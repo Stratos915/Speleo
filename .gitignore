@@ -1,0 +1,33 @@
+# Flutter/Dart/Pub related
+.dart_tool/
+.packages
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+.macos/
+android/.gradle/
+android/app/key.properties
+ios/Pods/
+ios/.symlinks/
+
+# Web
+build/web/
+
+# VSCode
+.vscode/
+
+# Misc
+*.log
+*.lock
+*.json.lock
+*.sqlite
+*.sqlite-journal
+*.iml
+
+# Chrome device data
+chrome-device/
+
+# Flutter log files
+flutter_*.log
