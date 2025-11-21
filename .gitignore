@@ -1,8 +1,11 @@
+
 # Flutter/Dart/Pub related
+# Flutter
 .dart_tool/
 .packages
 .pub/
 build/
+
 .flutter-plugins
 .flutter-plugins-dependencies
 .idea/
@@ -31,3 +34,16 @@ chrome-device/
 
 # Flutter log files
 flutter_*.log
+
+# Platform
+android/.gradle/
+android/app/*.keystore
+ios/Pods/
+ios/.symlinks/
+
+# VS Code
+.vscode/
+
+# Logs & misc
+*.log
+*.lock

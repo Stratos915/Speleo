@@ -2993,6 +2993,7 @@ class _FotoSectionState extends State<FotoSection> {
     setState(() => _uploading = true);
     try {
       final Uint8List bytes = await file.readAsBytes();
+
       String? downloadUrl;
       String? storagePath;
       if (!kIsWeb) {
@@ -3006,11 +3007,22 @@ class _FotoSectionState extends State<FotoSection> {
         downloadUrl = await ref.getDownloadURL();
         storagePath = path;
       }
+      final mime = file.mimeType ?? 'image/jpeg';
+      final path =
+          'uscite/${widget.uscitaRef.id}/foto/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+      final ref = FirebaseStorage.instance.ref(path);
+      await ref.putData(
+        bytes,
+        SettableMetadata(contentType: mime),
+      );
+      final downloadUrl = await ref.getDownloadURL();
+
       final Map<String, dynamic> docData = {
         'fileName': file.name,
         'uploadedBy':
             widget.identity.displayName ?? widget.identity.socioId ?? 'Anonimo',
         'uploadedAt': FieldValue.serverTimestamp(),
+
       };
       if (downloadUrl != null) {
         docData['url'] = downloadUrl;
@@ -3020,6 +3032,10 @@ class _FotoSectionState extends State<FotoSection> {
         docData['data'] = base64Encode(bytes);
         docData['mime'] = file.mimeType ?? 'image/jpeg';
       }
+        'url': downloadUrl,
+        'storagePath': path,
+        'mime': mime,
+      };
       await widget.uscitaRef.collection('foto').add(docData);
       await addAuditLog(
         'foto_caricata',
