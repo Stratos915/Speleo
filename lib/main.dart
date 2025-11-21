@@ -2976,10 +2976,13 @@ class _FotoSectionState extends State<FotoSection> {
     );
   }
 
+  
   Future<void> _pickImage() async {
     if (!_canUpload) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Devi effettuare il login per caricare')),
+        const SnackBar(
+          content: Text('Devi effettuare il login per caricare'),
+        ),
       );
       return;
     }
@@ -2991,52 +2994,46 @@ class _FotoSectionState extends State<FotoSection> {
     if (file == null) return;
 
     setState(() => _uploading = true);
+
     try {
       final Uint8List bytes = await file.readAsBytes();
+      final String mime = file.mimeType ?? 'image/jpeg';
+
+      // Percorso su Firebase Storage
+      final String path =
+          'uscite/${widget.uscitaRef.id}/foto/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
 
       String? downloadUrl;
       String? storagePath;
-      if (!kIsWeb) {
-        final path =
-            'uscite/${widget.uscitaRef.id}/foto/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
-        final ref = FirebaseStorage.instance.ref(path);
-        await ref.putData(
-          bytes,
-          SettableMetadata(contentType: file.mimeType ?? 'image/jpeg'),
-        );
-        downloadUrl = await ref.getDownloadURL();
-        storagePath = path;
-      }
-      final mime = file.mimeType ?? 'image/jpeg';
-      final path =
-          'uscite/${widget.uscitaRef.id}/foto/${DateTime.now().millisecondsSinceEpoch}_${file.name}';
+
+      // Carico sempre su Firebase Storage (strategia più semplice e coerente)
       final ref = FirebaseStorage.instance.ref(path);
       await ref.putData(
         bytes,
         SettableMetadata(contentType: mime),
       );
-      final downloadUrl = await ref.getDownloadURL();
+      downloadUrl = await ref.getDownloadURL();
+      storagePath = path;
 
+      // Dati comuni da salvare su Firestore
       final Map<String, dynamic> docData = {
         'fileName': file.name,
         'uploadedBy':
             widget.identity.displayName ?? widget.identity.socioId ?? 'Anonimo',
         'uploadedAt': FieldValue.serverTimestamp(),
-
+        'mime': mime,
       };
+
       if (downloadUrl != null) {
         docData['url'] = downloadUrl;
         docData['storagePath'] = storagePath;
-      }
-      if (kIsWeb || downloadUrl == null) {
+      } else {
+        // Fallback: in casi estremi salvo l'immagine in base64
         docData['data'] = base64Encode(bytes);
-        docData['mime'] = file.mimeType ?? 'image/jpeg';
       }
-        'url': downloadUrl,
-        'storagePath': path,
-        'mime': mime,
-      };
+
       await widget.uscitaRef.collection('foto').add(docData);
+
       await addAuditLog(
         'foto_caricata',
         socioId: widget.identity.socioId,
@@ -3044,16 +3041,17 @@ class _FotoSectionState extends State<FotoSection> {
         description: 'Foto caricata su uscita ${widget.uscitaRef.id}',
         extra: {'uscitaId': widget.uscitaRef.id, 'file': file.name},
       );
+
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Foto caricata')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Foto caricata')),
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Errore caricamento: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Errore caricamento: $e')),
+        );
       }
     } finally {
       if (mounted) {
