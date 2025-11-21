@@ -1,9 +1,12 @@
 name: Deploy Flutter Web
 
-on:permissions:
+permissions:
   contents: write
+
+on:
   push:
     branches: [ main ]
+
 
 jobs:
   build-and-deploy:
