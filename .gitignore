@@ -1,49 +1,21 @@
+# Node / React / Vite
+node_modules/
+dist/
+dist-ssr/
+*.local
 
-# Flutter/Dart/Pub related
-# Flutter
-.dart_tool/
-.packages
-.pub/
-build/
+# Env files
+.env
+.env.*
+!.env.example
 
-.flutter-plugins
-.flutter-plugins-dependencies
+# Editor / OS
+.vscode/
 .idea/
-.macos/
-android/.gradle/
-android/app/key.properties
-ios/Pods/
-ios/.symlinks/
+.DS_Store
 
-# Web
-build/web/
-
-# VSCode
-.vscode/
-
-# Misc
-*.log
-*.lock
-*.json.lock
-*.sqlite
-*.sqlite-journal
-*.iml
-
-# Chrome device data
-chrome-device/
-
-# Flutter log files
-flutter_*.log
-
-# Platform
-android/.gradle/
-android/app/*.keystore
-ios/Pods/
-ios/.symlinks/
-
-# VS Code
-.vscode/
-
-# Logs & misc
-*.log
-*.lock
+# Log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
