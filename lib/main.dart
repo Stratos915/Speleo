@@ -2857,126 +2857,6 @@ class FotoSection extends StatefulWidget {
   State<FotoSection> createState() => _FotoSectionState();
 }
 
-class _FotoSectionState extends State<FotoSection> {
-  bool _uploading = false;
-  final ImagePicker _picker = ImagePicker();
-
-  bool get _canUpload => widget.identity.role != null;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Text('Foto', style: Theme.of(context).textTheme.titleMedium),
-                const Spacer(),
-                if (_canUpload)
-                  FilledButton.icon(
-                    icon: _uploading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.add_a_photo),
-                    label: Text(
-                      _uploading ? 'Caricamento...' : 'Aggiungi foto',
-                    ),
-                    onPressed: _uploading ? null : _pickImage,
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: widget.uscitaRef
-                  .collection('foto')
-                  .orderBy('uploadedAt', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  return Text('Errore foto: ${snapshot.error}');
-                }
-
-                if (!snapshot.hasData) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                final docs = snapshot.data!.docs;
-                if (docs.isEmpty) {
-                  return const Text('Nessuna foto caricata.');
-                }
-
-                return Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: docs.map((doc) {
-                    final data = doc.data();
-                    final url = (data['url'] ?? '') as String;
-                    final base64Data = (data['data'] ?? '') as String;
-                    final mime = (data['mime'] ?? 'image/jpeg') as String;
-                    final autore = (data['uploadedBy'] ?? '') as String;
-                    final ts = data['uploadedAt'] as Timestamp?;
-                    final note = (data['fileName'] ?? '') as String;
-
-                    return SizedBox(
-                      width: 140,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          GestureDetector(
-                            onTap: url.isNotEmpty || base64Data.isNotEmpty
-                                ? () => _showPhoto(url, note, base64Data, mime)
-                                : null,
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: AspectRatio(
-                                aspectRatio: 4 / 3,
-                                child: _buildImagePreview(
-                                  url: url,
-                                  base64Data: base64Data,
-                                  mime: mime,
-                                ),
-                              ),
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            autore,
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          if (ts != null)
-                            Text(
-                              _formatTimestampLabel(ts, includeTime: true),
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                          if (widget.identity.isAdmin)
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: IconButton(
-                                icon: const Icon(Icons.delete_outline),
-                                tooltip: 'Elimina foto',
-                                onPressed: () => _deletePhoto(doc),
-                              ),
-                            ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  
   Future<void> _pickImage() async {
     if (!_canUpload) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3006,7 +2886,7 @@ class _FotoSectionState extends State<FotoSection> {
       String? downloadUrl;
       String? storagePath;
 
-      // Carico sempre su Firebase Storage (strategia più semplice e coerente)
+      // Carica sempre su Firebase Storage
       final ref = FirebaseStorage.instance.ref(path);
       await ref.putData(
         bytes,
@@ -3015,7 +2895,7 @@ class _FotoSectionState extends State<FotoSection> {
       downloadUrl = await ref.getDownloadURL();
       storagePath = path;
 
-      // Dati comuni da salvare su Firestore
+      // Documento da salvare su Firestore
       final Map<String, dynamic> docData = {
         'fileName': file.name,
         'uploadedBy':
@@ -3028,7 +2908,7 @@ class _FotoSectionState extends State<FotoSection> {
         docData['url'] = downloadUrl;
         docData['storagePath'] = storagePath;
       } else {
-        // Fallback: in casi estremi salvo l'immagine in base64
+        // Fallback: salva l'immagine in base64 se per qualche motivo manca l'URL
         docData['data'] = base64Encode(bytes);
       }
 
@@ -3059,6 +2939,7 @@ class _FotoSectionState extends State<FotoSection> {
       }
     }
   }
+
 
   Widget _buildImagePreview({
     required String url,
