@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 const initialItem = {
@@ -12,6 +12,8 @@ export default function Magazzino() {
   const [items, setItems] = useState([]);
   const [form, setForm] = useState(initialItem);
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [availability, setAvailability] = useState('all');
 
   useEffect(() => {
     loadItems();
@@ -42,6 +44,28 @@ export default function Magazzino() {
     await supabase.from('magazzino').delete().eq('id', id);
     loadItems();
   }
+
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return items.filter((item) => {
+      if (query) {
+        const matchesText =
+          item.nome?.toLowerCase().includes(query) ||
+          item.descrizione?.toLowerCase().includes(query);
+        if (!matchesText) return false;
+      }
+
+      if (availability === 'available' && Number(item.qty_disponibile) <= 0) {
+        return false;
+      }
+
+      if (availability === 'unavailable' && Number(item.qty_disponibile) > 0) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [availability, items, search]);
 
   return (
     <section>
@@ -76,6 +100,33 @@ export default function Magazzino() {
 
       <div style={{ marginTop: '2rem' }}>
         <h2>Elenco materiali</h2>
+        <div
+          style={{
+            display: 'grid',
+            gap: '0.5rem',
+            margin: '0.75rem 0 1rem',
+            maxWidth: '520px',
+            padding: '0.75rem',
+            border: '1px solid #e0e0e0',
+            borderRadius: '0.5rem',
+          }}
+        >
+          <strong>Filtri magazzino</strong>
+          <input
+            type="search"
+            placeholder="Cerca per nome o descrizione"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          <select value={availability} onChange={(event) => setAvailability(event.target.value)}>
+            <option value="all">Tutti i materiali</option>
+            <option value="available">Solo disponibili (&gt;0)</option>
+            <option value="unavailable">Esauriti</option>
+          </select>
+          <span style={{ fontSize: '0.9rem', color: '#555' }}>
+            Mostrati {filteredItems.length} materiali su {items.length}
+          </span>
+        </div>
         {loading ? (
           <p>Caricamento...</p>
         ) : (
@@ -89,7 +140,7 @@ export default function Magazzino() {
               </tr>
             </thead>
             <tbody>
-              {items.map((item) => (
+              {filteredItems.map((item) => (
                 <tr key={item.id}>
                   <td>{item.nome}</td>
                   <td>{item.qty_disponibile}</td>
