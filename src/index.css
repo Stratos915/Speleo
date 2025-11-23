@@ -1,68 +1,182 @@
 :root {
-  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-
-  color-scheme: light dark;
-  color: rgba(255, 255, 255, 0.87);
-  background-color: #242424;
-
+  color: #0f2a2a;
+  background-color: #f4fbfb;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --color-primary: #0e979a;
+  --color-primary-dark: #0b6f71;
+  --color-accent: #f27367;
+  --color-bg: #f4fbfb;
+  --color-surface: #ffffff;
+  --color-border: #dceaea;
+  --color-muted: #4d6b6b;
+  --color-text: #0f2a2a;
 }
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover {
-  color: #535bf2;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  min-height: 100vh;
+  background: var(--color-bg);
+  color: var(--color-text, #0f2a2a);
+}
+
+#root {
   min-height: 100vh;
 }
 
-h1 {
-  font-size: 3.2em;
-  line-height: 1.1;
+a {
+  color: inherit;
+}
+
+section {
+  background: var(--color-surface);
+  padding: clamp(1rem, 4vw, 2rem);
+  border-radius: 1rem;
+  box-shadow: 0 15px 40px rgba(15, 67, 69, 0.08);
+}
+
+h1,
+h2,
+h3 {
+  color: var(--color-primary-dark);
+  margin-top: 0;
 }
 
 button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
+  border-radius: 999px;
+  border: none;
+  padding: 0.6rem 1.4rem;
+  font-size: 1rem;
+  font-weight: 600;
   font-family: inherit;
-  background-color: #1a1a1a;
+  background-color: var(--color-primary);
+  color: #fff;
   cursor: pointer;
-  transition: border-color 0.25s;
-}
-button:hover {
-  border-color: #646cff;
-}
-button:focus,
-button:focus-visible {
-  outline: 4px auto -webkit-focus-ring-color;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    color: #213547;
-    background-color: #ffffff;
-  }
-  a:hover {
-    color: #747bff;
-  }
-  button {
-    background-color: #f9f9f9;
-  }
+button:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 16px rgba(14, 151, 154, 0.25);
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  padding: 0.75rem 1rem;
+  font-family: inherit;
+  font-size: 1rem;
+  background: #fff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(14, 151, 154, 0.2);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--color-surface);
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+th,
+td {
+  padding: 0.85rem;
+  text-align: left;
+}
+
+thead {
+  background: rgba(14, 151, 154, 0.08);
+  color: var(--color-primary-dark);
+}
+
+tbody tr:nth-child(odd) {
+  background: rgba(12, 117, 120, 0.02);
+}
+
+form {
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid var(--color-border);
+  border-radius: 1rem;
+  padding: 1.25rem;
+  box-shadow: 0 10px 30px rgba(14, 151, 154, 0.08);
+}
+
+.login-card {
+  background: var(--color-surface);
+  border-radius: 1.5rem;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  box-shadow: 0 25px 60px rgba(14, 151, 154, 0.15);
+  text-align: center;
+}
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1.5rem, 5vw, 3rem);
+  background: radial-gradient(circle at top, rgba(14, 151, 154, 0.15), transparent 55%),
+    radial-gradient(circle at bottom, rgba(242, 115, 103, 0.12), transparent 50%),
+    var(--color-bg);
+}
+
+.brand-logo {
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
+  margin: 0 auto 1rem;
+  border-radius: 24px;
+  background: linear-gradient(135deg, rgba(14, 151, 154, 0.15), rgba(242, 115, 103, 0.15));
+  padding: 0.75rem;
+  box-shadow: inset 0 0 0 1px rgba(14, 151, 154, 0.1);
+}
+
+.login-card form {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+}
+
+.page-grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(14, 151, 154, 0.08);
+  color: var(--color-primary-dark);
+  font-size: 0.9rem;
 }
