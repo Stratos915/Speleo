@@ -9,20 +9,60 @@ import Corso from './pages/Corso.jsx';
 import Biblioteca from './pages/Biblioteca.jsx';
 import Report from './pages/Report.jsx';
 import NotFound from './pages/NotFound.jsx';
+import ProtectedRoute from './components/ProtectedRoute.jsx';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
   {
     path: '/',
-    element: <App />,
+    element: (
+      <ProtectedRoute>
+        <App />
+      </ProtectedRoute>
+    ),
     children: [
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'uscite', element: <Uscite /> },
-      { path: 'uscite/:id', element: <UscitaDettaglio /> },
-      { path: 'magazzino', element: <Magazzino /> },
-      { path: 'corsi', element: <Corso /> },
-      { path: 'biblioteca', element: <Biblioteca /> },
-      { path: 'report', element: <Report /> },
+      {
+        path: 'uscite/:id',
+        element: (
+          <ProtectedRoute>
+            <UscitaDettaglio />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'magazzino',
+        element: (
+          <ProtectedRoute roles={['admin']}>
+            <Magazzino />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'corsi',
+        element: (
+          <ProtectedRoute>
+            <Corso />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'biblioteca',
+        element: (
+          <ProtectedRoute>
+            <Biblioteca />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'report',
+        element: (
+          <ProtectedRoute roles={['admin']}>
+            <Report />
+          </ProtectedRoute>
+        ),
+      },
     ],
   },
   { path: '*', element: <NotFound /> },

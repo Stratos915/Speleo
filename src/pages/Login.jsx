@@ -1,16 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
 
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
+    setLoading(true);
 
     const { error: loginError } = await supabase.auth.signInWithPassword({
       email,
@@ -19,10 +29,12 @@ export default function Login() {
 
     if (loginError) {
       setError(loginError.message);
+      setLoading(false);
       return;
     }
 
     navigate('/dashboard');
+    setLoading(false);
   }
 
   return (
@@ -43,7 +55,9 @@ export default function Login() {
           onChange={(event) => setPassword(event.target.value)}
           required
         />
-        <button type="submit">Entra</button>
+        <button type="submit" disabled={loading}>
+          {loading ? 'Accesso...' : 'Entra'}
+        </button>
       </form>
       {error && <p style={{ color: 'red' }}>{error}</p>}
     </div>
