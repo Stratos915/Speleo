@@ -1,13 +1,13 @@
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Dashboard() {
-  const { profile } = useAuth();
+  const { user, role } = useAuth();
 
   return (
     <section>
       <h1>Dashboard</h1>
-      <p>Benvenuto {profile?.full_name ?? 'socio'}.</p>
-      <p>Ruolo attivo: {profile?.role ?? 'socio'}.</p>
+      <p>Benvenuto {user?.email ?? 'socio'}.</p>
+      <p>Ruolo attivo: {role ?? 'socio'}.</p>
     </section>
   );
 }

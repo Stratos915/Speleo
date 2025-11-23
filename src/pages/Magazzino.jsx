@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
 const initialItem = {
@@ -14,16 +14,32 @@ export default function Magazzino() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [availability, setAvailability] = useState('all');
+  const [totalItems, setTotalItems] = useState(0);
 
   useEffect(() => {
-    loadItems();
-  }, []);
+    loadItems(search, availability);
+  }, [availability, search]);
 
-  async function loadItems() {
+  async function loadItems(currentSearch = search, currentAvailability = availability) {
     setLoading(true);
-    const { data, error } = await supabase.from('magazzino').select('*');
+    let request = supabase.from('magazzino').select('*', { count: 'exact' }).order('nome', { ascending: true });
+
+    const sanitizedSearch = currentSearch.trim().replace(/,/g, ' ');
+    if (sanitizedSearch) {
+      const pattern = `%${sanitizedSearch}%`;
+      request = request.or(`nome.ilike.${pattern},descrizione.ilike.${pattern}`);
+    }
+
+    if (currentAvailability === 'available') {
+      request = request.gt('qty_disponibile', 0);
+    } else if (currentAvailability === 'unavailable') {
+      request = request.lte('qty_disponibile', 0);
+    }
+
+    const { data, error, count } = await request;
     if (!error) {
-      setItems(data);
+      setItems(data ?? []);
+      setTotalItems(typeof count === 'number' ? count : data?.length ?? 0);
     }
     setLoading(false);
   }
@@ -37,35 +53,13 @@ export default function Magazzino() {
     };
     await supabase.from('magazzino').insert(payload);
     setForm(initialItem);
-    loadItems();
+    loadItems(search, availability);
   }
 
   async function handleDelete(id) {
     await supabase.from('magazzino').delete().eq('id', id);
-    loadItems();
+    loadItems(search, availability);
   }
-
-  const filteredItems = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    return items.filter((item) => {
-      if (query) {
-        const matchesText =
-          item.nome?.toLowerCase().includes(query) ||
-          item.descrizione?.toLowerCase().includes(query);
-        if (!matchesText) return false;
-      }
-
-      if (availability === 'available' && Number(item.qty_disponibile) <= 0) {
-        return false;
-      }
-
-      if (availability === 'unavailable' && Number(item.qty_disponibile) > 0) {
-        return false;
-      }
-
-      return true;
-    });
-  }, [availability, items, search]);
 
   return (
     <section>
@@ -124,7 +118,7 @@ export default function Magazzino() {
             <option value="unavailable">Esauriti</option>
           </select>
           <span style={{ fontSize: '0.9rem', color: '#555' }}>
-            Mostrati {filteredItems.length} materiali su {items.length}
+            Mostrati {items.length} materiali su {totalItems}
           </span>
         </div>
         {loading ? (
@@ -140,7 +134,7 @@ export default function Magazzino() {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => (
+              {items.map((item) => (
                 <tr key={item.id}>
                   <td>{item.nome}</td>
                   <td>{item.qty_disponibile}</td>

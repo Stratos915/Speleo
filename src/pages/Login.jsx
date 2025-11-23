@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Login() {
@@ -9,7 +8,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, login } = useAuth();
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -22,19 +21,14 @@ export default function Login() {
     setError('');
     setLoading(true);
 
-    const { error: loginError } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-
-    if (loginError) {
-      setError(loginError.message);
+    try {
+      await login(email, password);
+      navigate('/dashboard');
+    } catch (authError) {
+      setError(authError.message);
+    } finally {
       setLoading(false);
-      return;
     }
-
-    navigate('/dashboard');
-    setLoading(false);
   }
 
   return (

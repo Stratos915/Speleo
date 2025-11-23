@@ -1,70 +1,122 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 
-const AuthContext = createContext();
+const AuthContext = createContext(null);
+
+async function fetchUserRole(userId) {
+  const { data, error } = await supabase.from('users').select('role').eq('id', userId).single();
+  if (error) {
+    console.error('[AuthContext] Impossibile recuperare il ruolo:', error.message);
+    return 'socio';
+  }
+  return data?.role ?? 'socio';
+}
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const [user, setUser] = useState(null);
+  const [role, setRole] = useState('socio');
   const [loading, setLoading] = useState(true);
+
+  const refreshUser = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error('[AuthContext] Errore refresh utente:', error.message);
+      setUser(null);
+      setRole('socio');
+      setLoading(false);
+      return;
+    }
+    const currentUser = data?.user ?? null;
+    setUser(currentUser);
+    if (currentUser) {
+      const fetchedRole = await fetchUserRole(currentUser.id);
+      setRole(fetchedRole);
+    } else {
+      setRole('socio');
+    }
+    setLoading(false);
+  }, []);
+
+  const login = useCallback(
+    async (email, password) => {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) {
+        throw error;
+      }
+      await refreshUser();
+    },
+    [refreshUser],
+  );
+
+  const logout = useCallback(async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      throw error;
+    }
+    setUser(null);
+    setRole('socio');
+  }, []);
 
   useEffect(() => {
     let ignore = false;
 
-    async function loadProfile(userId) {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, full_name, role')
-        .eq('id', userId)
-        .single();
-      if (!error) {
-        setProfile(data);
+    async function bootstrap() {
+      setLoading(true);
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.error('[AuthContext] Errore caricamento sessione:', error.message);
       }
-    }
 
-    async function loadSession() {
-      const { data } = await supabase.auth.getSession();
+      const sessionUser = data?.session?.user ?? null;
       if (!ignore) {
-        setSession(data.session);
-        if (data.session?.user) {
-          await loadProfile(data.session.user.id);
+        setUser(sessionUser);
+        if (sessionUser) {
+          const fetchedRole = await fetchUserRole(sessionUser.id);
+          if (!ignore) {
+            setRole(fetchedRole);
+          }
         } else {
-          setProfile(null);
+          setRole('socio');
         }
         setLoading(false);
       }
     }
 
-    loadSession();
+    bootstrap();
 
-    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-      setSession(session);
-      if (session?.user) {
-        loadProfile(session.user.id);
+    const { data: subscription } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const sessionUser = session?.user ?? null;
+      setUser(sessionUser);
+      if (sessionUser) {
+        const fetchedRole = await fetchUserRole(sessionUser.id);
+        setRole(fetchedRole);
       } else {
-        setProfile(null);
+        setRole('socio');
       }
+      setLoading(false);
     });
 
     return () => {
       ignore = true;
-      sub.subscription.unsubscribe();
+      subscription?.subscription?.unsubscribe?.();
     };
   }, []);
 
-  return (
-    <AuthContext.Provider
-      value={{
-        session,
-        profile,
-        loading,
-        isAuthenticated: Boolean(session),
-        role: profile?.role ?? 'socio',
-      }}
-    >
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({
+      user,
+      role,
+      loading,
+      isAuthenticated: Boolean(user),
+      login,
+      logout,
+      refreshUser,
+    }),
+    [user, role, loading, login, logout, refreshUser],
   );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
