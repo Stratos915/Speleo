@@ -9,13 +9,25 @@ export function AuthProvider({ children }) {
   const [role, setRole] = useState('socio');
   const [loading, setLoading] = useState(true);
 
-  const applySession = useCallback((nextSession) => {
-    setSession(nextSession);
-    const nextUser = nextSession?.user ?? null;
-    setUser(nextUser);
-    const nextRole = nextUser?.user_metadata?.role ?? nextUser?.app_metadata?.role ?? 'socio';
-    setRole(nextRole);
+  const resolveRole = useCallback((targetUser) => {
+    if (!targetUser) return 'socio';
+    return (
+      targetUser.user_metadata?.role ??
+      targetUser.app_metadata?.role ??
+      targetUser.raw_user_meta_data?.role ??
+      'socio'
+    );
   }, []);
+
+  const applySession = useCallback(
+    (nextSession) => {
+      setSession(nextSession);
+      const nextUser = nextSession?.user ?? null;
+      setUser(nextUser);
+      setRole(resolveRole(nextUser));
+    },
+    [resolveRole],
+  );
 
   const login = useCallback(
     async (email, password) => {
@@ -27,10 +39,9 @@ export function AuthProvider({ children }) {
       }
       applySession(data.session ?? null);
       setLoading(false);
-      const derivedRole = data.user?.user_metadata?.role ?? data.user?.app_metadata?.role ?? 'socio';
-      return { user: data.user, role: derivedRole };
+      return { user: data.user ?? null, role: resolveRole(data.user ?? null) };
     },
-    [applySession],
+    [applySession, resolveRole],
   );
 
   const logout = useCallback(async () => {

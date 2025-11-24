@@ -10,6 +10,8 @@ import Biblioteca from './pages/Biblioteca.jsx';
 import Report from './pages/Report.jsx';
 import NotFound from './pages/NotFound.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import PrestitoAvanzato from './pages/PrestitoAvanzato.jsx';
+import StoricoPrestiti from './pages/StoricoPrestiti.jsx';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
@@ -34,8 +36,24 @@ export const router = createBrowserRouter([
       {
         path: 'magazzino',
         element: (
-          <ProtectedRoute roles={['admin']}>
+          <ProtectedRoute>
             <Magazzino />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'prestito-avanzato',
+        element: (
+          <ProtectedRoute roles={['admin']}>
+            <PrestitoAvanzato />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'storico-prestiti',
+        element: (
+          <ProtectedRoute>
+            <StoricoPrestiti />
           </ProtectedRoute>
         ),
       },
