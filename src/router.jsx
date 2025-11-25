@@ -12,9 +12,12 @@ import NotFound from './pages/NotFound.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import PrestitoAvanzato from './pages/PrestitoAvanzato.jsx';
 import StoricoPrestiti from './pages/StoricoPrestiti.jsx';
+import ResetPassword from './pages/ResetPassword.jsx';
+import Members from './pages/Members.jsx';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
+  { path: '/reset', element: <ResetPassword /> },
   {
     path: '/',
     element: (
@@ -85,3 +88,11 @@ export const router = createBrowserRouter([
   },
   { path: '*', element: <NotFound /> },
 ]);
+      {
+        path: 'soci',
+        element: (
+          <ProtectedRoute>
+            <Members />
+          </ProtectedRoute>
+        ),
+      },

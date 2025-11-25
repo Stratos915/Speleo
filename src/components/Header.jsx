@@ -31,6 +31,9 @@ export default function Header() {
         <Link className="nav-link" to="/magazzino">
           Magazzino
         </Link>
+        <Link className="nav-link" to="/soci">
+          Soci
+        </Link>
         {userRole === 'admin' && (
           <>
             <Link className="nav-link" to="/prestito-avanzato">

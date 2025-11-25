@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext.jsx';
+import { createUscita, deleteUscita, getUscite, updateUscita } from '../services/uscite';
 
 const initialForm = {
   titolo: '',
@@ -22,6 +22,7 @@ export default function Uscite() {
     from: '',
     to: '',
   });
+  const [editingId, setEditingId] = useState(null);
   const { role } = useAuth();
 
   useEffect(() => {
@@ -31,48 +32,72 @@ export default function Uscite() {
   async function loadUscite(currentFilters = filters) {
     setLoading(true);
     const { query, tipo, from, to } = currentFilters;
-    let request = supabase.from('uscite').select('*', { count: 'exact' }).order('data', { ascending: true });
-
-    const sanitizedQuery = query.trim().replace(/,/g, ' ');
-    if (sanitizedQuery) {
-      const pattern = `%${sanitizedQuery}%`;
-      request = request.or(`titolo.ilike.${pattern},luogo.ilike.${pattern}`);
+    try {
+      const data = await getUscite();
+      const filtered = data.filter((uscita) => {
+        const matchesQuery =
+          !query.trim() ||
+          uscita.titolo?.toLowerCase().includes(query.toLowerCase()) ||
+          uscita.luogo?.toLowerCase().includes(query.toLowerCase());
+        const matchesTipo = !tipo || uscita.tipo === tipo;
+        const uscitaDate = uscita.data ? new Date(uscita.data) : null;
+        const matchesFrom = !from || (uscitaDate && uscitaDate >= new Date(from));
+        const matchesTo = !to || (uscitaDate && uscitaDate <= new Date(to));
+        return matchesQuery && matchesTipo && matchesFrom && matchesTo;
+      });
+      setUscite(filtered);
+      setTotalUscite(data.length);
+    } catch (error) {
+      setMessage('TODO: la tabella "uscite" sarà disponibile a breve su Supabase.');
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
-
-    if (tipo) {
-      request = request.eq('tipo', tipo);
-    }
-
-    if (from) {
-      request = request.gte('data', new Date(`${from}T00:00:00.000Z`).toISOString());
-    }
-
-    if (to) {
-      request = request.lte('data', new Date(`${to}T23:59:59.999Z`).toISOString());
-    }
-
-    const { data, error, count } = await request;
-    if (!error) {
-      setUscite(data ?? []);
-      setTotalUscite(typeof count === 'number' ? count : data?.length ?? 0);
-    }
-    setLoading(false);
   }
 
   async function handleSubmit(event) {
     event.preventDefault();
     setMessage('');
     const payload = {
-      ...form,
+      titolo: form.titolo.trim(),
+      luogo: form.luogo.trim(),
       data: form.data ? new Date(form.data).toISOString() : null,
+      tipo: form.tipo,
     };
-    const { error } = await supabase.from('uscite').insert(payload);
-    if (error) {
-      setMessage(error.message);
-    } else {
+    try {
+      if (editingId) {
+        await updateUscita(editingId, payload);
+        setMessage('Uscita aggiornata.');
+      } else {
+        await createUscita(payload);
+        setMessage('Uscita creata con successo');
+      }
       setForm(initialForm);
+      setEditingId(null);
       loadUscite(filters);
-      setMessage('Uscita creata con successo');
+    } catch (error) {
+      setMessage(error.message ?? 'Errore durante il salvataggio.');
+    }
+  }
+
+  function handleEdit(uscita) {
+    setEditingId(uscita.id);
+    setForm({
+      titolo: uscita.titolo ?? '',
+      luogo: uscita.luogo ?? '',
+      data: uscita.data ? new Date(uscita.data).toISOString().slice(0, 16) : '',
+      tipo: uscita.tipo ?? 'sociale',
+    });
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Vuoi eliminare questa uscita?')) return;
+    setMessage('');
+    try {
+      await deleteUscita(id);
+      loadUscite(filters);
+    } catch (error) {
+      setMessage(error.message ?? 'Impossibile eliminare l\'uscita.');
     }
   }
 
