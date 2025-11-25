@@ -76,7 +76,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      {
+      
             {
       path: 'report',
       element: (
