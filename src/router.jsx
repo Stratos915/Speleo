@@ -77,22 +77,22 @@ export const router = createBrowserRouter([
         ),
       },
       {
-        path: 'report',
-        element: (
-          <ProtectedRoute roles={['admin']}>
-            <Report />
-          </ProtectedRoute>
-        ),
-      },
-    ],
-  },
+            {
+      path: 'report',
+      element: (
+        <ProtectedRoute roles={['admin']}>
+          <Report />
+        </ProtectedRoute>
+      ),
+    },
+    {
+      path: 'soci',
+      element: (
+        <ProtectedRoute>
+          <Members />
+        </ProtectedRoute>
+      ),
+    },
+  ],
   { path: '*', element: <NotFound /> },
 ]);
-      {
-        path: 'soci',
-        element: (
-          <ProtectedRoute>
-            <Members />
-          </ProtectedRoute>
-        ),
-      },
