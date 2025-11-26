@@ -16,6 +16,7 @@ export default function Magazzino() {
   const [form, setForm] = useState(emptyMaterial);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     loadMaterials();
@@ -116,62 +117,55 @@ export default function Magazzino() {
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-        <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
-        <input
-          type="number"
-          min={0}
-          placeholder="Codice materiale (opzionale)"
-          value={form.equipment_number}
-          onChange={(event) => handleChange('equipment_number', event.target.value)}
-        />
-        <input
-          placeholder="Nome"
-          value={form.name}
-          onChange={(event) => handleChange('name', event.target.value)}
-          required
-        />
-        <textarea
-          placeholder="Descrizione"
-          value={form.description}
-          onChange={(event) => handleChange('description', event.target.value)}
-        />
-        <input
-          type="number"
-          min={0}
-          placeholder="Quantità"
-          value={form.quantity}
-          onChange={(event) => handleChange('quantity', event.target.value)}
-          required
-        />
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
-          </button>
-          {editingId && (
-            <button type="button" style={{ background: '#adb5bd' }} onClick={cancelEdit}>
-              Annulla
-            </button>
-          )}
+      {showForm && (
+        <div className="card">
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+            <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
+            <input
+              type="number"
+              min={0}
+              placeholder="Codice materiale (opzionale)"
+              value={form.equipment_number}
+              onChange={(event) => handleChange('equipment_number', event.target.value)}
+            />
+            <input
+              placeholder="Nome"
+              value={form.name}
+              onChange={(event) => handleChange('name', event.target.value)}
+              required
+            />
+            <textarea
+              placeholder="Descrizione"
+              value={form.description}
+              onChange={(event) => handleChange('description', event.target.value)}
+            />
+            <input
+              type="number"
+              min={0}
+              placeholder="Quantità"
+              value={form.quantity}
+              onChange={(event) => handleChange('quantity', event.target.value)}
+              required
+            />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
+              </button>
+              <button type="button" style={{ background: '#adb5bd' }} onClick={cancelEdit}>
+                Annulla
+              </button>
+            </div>
+            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+          </form>
         </div>
-        {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-      </form>
+      )}
 
       {loading ? (
         <p>Caricamento magazzino...</p>
       ) : (
-        <div className="page-grid" style={{ gap: '1rem' }}>
+        <div className="card-list">
           {filtered.map((material) => (
-            <article
-              key={material.id}
-              style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: '1rem',
-                padding: '1rem',
-                background: '#fff',
-                boxShadow: '0 10px 24px rgba(15, 67, 69, 0.08)',
-              }}
-            >
+            <article className="card" key={material.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <h3 style={{ margin: 0 }}>{material.name}</h3>
@@ -183,7 +177,13 @@ export default function Magazzino() {
               </header>
               <p style={{ color: 'var(--color-muted)' }}>{material.description || 'Nessuna descrizione'}</p>
               <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button type="button" onClick={() => startEdit(material)}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    startEdit(material);
+                    setShowForm(true);
+                  }}
+                >
                   Modifica
                 </button>
                 <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(material.id)}>
@@ -195,6 +195,17 @@ export default function Magazzino() {
           {!filtered.length && <p>Nessun materiale trovato.</p>}
         </div>
       )}
+      <button
+        type="button"
+        className="floating-button"
+        onClick={() => {
+          setShowForm((prev) => !prev);
+          setEditingId(null);
+          setForm(emptyMaterial);
+        }}
+      >
+        {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
+      </button>
     </section>
   );
 }

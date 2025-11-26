@@ -9,13 +9,13 @@ const csvColumns = {
     { key: 'tipo', label: 'Tipo' },
   ],
   magazzino: [
-    { key: 'nome', label: 'Nome' },
-    { key: 'qty_disponibile', label: 'Disponibile' },
-    { key: 'qty_totale', label: 'Totale' },
+    { key: 'name', label: 'Nome' },
+    { key: 'description', label: 'Descrizione' },
+    { key: 'quantity', label: 'Quantità' },
   ],
   soci: [
     { key: 'full_name', label: 'Nome completo' },
-    { key: 'role', label: 'Ruolo' },
+    { key: 'membership_number', label: 'Numero tessera' },
   ],
 };
 
@@ -74,17 +74,17 @@ export default function Report() {
       const [
         { data: memberData, error: membersError },
         { data: uscitaData, error: uscitaError },
-        { data: magazzinoData, error: magazzinoError },
+        { data: equipmentData, error: equipmentError },
       ] = await Promise.all([
-        supabase.from('profiles').select('id, full_name, role').order('full_name', { ascending: true }),
-        supabase.from('uscite').select('id, titolo, luogo, data, tipo').order('data', { ascending: false }),
-        supabase.from('magazzino').select('id, nome, qty_disponibile, qty_totale').order('nome', { ascending: true }),
+        supabase.from('members').select('id, full_name, membership_number').order('full_name', { ascending: true }),
+        supabase.from('uscite').select('id, titolo, luogo, data, tipo').order('data', { ascending: false }).catch(() => ({ data: [] })),
+        supabase.from('equipment').select('id, name, description, quantity').order('name', { ascending: true }),
       ]);
       if (!ignore) {
         setMembers(memberData ?? []);
         setUscite(uscitaData ?? []);
-        setMagazzino(magazzinoData ?? []);
-        const firstError = membersError || uscitaError || magazzinoError;
+        setMagazzino(equipmentData ?? []);
+        const firstError = membersError || uscitaError || equipmentError;
         if (firstError) {
           setError('Impossibile caricare tutti i dati, riprova più tardi.');
         }
@@ -128,64 +128,79 @@ export default function Report() {
   }
 
   return (
-    <section>
-      <h1>Area Report</h1>
-      <p>
-        Genera esportazioni aggiornate per uscite, magazzino e soci. I dataset vengono letti in tempo reale da
-        Supabase.
-      </p>
-      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '1rem' }}>
-        <button onClick={() => handleExport('uscita')} disabled={loading}>
-          Esporta uscite
-        </button>
-        <button onClick={() => handleExport('magazzino')} disabled={loading}>
-          Esporta magazzino
-        </button>
-        <button onClick={() => handleExport('soci')} disabled={loading}>
-          Esporta soci
-        </button>
+    <section className="page-grid">
+      <header>
+        <h1>Report amministratore</h1>
+        <p>Scarica gli elenchi aggiornati o sincronizza i dati con strumenti esterni.</p>
+      </header>
+
+      {loading && <p>Raccolta dati in corso...</p>}
+      {error && <p style={{ color: '#c92a2a' }}>{error}</p>}
+
+      <div className="card-list">
+        <ReportCard
+          title="Elenco soci"
+          description="Scarica anagrafica soci aggiornata."
+          onCsv={() => handleExport('soci')}
+          disabled={loading}
+        />
+        <ReportCard
+          title="Uscite"
+          description="Esporta elenco uscite registrate (TODO: tabella Supabase)."
+          onCsv={() => handleExport('uscita')}
+          disabled={loading}
+        />
+        <ReportCard
+          title="Inventario"
+          description="Scarica lo stato del magazzino."
+          onCsv={() => handleExport('magazzino')}
+          disabled={loading}
+        />
       </div>
-      {loading && <p style={{ marginTop: '1rem' }}>Raccolta dati in corso...</p>}
-      {error && (
-        <p style={{ marginTop: '0.75rem', color: '#c92a2a' }}>
-          {error}
-        </p>
-      )}
-      <div style={{ marginTop: '2rem' }}>
-        <h2>Elenco Soci</h2>
-        <p>Verifica rapidamente gli iscritti e applica un filtro testuale.</p>
+
+      <div className="card">
+        <h2>Gestione soci</h2>
         <input
           type="search"
-          placeholder="Filtra per nome"
+          placeholder="Cerca per nome o tessera"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          style={{ margin: '0.5rem 0', padding: '0.5rem', width: '100%', maxWidth: '320px' }}
         />
-        {filteredMembers.length === 0 ? (
-          <p>Nessun socio trovato.</p>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ccc', paddingBottom: '0.25rem' }}>
-                  Nome
-                </th>
-                <th style={{ textAlign: 'left', borderBottom: '1px solid #ccc', paddingBottom: '0.25rem' }}>
-                  Ruolo
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredMembers.map((member) => (
-                <tr key={member.id}>
-                  <td style={{ padding: '0.35rem 0' }}>{member.full_name ?? 'N/D'}</td>
-                  <td style={{ padding: '0.35rem 0' }}>{member.role ?? '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <div className="card-list" style={{ marginTop: '1rem' }}>
+          {filteredMembers.map((member) => (
+            <div key={member.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <div>
+                <strong>{member.full_name}</strong>
+                <p style={{ margin: 0, color: 'var(--color-muted)' }}>Tessera: {member.membership_number ?? 'N/D'}</p>
+              </div>
+              <button type="button" style={{ background: '#adb5bd' }}>
+                TODO
+              </button>
+            </div>
+          ))}
+          {!filteredMembers.length && <p>Nessun socio trovato.</p>}
+        </div>
       </div>
     </section>
+  );
+}
+
+function ReportCard({ title, description, onCsv, disabled }) {
+  return (
+    <article className="card">
+      <h3 style={{ margin: '0 0 0.25rem' }}>{title}</h3>
+      <p style={{ color: 'var(--color-muted)' }}>{description}</p>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+        <button type="button" onClick={onCsv} disabled={disabled}>
+          CSV
+        </button>
+        <button type="button" style={{ background: '#adb5bd' }} disabled>
+          PDF
+        </button>
+        <button type="button" style={{ background: '#adb5bd' }} disabled>
+          XLSX
+        </button>
+      </div>
+    </article>
   );
 }

@@ -180,3 +180,49 @@ form {
   color: var(--color-primary-dark);
   font-size: 0.9rem;
 }
+
+.card-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.card {
+  background: #fff;
+  border-radius: 1rem;
+  padding: 1rem;
+  box-shadow: 0 5px 16px rgba(15, 67, 69, 0.08);
+  border: 1px solid rgba(13, 78, 82, 0.05);
+}
+
+.pill-group {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pill-button {
+  border-radius: 999px;
+  padding: 0.4rem 0.9rem;
+  background: rgba(14, 151, 154, 0.1);
+  color: var(--color-primary-dark);
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.pill-button--active {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.floating-button {
+  position: fixed;
+  bottom: 5rem;
+  right: 1.5rem;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 999px;
+  padding: 0.85rem 1.4rem;
+  box-shadow: 0 12px 24px rgba(242, 115, 103, 0.35);
+  z-index: 10;
+}

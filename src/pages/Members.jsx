@@ -16,6 +16,7 @@ export default function Members() {
   const [form, setForm] = useState(emptyMember);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     loadMembers();
@@ -57,6 +58,7 @@ export default function Members() {
       email: member.email ?? '',
       phone: member.phone ?? '',
     });
+    setShowForm(true);
   }
 
   function resetForm() {
@@ -81,6 +83,7 @@ export default function Members() {
         await createMember(payload);
       }
       resetForm();
+      setShowForm(false);
       loadMembers();
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio del socio.');
@@ -103,8 +106,8 @@ export default function Members() {
   return (
     <section className="page-grid">
       <div>
-        <h1>Elenco soci</h1>
-        <p>Consulta l&apos;anagrafica importata dalla vecchia gestione Firebase ora salvata su Supabase.</p>
+        <h1>Gestione soci</h1>
+        <p>Anagrafica aggiornata importata dalla versione precedente.</p>
       </div>
 
       <input
@@ -114,52 +117,40 @@ export default function Members() {
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-        <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
-        <input
-          type="number"
-          min={0}
-          placeholder="Numero tessera"
-          value={form.membership_number}
-          onChange={(event) => handleChange('membership_number', event.target.value)}
-          required
-        />
-        <input
-          placeholder="Nome e cognome"
-          value={form.full_name}
-          onChange={(event) => handleChange('full_name', event.target.value)}
-          required
-        />
-        <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
-        <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
-          </button>
-          {editingId && (
-            <button type="button" style={{ background: '#adb5bd' }} onClick={resetForm}>
-              Annulla
-            </button>
-          )}
+      {showForm && (
+        <div className="card">
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+            <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
+            <input
+              type="number"
+              min={0}
+              placeholder="Numero tessera"
+              value={form.membership_number}
+              onChange={(event) => handleChange('membership_number', event.target.value)}
+              required
+            />
+            <input placeholder="Nome e cognome" value={form.full_name} onChange={(event) => handleChange('full_name', event.target.value)} required />
+            <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
+            <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
+              </button>
+              <button type="button" style={{ background: '#adb5bd' }} onClick={() => { resetForm(); setShowForm(false); }}>
+                Annulla
+              </button>
+            </div>
+            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+          </form>
         </div>
-        {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-      </form>
+      )}
 
       {loading ? (
         <p>Caricamento soci...</p>
       ) : (
-        <div className="page-grid" style={{ gap: '1rem' }}>
+        <div className="card-list">
           {filteredMembers.map((member) => (
-            <article
-              key={member.id}
-              style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: '1rem',
-                padding: '1rem',
-                background: '#fff',
-                boxShadow: '0 10px 20px rgba(0, 0, 0, 0.05)',
-              }}
-            >
+            <article className="card" key={member.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <div>
                   <h3 style={{ margin: 0 }}>{member.full_name}</h3>
@@ -181,6 +172,17 @@ export default function Members() {
           {!filteredMembers.length && <p>Nessun socio trovato.</p>}
         </div>
       )}
+
+      <button
+        className="floating-button"
+        type="button"
+        onClick={() => {
+          setShowForm((prev) => !prev);
+          resetForm();
+        }}
+      >
+        {showForm ? 'Chiudi modulo' : 'Aggiungi socio'}
+      </button>
     </section>
   );
 }

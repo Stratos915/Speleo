@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router-dom';
 import Header from './components/Header';
+import BottomNav from './components/BottomNav.jsx';
 import './App.css';
 
 export default function App() {
@@ -9,6 +10,7 @@ export default function App() {
       <main className="app-content">
         <Outlet />
       </main>
+      <BottomNav />
     </div>
   );
 }

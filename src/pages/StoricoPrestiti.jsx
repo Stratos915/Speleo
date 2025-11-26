@@ -16,6 +16,7 @@ export default function StoricoPrestiti() {
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
   const [processingId, setProcessingId] = useState(null);
+  const [query, setQuery] = useState('');
 
   useEffect(() => {
     loadLoans();
@@ -54,9 +55,15 @@ export default function StoricoPrestiti() {
   }
 
   const filteredLoans = useMemo(() => {
-    if (filter === 'all') return loans;
-    return loans.filter((loan) => loan.status === filter);
-  }, [loans, filter]);
+    return loans.filter((loan) => {
+      const matchesFilter = filter === 'all' || loan.status === filter;
+      const matchesQuery =
+        !query.trim() ||
+        loan.borrower_name?.toLowerCase().includes(query.toLowerCase()) ||
+        loan.equipment?.name?.toLowerCase().includes(query.toLowerCase());
+      return matchesFilter && matchesQuery;
+    });
+  }, [loans, filter, query]);
 
   async function handleRestitution(loan) {
     if (!isAdmin) return;
@@ -110,16 +117,20 @@ export default function StoricoPrestiti() {
         <p>Consulta tutti i prestiti registrati e gestisci le restituzioni del materiale.</p>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+      <input
+        type="search"
+        placeholder="Cerca per materiale o persona"
+        value={query}
+        onChange={(event) => setQuery(event.target.value)}
+      />
+
+      <div className="pill-group">
         {FILTERS.map((item) => (
           <button
             key={item.value}
             type="button"
             onClick={() => setFilter(item.value)}
-            style={{
-              background: filter === item.value ? 'var(--color-primary)' : 'var(--color-border)',
-              color: filter === item.value ? '#fff' : 'var(--color-muted)',
-            }}
+            className={`pill-button ${filter === item.value ? 'pill-button--active' : ''}`}
           >
             {item.label}
           </button>
@@ -131,18 +142,9 @@ export default function StoricoPrestiti() {
       {loading ? (
         <p>Caricamento storico...</p>
       ) : (
-        <div className="page-grid" style={{ gap: '1rem' }}>
+        <div className="card-list">
           {filteredLoans.map((loan) => (
-            <article
-              key={loan.id}
-              style={{
-                border: '1px solid var(--color-border)',
-                borderRadius: '1rem',
-                padding: '1rem',
-                background: '#fff',
-                boxShadow: '0 10px 22px rgba(14, 151, 154, 0.08)',
-              }}
-            >
+            <article className="card" key={loan.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                 <div>
                   <h3 style={{ marginBottom: '0.25rem' }}>

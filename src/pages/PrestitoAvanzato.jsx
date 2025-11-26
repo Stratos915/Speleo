@@ -41,7 +41,7 @@ export default function PrestitoAvanzato() {
   }
 
   const selectedEquipment = useMemo(
-    () => equipment.find((item) => String(item.equipment_id) === form.equipmentId),
+    () => equipment.find((item) => String(item.id ?? item.equipment_id) === form.equipmentId),
     [equipment, form.equipmentId],
   );
 
@@ -79,7 +79,7 @@ export default function PrestitoAvanzato() {
       return;
     }
 
-    if (quantity > selectedEquipment.quantity_available) {
+    if (quantity > Number(selectedEquipment.quantity ?? 0)) {
       setError('La quantità richiesta supera la disponibilità attuale.');
       setSubmitting(false);
       return;
@@ -92,7 +92,7 @@ export default function PrestitoAvanzato() {
     }
 
     const payload = {
-      equipment_id: selectedEquipment.equipment_id,
+      equipment_id: selectedEquipment.id ?? selectedEquipment.equipment_id,
       borrower_name: form.borrowerName.trim(),
       borrower_member_number: form.borrowerMemberNumber ? Number(form.borrowerMemberNumber) : null,
       quantity,
@@ -109,9 +109,9 @@ export default function PrestitoAvanzato() {
     const { error: updateError } = await supabase
       .from('equipment')
       .update({
-        quantity_available: selectedEquipment.quantity_available - quantity,
+        quantity: Number(selectedEquipment.quantity ?? 0) - quantity,
       })
-      .eq('equipment_id', selectedEquipment.equipment_id);
+      .eq('id', selectedEquipment.id ?? selectedEquipment.equipment_id);
 
     if (updateError) {
       setError('Prestito registrato ma impossibile aggiornare il magazzino. Verifica manualmente.');
@@ -134,94 +134,68 @@ export default function PrestitoAvanzato() {
 
   return (
     <section className="page-grid">
-      <div>
+      <header>
         <h1>Prestito avanzato</h1>
-        <p>Registra nuove consegne di materiale e tieni traccia di chi lo utilizza.</p>
-      </div>
+        <p>Compila il modulo per consegnare materiale a soci o squadre operative.</p>
+      </header>
 
       {loading ? (
         <p>Caricamento dati...</p>
       ) : (
-        <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '1rem' }}>
-          <div>
-            <label htmlFor="equipmentId">Materiale</label>
+        <div className="card">
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
             <select
-              id="equipmentId"
               value={form.equipmentId}
               onChange={(event) => setForm((prev) => ({ ...prev, equipmentId: event.target.value }))}
               required
             >
-              <option value="">Seleziona materiale</option>
+              <option value="">Materiale</option>
               {equipment.map((item) => (
-                <option key={item.equipment_id} value={item.equipment_id}>
-                  {item.name} — Disponibile: {item.quantity_available}
+                <option key={item.id ?? item.equipment_id} value={item.id ?? item.equipment_id}>
+                  {item.name} · Disponibile: {item.quantity ?? 0}
                 </option>
               ))}
             </select>
-          </div>
 
-          {selectedEquipment && (
-            <div className="chip">
-              Disponibile: {selectedEquipment.quantity_available} / {selectedEquipment.quantity_total}
-            </div>
-          )}
-
-          <div>
-            <label htmlFor="quantity">Quantità</label>
             <input
-              id="quantity"
               type="number"
               min={1}
+              placeholder="Quantità"
               value={form.quantity}
               onChange={(event) => setForm((prev) => ({ ...prev, quantity: event.target.value }))}
               required
             />
-          </div>
 
-          <div>
-            <label htmlFor="memberSelect">Seleziona socio (facoltativo)</label>
-            <select
-              id="memberSelect"
-              value={form.borrowerMemberNumber}
-              onChange={(event) => handleMemberSelection(event.target.value)}
-            >
-              <option value="">Nessuno</option>
-              {members.map((member) => (
-                <option key={member.membership_number} value={member.membership_number}>
-                  {member.membership_number} — {member.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label htmlFor="borrowerName">Consegnato a</label>
             <input
-              id="borrowerName"
-              placeholder="Nome e cognome"
+              placeholder="Consegnato a"
               value={form.borrowerName}
               onChange={(event) => setForm((prev) => ({ ...prev, borrowerName: event.target.value }))}
               required
             />
-          </div>
 
-          <div>
-            <label htmlFor="notes">Note (facoltative)</label>
+            <select value={form.borrowerMemberNumber} onChange={(event) => handleMemberSelection(event.target.value)}>
+              <option value="">Seleziona socio (facoltativo)</option>
+              {members.map((member) => (
+                <option key={member.membership_number} value={member.membership_number}>
+                  {member.membership_number} · {member.full_name}
+                </option>
+              ))}
+            </select>
+
             <textarea
-              id="notes"
-              placeholder="Inserisci eventuali note, luogo o motivazione"
+              rows={3}
+              placeholder="Note (facoltative)"
               value={form.notes}
               onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
             />
-          </div>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? 'Registrazione...' : 'Registra prestito'}
-          </button>
-
-          {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-          {success && <p style={{ color: 'var(--color-primary-dark)' }}>{success}</p>}
-        </form>
+            <button type="submit" disabled={submitting}>
+              {submitting ? 'Registrazione...' : 'Registra prestito'}
+            </button>
+            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+            {success && <p style={{ color: 'var(--color-primary-dark)' }}>{success}</p>}
+          </form>
+        </div>
       )}
     </section>
   );

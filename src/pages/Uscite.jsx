@@ -24,6 +24,8 @@ export default function Uscite() {
   });
   const [editingId, setEditingId] = useState(null);
   const { role } = useAuth();
+  const [showForm, setShowForm] = useState(false);
+  const [statusFilter, setStatusFilter] = useState('tutte');
 
   useEffect(() => {
     loadUscite(filters);
@@ -88,6 +90,7 @@ export default function Uscite() {
       data: uscita.data ? new Date(uscita.data).toISOString().slice(0, 16) : '',
       tipo: uscita.tipo ?? 'sociale',
     });
+    setShowForm(true);
   }
 
   async function handleDelete(id) {
@@ -115,102 +118,83 @@ export default function Uscite() {
   }
 
   return (
-    <section>
-      <h1>Gestione Uscite</h1>
+    <section className="page-grid">
+      <header>
+        <h1>Uscite</h1>
+        <p>Organizza spedizioni, incontri e sessioni di formazione.</p>
+      </header>
 
-      {role === 'admin' && (
-        <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.5rem', maxWidth: '480px' }}>
-          <h2>Nuova uscita</h2>
-          <input
-            placeholder="Titolo"
-            value={form.titolo}
-            onChange={(e) => setForm({ ...form, titolo: e.target.value })}
-            required
-          />
-          <input
-            placeholder="Luogo"
-            value={form.luogo}
-            onChange={(e) => setForm({ ...form, luogo: e.target.value })}
-            required
-          />
-          <input
-            type="datetime-local"
-            value={form.data}
-            onChange={(e) => setForm({ ...form, data: e.target.value })}
-            required
-          />
-          <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-            <option value="sociale">Sociale</option>
-            <option value="formazione">Formazione</option>
-            <option value="esplorazione">Esplorazione</option>
-          </select>
-          <button>Crea uscita</button>
-          {message && <p>{message}</p>}
-        </form>
+      <div className="card">
+        <input
+          type="search"
+          placeholder="Cerca per titolo o luogo"
+          value={filters.query}
+          onChange={(event) => handleFilterChange('query', event.target.value)}
+        />
+        <div className="pill-group" style={{ marginTop: '0.75rem' }}>
+          {['tutte', 'aperte', 'chiuse'].map((status) => (
+            <button
+              key={status}
+              type="button"
+              className={`pill-button ${statusFilter === status ? 'pill-button--active' : ''}`}
+              onClick={() => setStatusFilter(status)}
+            >
+              {status === 'tutte' ? 'Tutte' : status.charAt(0).toUpperCase() + status.slice(1)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <p>Caricamento uscite...</p>
+      ) : (
+        <div className="card-list">
+          {uscite.map((uscita) => (
+            <article className="card" key={uscita.id}>
+              <header style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <div>
+                  <strong>{uscita.titolo}</strong>
+                  <p style={{ margin: 0, color: 'var(--color-muted)' }}>{uscita.luogo}</p>
+                </div>
+                <span className="chip">{uscita.tipo ?? 'sociale'}</span>
+              </header>
+              <p style={{ color: 'var(--color-muted)' }}>{uscita.data && new Date(uscita.data).toLocaleString()}</p>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <Link to={`/uscite/${uscita.id}`}>Apri scheda</Link>
+                {role === 'admin' && (
+                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleEdit(uscita)}>
+                    Modifica
+                  </button>
+                )}
+              </div>
+            </article>
+          ))}
+          {!uscite.length && <p>Nessuna uscita presente. TODO: collegare la tabella "uscite" su Supabase.</p>}
+        </div>
       )}
 
-      <div style={{ marginTop: '2rem' }}>
-        <h2>Elenco uscite</h2>
-        <div
-          style={{
-            display: 'grid',
-            gap: '0.5rem',
-            margin: '0.75rem 0 1rem',
-            maxWidth: '520px',
-            padding: '0.75rem',
-            border: '1px solid #e0e0e0',
-            borderRadius: '0.5rem',
-          }}
-        >
-          <strong>Filtri rapidi</strong>
-          <input
-            type="search"
-            placeholder="Cerca per titolo o luogo"
-            value={filters.query}
-            onChange={(event) => handleFilterChange('query', event.target.value)}
-          />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.5rem' }}>
-            <select value={filters.tipo} onChange={(event) => handleFilterChange('tipo', event.target.value)}>
-              <option value="">Tutti i tipi</option>
+      {showForm && role === 'admin' && (
+        <div className="card">
+          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.5rem' }}>
+            <input placeholder="Titolo" value={form.titolo} onChange={(e) => setForm({ ...form, titolo: e.target.value })} required />
+            <input placeholder="Luogo" value={form.luogo} onChange={(e) => setForm({ ...form, luogo: e.target.value })} required />
+            <input type="datetime-local" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} required />
+            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
               <option value="sociale">Sociale</option>
               <option value="formazione">Formazione</option>
               <option value="esplorazione">Esplorazione</option>
             </select>
-            <input
-              type="date"
-              value={filters.from}
-              onChange={(event) => handleFilterChange('from', event.target.value)}
-              placeholder="Dal"
-            />
-            <input
-              type="date"
-              value={filters.to}
-              onChange={(event) => handleFilterChange('to', event.target.value)}
-              placeholder="Al"
-            />
-          </div>
-          <button type="button" onClick={resetFilters}>
-            Pulisci filtri
-          </button>
-          <span style={{ fontSize: '0.9rem', color: '#555' }}>
-            Mostrate {uscite.length} uscite su {totalUscite}
-          </span>
+            <button type="submit">{editingId ? 'Aggiorna' : 'Crea uscita'}</button>
+            {message && <p>{message}</p>}
+          </form>
         </div>
-        {loading ? (
-          <p>Caricamento...</p>
-        ) : (
-          <ul style={{ display: 'grid', gap: '0.75rem' }}>
-            {uscite.map((uscita) => (
-              <li key={uscita.id} style={{ border: '1px solid #ccc', padding: '0.75rem' }}>
-                <h3>{uscita.titolo}</h3>
-                <p>{uscita.luogo}</p>
-                <p>{uscita.data && new Date(uscita.data).toLocaleString()}</p>
-                <Link to={`/uscite/${uscita.id}`}>Dettagli</Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
+      )}
+
+      {role === 'admin' && (
+        <button className="floating-button" type="button" onClick={() => { setShowForm((prev) => !prev); setEditingId(null); setForm(initialForm); }}>
+          {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
+        </button>
+      )}
     </section>
   );
 }
