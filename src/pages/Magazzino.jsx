@@ -164,34 +164,38 @@ export default function Magazzino() {
         <p>Caricamento magazzino...</p>
       ) : (
         <div className="card-list">
-          {filtered.map((material) => (
-            <article className="card" key={material.id}>
-              <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                <div>
-                  <h3 style={{ margin: 0 }}>{material.name}</h3>
-                  {material.equipment_number && (
-                    <span className="chip">Codice #{material.equipment_number}</span>
-                  )}
+          {filtered.map((material) => {
+            // Fallback per evitare warning React anche quando la riga non ha ancora un id.
+            const key = material.id ?? `${material.equipment_number ?? 'no-code'}-${material.name ?? 'item'}`;
+            return (
+              <article className="card" key={key}>
+                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>{material.name}</h3>
+                    {material.equipment_number && (
+                      <span className="chip">Codice #{material.equipment_number}</span>
+                    )}
+                  </div>
+                  <strong>{material.quantity ?? 0} pezzi</strong>
+                </header>
+                <p style={{ color: 'var(--color-muted)' }}>{material.description || 'Nessuna descrizione'}</p>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      startEdit(material);
+                      setShowForm(true);
+                    }}
+                  >
+                    Modifica
+                  </button>
+                  <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(material.id)}>
+                    Elimina
+                  </button>
                 </div>
-                <strong>{material.quantity ?? 0} pezzi</strong>
-              </header>
-              <p style={{ color: 'var(--color-muted)' }}>{material.description || 'Nessuna descrizione'}</p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    startEdit(material);
-                    setShowForm(true);
-                  }}
-                >
-                  Modifica
-                </button>
-                <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(material.id)}>
-                  Elimina
-                </button>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
           {!filtered.length && <p>Nessun materiale trovato.</p>}
         </div>
       )}

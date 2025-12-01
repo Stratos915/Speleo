@@ -3,6 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import { deleteUscita, getUscite } from '../services/uscite';
 
+const TIPO_OPTIONS = [
+  { value: '', label: 'Tutte' },
+  { value: 'sociale', label: 'Sociale' },
+  { value: 'corso', label: 'Corso' },
+  { value: 'allenamento', label: 'Allenamento' },
+  { value: 'esplorazione', label: 'Esplorazione' },
+  { value: 'altro', label: 'Altro' },
+];
+
 function formatDate(value) {
   if (!value) return '-';
   const source = value.includes('T') ? value : `${value}T00:00:00`;
@@ -17,6 +26,11 @@ function formatTime(value) {
   if (!value) return '-';
   const [timePart] = value.split('+');
   return timePart.slice(0, 5);
+}
+
+function buildMapsLink(luogo) {
+  if (!luogo) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(luogo)}`;
 }
 
 export default function Uscite() {
@@ -38,7 +52,8 @@ export default function Uscite() {
       const data = await getUscite();
       setUscite(data);
     } catch (loadError) {
-      setError(loadError.message ?? 'Impossibile caricare le uscite.');
+      console.error('[Uscite] Errore caricamento', loadError);
+      setError('Impossibile caricare le uscite, riprova più tardi.');
     } finally {
       setLoading(false);
     }
@@ -81,12 +96,16 @@ export default function Uscite() {
           value={filters.query}
           onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
         />
-        <input
-          placeholder="Filtra per tipo (opzionale)"
-          value={filters.tipo}
-          onChange={(event) => setFilters((prev) => ({ ...prev, tipo: event.target.value }))}
-        />
-        <small style={{ color: 'var(--color-muted)' }}>{filteredUscite.length} uscite su {uscite.length}</small>
+        <select value={filters.tipo} onChange={(event) => setFilters((prev) => ({ ...prev, tipo: event.target.value }))}>
+          {TIPO_OPTIONS.map((option) => (
+            <option key={option.value || 'all'} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+        <small style={{ color: 'var(--color-muted)' }}>
+          {filteredUscite.length} uscite su {uscite.length}
+        </small>
       </div>
 
       {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
@@ -100,7 +119,15 @@ export default function Uscite() {
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
                 <div>
                   <strong>{uscita.titolo}</strong>
-                  <p style={{ margin: 0, color: 'var(--color-muted)' }}>{uscita.luogo}</p>
+                  <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                    {uscita.luogo ? (
+                      <a href={buildMapsLink(uscita.luogo)} target="_blank" rel="noopener noreferrer">
+                        {uscita.luogo}
+                      </a>
+                    ) : (
+                      'Luogo non indicato'
+                    )}
+                  </p>
                 </div>
                 {uscita.tipo && <span className="chip">{uscita.tipo}</span>}
               </header>

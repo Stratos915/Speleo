@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
-import { getEquipment } from '../services/equipment';
-import { getMembers } from '../services/members';
-import { getUscite } from '../services/uscite';
+import { supabase } from '../lib/supabaseClient';
+
+async function fetchCount(table) {
+  const { count, error } = await supabase.from(table).select('id', { count: 'exact', head: true });
+  if (error) throw error;
+  return count ?? 0;
+}
 
 export default function Dashboard() {
   const { user, role } = useAuth();
@@ -14,18 +18,14 @@ export default function Dashboard() {
       setLoading(true);
       try {
         const [equipment, members, uscite] = await Promise.all([
-          getEquipment(),
-          getMembers(),
-          getUscite().catch(() => []), // TODO: rimuovere catch quando la tabella esiste
+          fetchCount('equipment'),
+          fetchCount('members'),
+          fetchCount('uscite'),
         ]);
-        setStats({
-          equipment: equipment.length,
-          members: members.length,
-          uscite: uscite.length,
-        });
+        setStats({ equipment, members, uscite });
       } catch (error) {
-        // i widget mostreranno 0 e un TODO ricorderà di gestire notifiche
         console.error('Errore caricamento dashboard', error);
+        setStats({ equipment: 0, members: 0, uscite: 0 });
       } finally {
         setLoading(false);
       }

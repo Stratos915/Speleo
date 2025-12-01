@@ -11,6 +11,15 @@ const EMPTY_FORM = {
   note: '',
 };
 
+const TIPO_OPTIONS = [
+  { value: 'sociale', label: 'Sociale' },
+  { value: 'corso', label: 'Corso' },
+  { value: 'allenamento', label: 'Allenamento' },
+  { value: 'formazione', label: 'Formazione' },
+  { value: 'esplorazione', label: 'Esplorazione' },
+  { value: 'altro', label: 'Altro' },
+];
+
 function dateForInput(value) {
   if (!value) return '';
   if (value.includes('T')) {
@@ -89,6 +98,11 @@ export default function UscitaForm({
     return submitting || membersLoading;
   }, [membersLoading, submitting]);
 
+  const mapsLink = useMemo(() => {
+    if (!form.luogo?.trim()) return null;
+    return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(form.luogo.trim())}`;
+  }, [form.luogo]);
+
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -130,6 +144,13 @@ export default function UscitaForm({
           required
           placeholder="Es. Grotta XYZ"
         />
+        {mapsLink && (
+          <small>
+            <a href={mapsLink} target="_blank" rel="noopener noreferrer">
+              Apri posizione su Google Maps
+            </a>
+          </small>
+        )}
       </div>
 
       <div className="card">
@@ -144,12 +165,13 @@ export default function UscitaForm({
 
       <div className="card">
         <label htmlFor="tipo">Tipo</label>
-        <input
-          id="tipo"
-          value={form.tipo}
-          onChange={(event) => handleChange('tipo', event.target.value)}
-          placeholder="Es. Corso, Allenamento..."
-        />
+        <select id="tipo" value={form.tipo} onChange={(event) => handleChange('tipo', event.target.value)}>
+          {TIPO_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
       </div>
 
       <div className="card">

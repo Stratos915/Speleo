@@ -1,40 +1,62 @@
 import { supabase } from '../lib/supabaseClient';
 
 const TABLE = 'uscite';
-// La select include l'alias "responsabile" per recuperare il nome del socio collegato via FK.
-const USCITE_SELECT =
-  'id,titolo,luogo,data,ora,tipo,responsabile_id,note,created_at,responsabile:members!uscite_responsabile_id_fkey(id,full_name)';
+const BASE_FIELDS = 'id,titolo,luogo,data,ora,tipo,responsabile_id,note,created_at';
 
-function withResponsabile(data) {
-  if (!data) return data;
-  return {
-    ...data,
-    responsabile_full_name: data.responsabile?.full_name ?? null,
-  };
+async function attachResponsabile(records) {
+  const list = Array.isArray(records) ? records : records ? [records] : [];
+  if (!list.length) {
+    return Array.isArray(records) ? [] : null;
+  }
+
+  const responsabiliIds = [
+    ...new Set(list.map((record) => record?.responsabile_id).filter(Boolean)),
+  ];
+  if (!responsabiliIds.length) {
+    return Array.isArray(records) ? list : list[0];
+  }
+
+  const { data: members, error } = await supabase
+    .from('members')
+    .select('id,full_name')
+    .in('id', responsabiliIds);
+  if (error) throw error;
+
+  const map = members.reduce((acc, member) => {
+    acc[member.id] = member.full_name;
+    return acc;
+  }, {});
+
+  const enriched = list.map((record) => ({
+    ...record,
+    responsabile_full_name: map[record.responsabile_id] ?? null,
+  }));
+
+  return Array.isArray(records) ? enriched : enriched[0];
 }
 
 export async function getUscite() {
-  const { data, error } = await supabase.from(TABLE).select(USCITE_SELECT).order('data', { ascending: true });
+  const { data, error } = await supabase.from(TABLE).select(BASE_FIELDS).order('data', { ascending: true });
   if (error) throw error;
-  return (data ?? []).map(withResponsabile);
+  return attachResponsabile(data ?? []);
 }
 
 export async function getUscitaById(id) {
-  const { data, error } = await supabase.from(TABLE).select(USCITE_SELECT).eq('id', id).single();
+  const { data, error } = await supabase.from(TABLE).select(BASE_FIELDS).eq('id', id).single();
   if (error) throw error;
-  return withResponsabile(data);
+  return attachResponsabile(data);
 }
 
 export async function createUscita(payload) {
-  const { data, error } = await supabase.from(TABLE).insert(payload).select(USCITE_SELECT).single();
+  const { data, error } = await supabase.from(TABLE).insert(payload).select(BASE_FIELDS).single();
   if (error) throw error;
-  return withResponsabile(data);
+  return attachResponsabile(data);
 }
 
 export async function updateUscita(id, payload) {
-  const { data, error } = await supabase.from(TABLE).update(payload).eq('id', id).select(USCITE_SELECT).single();
+  const { data, error } = await supabase.from(TABLE).update(payload).eq('id', id).select(BASE_FIELDS).single();
   if (error) throw error;
-  return withResponsabile(data);
+  return attachResponsabile(data);
 }
 
 export async function deleteUscita(id) {
