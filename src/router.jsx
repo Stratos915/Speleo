@@ -4,6 +4,7 @@ import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Uscite from './pages/Uscite.jsx';
 import UscitaDettaglio from './pages/UscitaDettaglio.jsx';
+import UscitaNuova from './pages/UscitaNuova.jsx';
 import Magazzino from './pages/Magazzino.jsx';
 import Corso from './pages/Corso.jsx';
 import Biblioteca from './pages/Biblioteca.jsx';
@@ -28,6 +29,14 @@ export const router = createBrowserRouter([
     children: [
       { path: 'dashboard', element: <Dashboard /> },
       { path: 'uscite', element: <Uscite /> },
+      {
+        path: 'uscite/new',
+        element: (
+          <ProtectedRoute roles={['admin']}>
+            <UscitaNuova />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: 'uscite/:id',
         element: (

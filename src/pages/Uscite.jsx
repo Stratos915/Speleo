@@ -1,198 +1,138 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { createUscita, deleteUscita, getUscite, updateUscita } from '../services/uscite';
+import { deleteUscita, getUscite } from '../services/uscite';
 
-const initialForm = {
-  titolo: '',
-  luogo: '',
-  data: '',
-  tipo: 'sociale',
-};
+function formatDate(value) {
+  if (!value) return '-';
+  const source = value.includes('T') ? value : `${value}T00:00:00`;
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function formatTime(value) {
+  if (!value) return '-';
+  const [timePart] = value.split('+');
+  return timePart.slice(0, 5);
+}
 
 export default function Uscite() {
   const [uscite, setUscite] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState(initialForm);
-  const [message, setMessage] = useState('');
-  const [totalUscite, setTotalUscite] = useState(0);
-  const [filters, setFilters] = useState({
-    query: '',
-    tipo: '',
-    from: '',
-    to: '',
-  });
-  const [editingId, setEditingId] = useState(null);
+  const [error, setError] = useState('');
+  const [filters, setFilters] = useState({ query: '', tipo: '' });
   const { role } = useAuth();
-  const [showForm, setShowForm] = useState(false);
-  const [statusFilter, setStatusFilter] = useState('tutte');
+  const navigate = useNavigate();
 
   useEffect(() => {
-    loadUscite(filters);
-  }, [filters]);
+    loadUscite();
+  }, []);
 
-  async function loadUscite(currentFilters = filters) {
+  async function loadUscite() {
     setLoading(true);
-    const { query, tipo, from, to } = currentFilters;
+    setError('');
     try {
       const data = await getUscite();
-      const filtered = data.filter((uscita) => {
-        const matchesQuery =
-          !query.trim() ||
-          uscita.titolo?.toLowerCase().includes(query.toLowerCase()) ||
-          uscita.luogo?.toLowerCase().includes(query.toLowerCase());
-        const matchesTipo = !tipo || uscita.tipo === tipo;
-        const uscitaDate = uscita.data ? new Date(uscita.data) : null;
-        const matchesFrom = !from || (uscitaDate && uscitaDate >= new Date(from));
-        const matchesTo = !to || (uscitaDate && uscitaDate <= new Date(to));
-        return matchesQuery && matchesTipo && matchesFrom && matchesTo;
-      });
-      setUscite(filtered);
-      setTotalUscite(data.length);
-    } catch (error) {
-      setMessage('TODO: la tabella "uscite" sarà disponibile a breve su Supabase.');
-      console.error(error);
+      setUscite(data);
+    } catch (loadError) {
+      setError(loadError.message ?? 'Impossibile caricare le uscite.');
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSubmit(event) {
-    event.preventDefault();
-    setMessage('');
-    const payload = {
-      titolo: form.titolo.trim(),
-      luogo: form.luogo.trim(),
-      data: form.data ? new Date(form.data).toISOString() : null,
-      tipo: form.tipo,
-    };
-    try {
-      if (editingId) {
-        await updateUscita(editingId, payload);
-        setMessage('Uscita aggiornata.');
-      } else {
-        await createUscita(payload);
-        setMessage('Uscita creata con successo');
-      }
-      setForm(initialForm);
-      setEditingId(null);
-      loadUscite(filters);
-    } catch (error) {
-      setMessage(error.message ?? 'Errore durante il salvataggio.');
-    }
-  }
-
-  function handleEdit(uscita) {
-    setEditingId(uscita.id);
-    setForm({
-      titolo: uscita.titolo ?? '',
-      luogo: uscita.luogo ?? '',
-      data: uscita.data ? new Date(uscita.data).toISOString().slice(0, 16) : '',
-      tipo: uscita.tipo ?? 'sociale',
-    });
-    setShowForm(true);
-  }
-
   async function handleDelete(id) {
-    if (!window.confirm('Vuoi eliminare questa uscita?')) return;
-    setMessage('');
+    if (!window.confirm('Eliminare questa uscita?')) {
+      return;
+    }
     try {
       await deleteUscita(id);
-      loadUscite(filters);
-    } catch (error) {
-      setMessage(error.message ?? 'Impossibile eliminare l\'uscita.');
+      await loadUscite();
+    } catch (deleteError) {
+      setError(deleteError.message ?? 'Errore durante l\'eliminazione dell\'uscita.');
     }
   }
 
-  function handleFilterChange(field, value) {
-    setFilters((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function resetFilters() {
-    setFilters({
-      query: '',
-      tipo: '',
-      from: '',
-      to: '',
+  const filteredUscite = useMemo(() => {
+    return uscite.filter((uscita) => {
+      const matchesQuery =
+        !filters.query ||
+        uscita.titolo?.toLowerCase().includes(filters.query.toLowerCase()) ||
+        uscita.luogo?.toLowerCase().includes(filters.query.toLowerCase());
+      const matchesTipo = !filters.tipo || uscita.tipo?.toLowerCase() === filters.tipo.toLowerCase();
+      return matchesQuery && matchesTipo;
     });
-  }
+  }, [uscite, filters]);
 
   return (
     <section className="page-grid">
       <header>
         <h1>Uscite</h1>
-        <p>Organizza spedizioni, incontri e sessioni di formazione.</p>
+        <p>Elenco aggiornato di spedizioni, corsi e attività in programma.</p>
       </header>
 
-      <div className="card">
+      <div className="card" style={{ display: 'grid', gap: '0.75rem' }}>
         <input
           type="search"
           placeholder="Cerca per titolo o luogo"
           value={filters.query}
-          onChange={(event) => handleFilterChange('query', event.target.value)}
+          onChange={(event) => setFilters((prev) => ({ ...prev, query: event.target.value }))}
         />
-        <div className="pill-group" style={{ marginTop: '0.75rem' }}>
-          {['tutte', 'aperte', 'chiuse'].map((status) => (
-            <button
-              key={status}
-              type="button"
-              className={`pill-button ${statusFilter === status ? 'pill-button--active' : ''}`}
-              onClick={() => setStatusFilter(status)}
-            >
-              {status === 'tutte' ? 'Tutte' : status.charAt(0).toUpperCase() + status.slice(1)}
-            </button>
-          ))}
-        </div>
+        <input
+          placeholder="Filtra per tipo (opzionale)"
+          value={filters.tipo}
+          onChange={(event) => setFilters((prev) => ({ ...prev, tipo: event.target.value }))}
+        />
+        <small style={{ color: 'var(--color-muted)' }}>{filteredUscite.length} uscite su {uscite.length}</small>
       </div>
+
+      {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
 
       {loading ? (
         <p>Caricamento uscite...</p>
       ) : (
         <div className="card-list">
-          {uscite.map((uscita) => (
+          {filteredUscite.map((uscita) => (
             <article className="card" key={uscita.id}>
-              <header style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
                 <div>
                   <strong>{uscita.titolo}</strong>
                   <p style={{ margin: 0, color: 'var(--color-muted)' }}>{uscita.luogo}</p>
                 </div>
-                <span className="chip">{uscita.tipo ?? 'sociale'}</span>
+                {uscita.tipo && <span className="chip">{uscita.tipo}</span>}
               </header>
-              <p style={{ color: 'var(--color-muted)' }}>{uscita.data && new Date(uscita.data).toLocaleString()}</p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <p style={{ color: 'var(--color-muted)' }}>
+                {formatDate(uscita.data)} · {formatTime(uscita.ora)}
+              </p>
+              <p style={{ marginTop: '0.5rem' }}>
+                Responsabile:{' '}
+                <strong>{uscita.responsabile_full_name ?? 'Da assegnare'}</strong>
+              </p>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <Link to={`/uscite/${uscita.id}`}>Apri scheda</Link>
                 {role === 'admin' && (
-                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleEdit(uscita)}>
+                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => navigate(`/uscite/${uscita.id}`)}>
                     Modifica
+                  </button>
+                )}
+                {role === 'admin' && (
+                  <button type="button" style={{ background: '#f27367' }} onClick={() => handleDelete(uscita.id)}>
+                    Elimina
                   </button>
                 )}
               </div>
             </article>
           ))}
-          {!uscite.length && <p>Nessuna uscita presente. TODO: collegare la tabella "uscite" su Supabase.</p>}
-        </div>
-      )}
-
-      {showForm && role === 'admin' && (
-        <div className="card">
-          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.5rem' }}>
-            <input placeholder="Titolo" value={form.titolo} onChange={(e) => setForm({ ...form, titolo: e.target.value })} required />
-            <input placeholder="Luogo" value={form.luogo} onChange={(e) => setForm({ ...form, luogo: e.target.value })} required />
-            <input type="datetime-local" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })} required />
-            <select value={form.tipo} onChange={(e) => setForm({ ...form, tipo: e.target.value })}>
-              <option value="sociale">Sociale</option>
-              <option value="formazione">Formazione</option>
-              <option value="esplorazione">Esplorazione</option>
-            </select>
-            <button type="submit">{editingId ? 'Aggiorna' : 'Crea uscita'}</button>
-            {message && <p>{message}</p>}
-          </form>
+          {!filteredUscite.length && !loading && <p>Nessuna uscita trovata.</p>}
         </div>
       )}
 
       {role === 'admin' && (
-        <button className="floating-button" type="button" onClick={() => { setShowForm((prev) => !prev); setEditingId(null); setForm(initialForm); }}>
-          {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
+        <button className="floating-button" type="button" onClick={() => navigate('/uscite/new')}>
+          Nuova uscita
         </button>
       )}
     </section>
