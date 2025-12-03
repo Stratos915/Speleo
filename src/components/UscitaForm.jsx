@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { getMembers } from '../services/members';
 
 const EMPTY_FORM = {
@@ -8,7 +9,10 @@ const EMPTY_FORM = {
   ora: '',
   tipo: 'sociale',
   responsabile_id: '',
+  responsabile_nome: '',
   note: '',
+  participants_ids: [],
+  participants_manual: '',
 };
 
 const TIPO_OPTIONS = [
@@ -48,16 +52,29 @@ export default function UscitaForm({
   successMessage = '',
   onCancel,
   submitLabel = 'Salva uscita',
+  membersList = null,
 }) {
+  const navigate = useNavigate();
   const [form, setForm] = useState(() => ({
     ...EMPTY_FORM,
     ...(initialValues ?? {}),
     data: initialValues?.data ? dateForInput(initialValues.data) : '',
     ora: initialValues?.ora ? timetzForInput(initialValues.ora) : '',
+    participants_ids: initialValues?.participants_ids?.map(String) ?? [],
   }));
-  const [members, setMembers] = useState([]);
-  const [membersLoading, setMembersLoading] = useState(true);
+  const [members, setMembers] = useState(membersList ?? []);
+  const [membersLoading, setMembersLoading] = useState(!membersList);
   const [membersError, setMembersError] = useState('');
+  const [participantsSearch, setParticipantsSearch] = useState('');
+  const timeInputRef = useRef(null);
+  const prestitoParams = useMemo(() => {
+    if (!initialValues?.id) return null;
+    const params = new URLSearchParams();
+    params.set('uscita', initialValues.id);
+    if (initialValues.titolo) params.set('uscitaTitle', initialValues.titolo);
+    if (initialValues.data) params.set('uscitaDate', initialValues.data);
+    return params.toString();
+  }, [initialValues?.id, initialValues?.titolo, initialValues?.data]);
 
   useEffect(() => {
     setForm({
@@ -65,10 +82,21 @@ export default function UscitaForm({
       ...(initialValues ?? {}),
       data: initialValues?.data ? dateForInput(initialValues.data) : '',
       ora: initialValues?.ora ? timetzForInput(initialValues.ora) : '',
+      responsabile_id: initialValues?.responsabile_id ?? '',
+      responsabile_nome: initialValues?.responsabile_nome ?? initialValues?.responsabile ?? '',
+      participants_ids: initialValues?.participants_ids?.map(String) ?? [],
+      participants_manual: initialValues?.participants_manual ?? '',
     });
+    setParticipantsSearch('');
   }, [initialValues]);
 
   useEffect(() => {
+    if (membersList) {
+      setMembers(membersList);
+      setMembersLoading(false);
+      return undefined;
+    }
+
     let ignore = false;
     async function loadMembers() {
       setMembersLoading(true);
@@ -92,7 +120,7 @@ export default function UscitaForm({
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [membersList]);
 
   const isSubmitDisabled = useMemo(() => {
     return submitting || membersLoading;
@@ -102,6 +130,16 @@ export default function UscitaForm({
     if (!form.luogo?.trim()) return null;
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(form.luogo.trim())}`;
   }, [form.luogo]);
+
+  const filteredParticipants = useMemo(() => {
+    if (!participantsSearch.trim()) return members;
+    const term = participantsSearch.toLowerCase();
+    return members.filter(
+      (member) =>
+        member.full_name?.toLowerCase().includes(term) ||
+        String(member.membership_number ?? '').includes(term),
+    );
+  }, [members, participantsSearch]);
 
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -117,6 +155,9 @@ export default function UscitaForm({
       ora: timeToTimetz(form.ora),
       tipo: form.tipo.trim() || null,
       responsabile_id: form.responsabile_id || null,
+      responsabile_nome: form.responsabile_nome.trim() || null,
+      participants_ids: form.participants_ids?.length ? form.participants_ids : null,
+      participants_manual: form.participants_manual.trim() || null,
       note: form.note?.trim() ? form.note.trim() : null,
     };
     await onSubmit(payload);
@@ -160,7 +201,24 @@ export default function UscitaForm({
 
       <div className="card">
         <label htmlFor="ora">Ora</label>
-        <input id="ora" type="time" value={form.ora} onChange={(event) => handleChange('ora', event.target.value)} required />
+        <div className="input-with-icon">
+          <button
+            type="button"
+            aria-label="Apri selettore orario"
+            onClick={() => timeInputRef.current?.showPicker?.()}
+            style={{ border: 'none', background: 'transparent', cursor: 'pointer' }}
+          >
+            🕒
+          </button>
+          <input
+            id="ora"
+            ref={timeInputRef}
+            type="time"
+            value={form.ora}
+            onChange={(event) => handleChange('ora', event.target.value)}
+            required
+          />
+        </div>
       </div>
 
       <div className="card">
@@ -176,24 +234,115 @@ export default function UscitaForm({
 
       <div className="card">
         <label htmlFor="responsabile">Responsabile</label>
+        <input
+          placeholder="Nome responsabile"
+          value={form.responsabile_nome}
+          onChange={(event) => handleChange('responsabile_nome', event.target.value)}
+        />
         {membersLoading ? (
           <p>Caricamento soci...</p>
         ) : (
-          <select
-            id="responsabile"
-            value={form.responsabile_id}
-            onChange={(event) => handleChange('responsabile_id', event.target.value)}
-            required
-          >
-            <option value="">Seleziona responsabile</option>
-            {members.map((member) => (
-              <option key={member.id} value={member.id}>
-                {member.full_name}
-              </option>
-            ))}
-          </select>
+          <>
+            <select
+              id="responsabile"
+              value={form.responsabile_id}
+              onChange={(event) => {
+                const selectedId = event.target.value;
+                const selectedMember = members.find((member) => String(member.id) === selectedId);
+                setForm((prev) => ({
+                  ...prev,
+                  responsabile_id: selectedId,
+                  responsabile_nome: selectedMember ? selectedMember.full_name : prev.responsabile_nome,
+                }));
+              }}
+              disabled={!members.length}
+            >
+              <option value="">{members.length ? 'Seleziona responsabile' : 'Nessun socio disponibile'}</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.membership_number ? `${member.membership_number} · ${member.full_name}` : member.full_name}
+                </option>
+              ))}
+            </select>
+            {!members.length && !membersError && (
+              <small style={{ color: 'var(--color-muted)' }}>
+                Importa i soci per assegnare un responsabile (facoltativo).
+              </small>
+            )}
+          </>
         )}
         {membersError && <p style={{ color: 'var(--color-accent)' }}>{membersError}</p>}
+      </div>
+
+      <div className="card">
+        <label htmlFor="participants">Partecipanti (seleziona soci)</label>
+        {membersLoading ? (
+          <p>Caricamento soci...</p>
+        ) : (
+          <>
+            <input
+              type="search"
+              placeholder="Filtra per nome o tessera"
+              value={participantsSearch}
+              onChange={(event) => setParticipantsSearch(event.target.value)}
+            />
+            <div
+              id="participants"
+              style={{
+                maxHeight: '12rem',
+                overflowY: 'auto',
+                border: '1px solid rgba(0,0,0,0.1)',
+                borderRadius: '0.75rem',
+                padding: '0.5rem',
+                marginTop: '0.5rem',
+              }}
+            >
+              {!filteredParticipants.length && <p style={{ color: 'var(--color-muted)' }}>Nessun socio trovato.</p>}
+              {filteredParticipants.map((member) => {
+                const memberId = String(member.id);
+                const checked = form.participants_ids.includes(memberId);
+                return (
+                  <label
+                    key={memberId}
+                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.15rem 0' }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(event) => {
+                        const { checked: isChecked } = event.target;
+                        if (isChecked) {
+                          handleChange('participants_ids', [...new Set([...form.participants_ids, memberId])]);
+                        } else {
+                          handleChange(
+                            'participants_ids',
+                            form.participants_ids.filter((value) => value !== memberId),
+                          );
+                        }
+                      }}
+                    />
+                    <span>
+                      {member.membership_number ? `${member.membership_number} · ${member.full_name}` : member.full_name}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+            <small style={{ color: 'var(--color-muted)' }}>
+              Spunta più nomi contemporaneamente o usa il campo qui sotto per partecipanti esterni.
+            </small>
+          </>
+        )}
+        <label htmlFor="participantsManual" style={{ marginTop: '0.5rem' }}>
+          Partecipanti esterni (uno per riga o separati da virgola)
+        </label>
+        <textarea
+          id="participantsManual"
+          rows={2}
+          placeholder="Es. Mario Rossi&#10;Squadra esterna"
+          value={form.participants_manual}
+          onChange={(event) => handleChange('participants_manual', event.target.value)}
+        />
       </div>
 
       <div className="card">
@@ -206,6 +355,23 @@ export default function UscitaForm({
           placeholder="Dettagli logistici, materiale necessario..."
         />
       </div>
+
+      {prestitoParams ? (
+        <div className="card">
+          <p style={{ margin: '0 0 0.35rem' }}>Materiale necessario</p>
+          <button
+            type="button"
+            onClick={() => navigate(`/prestito-avanzato?${prestitoParams}`)}
+            style={{ background: 'var(--color-primary-dark)' }}
+          >
+            Apri modulo prestiti
+          </button>
+        </div>
+      ) : (
+        <div className="card">
+          <small>Salva l&apos;uscita per collegare il materiale necessario.</small>
+        </div>
+      )}
 
       {errorMessage && <p style={{ color: 'var(--color-accent)' }}>{errorMessage}</p>}
       {successMessage && <p style={{ color: 'var(--color-primary)' }}>{successMessage}</p>}

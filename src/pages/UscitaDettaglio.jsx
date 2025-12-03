@@ -3,6 +3,10 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
+import { getMembers } from '../services/members';
+import { supabase } from '../lib/supabaseClient';
+
+const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
 function formatDate(value) {
   if (!value) return '-';
@@ -31,10 +35,71 @@ export default function UscitaDettaglio() {
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState('');
   const [formError, setFormError] = useState('');
+  const [prestitoParams, setPrestitoParams] = useState('');
+  const [membersMap, setMembersMap] = useState(new Map());
+  const [feedbackText, setFeedbackText] = useState('');
+  const [photosText, setPhotosText] = useState('');
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackStatus, setFeedbackStatus] = useState('');
+  const [feedbackError, setFeedbackError] = useState('');
+  const [hasOpenLoans, setHasOpenLoans] = useState(false);
+  const [checkingLoans, setCheckingLoans] = useState(true);
+  const [statusChanging, setStatusChanging] = useState(false);
+  const [statusError, setStatusError] = useState('');
+  const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  const [uploadError, setUploadError] = useState('');
 
   useEffect(() => {
     loadDettaglio();
   }, [id]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function checkOpenLoans() {
+      if (!id) {
+        setHasOpenLoans(false);
+        setCheckingLoans(false);
+        return;
+      }
+      setCheckingLoans(true);
+      try {
+        const { count, error } = await supabase
+          .from('loans')
+          .select('id', { count: 'exact', head: true })
+          .eq('uscita_id', id)
+          .eq('status', 'in_corso');
+        if (error) {
+          throw error;
+        }
+        if (!ignore) {
+          setHasOpenLoans((count ?? 0) > 0);
+        }
+      } catch (loanError) {
+        if (!ignore) {
+          console.error('[UscitaDettaglio] Errore verifica prestiti aperti:', loanError.message);
+          setHasOpenLoans(false);
+        }
+      } finally {
+        if (!ignore) {
+          setCheckingLoans(false);
+        }
+      }
+    }
+    checkOpenLoans();
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
+
+  useEffect(() => {
+    async function loadMembers() {
+      const list = await getMembers();
+      const map = new Map();
+      list.forEach((member) => map.set(member.id, member.full_name));
+      setMembersMap(map);
+    }
+    loadMembers();
+  }, []);
 
   async function loadDettaglio() {
     setLoading(true);
@@ -42,6 +107,8 @@ export default function UscitaDettaglio() {
     try {
       const data = await getUscitaById(id);
       setUscita(data);
+      setFeedbackText(data.feedback ?? '');
+      setPhotosText((data.photo_urls ?? []).join('\n'));
     } catch (loadError) {
       setError(loadError.message ?? 'Uscita non trovata.');
     } finally {
@@ -56,6 +123,8 @@ export default function UscitaDettaglio() {
     try {
       const updated = await updateUscita(id, payload);
       setUscita(updated);
+      setFeedbackText(updated.feedback ?? '');
+      setPhotosText((updated.photo_urls ?? []).join('\n'));
       setSuccess('Uscita aggiornata.');
       setEditMode(false);
     } catch (updateError) {
@@ -65,10 +134,121 @@ export default function UscitaDettaglio() {
     }
   }
 
+  async function handleFeedbackSave() {
+    setFeedbackSaving(true);
+    setFeedbackError('');
+    setFeedbackStatus('');
+    try {
+      const photos = photosText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+      const updated = await updateUscita(id, {
+        feedback: feedbackText.trim() || null,
+        photo_urls: photos.length ? photos : null,
+      });
+      setUscita(updated);
+      setFeedbackStatus('Feedback aggiornato.');
+    } catch (saveError) {
+      setFeedbackError(saveError.message ?? 'Impossibile salvare il feedback.');
+    } finally {
+      setFeedbackSaving(false);
+    }
+  }
+
+  async function handleStatusToggle(nextStatus) {
+    setStatusChanging(true);
+    setStatusError('');
+    try {
+      const payload = { status: nextStatus };
+      if (supportsClosedAt) {
+        payload.closed_at = nextStatus === 'chiusa' ? new Date().toISOString() : null;
+      }
+      const updated = await updateUscita(id, payload);
+      setUscita(updated);
+      setSuccess(nextStatus === 'chiusa' ? 'Uscita chiusa.' : 'Uscita riaperta.');
+    } catch (toggleError) {
+      if (supportsClosedAt && /closed_at/i.test(toggleError.message ?? '')) {
+        try {
+          const updated = await updateUscita(id, { status: nextStatus });
+          setUscita(updated);
+          setSuccess(nextStatus === 'chiusa' ? 'Uscita chiusa.' : 'Uscita riaperta.');
+          return;
+        } catch (fallbackError) {
+          setStatusError(fallbackError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+        }
+      } else {
+        setStatusError(toggleError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+      }
+    } finally {
+      setStatusChanging(false);
+    }
+  }
+
+  async function handlePhotoUpload(event) {
+    if (!uscita) return;
+    const input = event.target;
+    const files = Array.from(input.files ?? []);
+    if (!files.length) return;
+    if (!PHOTO_BUCKET) {
+      setUploadError('Configura VITE_SUPABASE_PHOTOS_BUCKET per abilitare l\'upload delle foto.');
+      return;
+    }
+    setUploadError('');
+    setUploadingPhotos(true);
+    try {
+      const uploadedUrls = [];
+      for (const file of files) {
+        const sanitizedName = file.name.replace(/\s+/g, '-');
+        const path = `${uscita.id}/${Date.now()}-${sanitizedName}`;
+        const { error: uploadErrorResp } = await supabase.storage
+          .from(PHOTO_BUCKET)
+          .upload(path, file, { upsert: false, cacheControl: '3600', contentType: file.type });
+        if (uploadErrorResp) {
+          throw uploadErrorResp;
+        }
+        const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+        if (publicData?.publicUrl) {
+          uploadedUrls.push(publicData.publicUrl);
+        }
+      }
+      const mergedPhotos = [...new Set([...(uscita.photo_urls ?? []), ...uploadedUrls])];
+      const updated = await updateUscita(id, { photo_urls: mergedPhotos });
+      setUscita(updated);
+      setPhotosText((updated.photo_urls ?? []).join('\n'));
+      setFeedbackStatus('Foto caricate con successo.');
+    } catch (uploadErr) {
+      setUploadError(uploadErr.message ?? 'Impossibile caricare le foto.');
+    } finally {
+      setUploadingPhotos(false);
+      input.value = '';
+    }
+  }
+
+  const supportsClosedAt = uscita ? Object.prototype.hasOwnProperty.call(uscita, 'closed_at') : false;
+  const isClosed = uscita?.status === 'chiusa';
   const mapsLink = useMemo(() => {
     if (!uscita?.luogo) return null;
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(uscita.luogo)}`;
   }, [uscita?.luogo]);
+
+  useEffect(() => {
+    if (!uscita) return;
+    const params = new URLSearchParams();
+    params.set('uscita', uscita.id);
+    if (uscita.titolo) params.set('uscitaTitle', uscita.titolo);
+    if (uscita.data) params.set('uscitaDate', uscita.data);
+    setPrestitoParams(params.toString());
+  }, [uscita]);
+
+  const uscitaDateObject = uscita?.data ? new Date(uscita.data) : null;
+  const isPast = uscitaDateObject ? uscitaDateObject < new Date() : false;
+
+  const disableLoanButton = useMemo(() => {
+    if (isClosed) return true;
+    if (!uscitaDateObject || Number.isNaN(uscitaDateObject.getTime())) return false;
+    return uscitaDateObject < new Date() && !hasOpenLoans;
+  }, [uscitaDateObject, hasOpenLoans, isClosed]);
 
   if (loading) {
     return <p>Caricamento uscita...</p>;
@@ -91,10 +271,17 @@ export default function UscitaDettaglio() {
         </button>
         <h1>{uscita.titolo}</h1>
         <p>Creato il: {uscita.created_at ? new Date(uscita.created_at).toLocaleString('it-IT') : '-'}</p>
+        <p>
+          Stato: <strong>{isClosed ? 'Chiusa' : 'Aperta'}</strong>
+          {isClosed && uscita.closed_at
+            ? ` · chiusa il ${new Date(uscita.closed_at).toLocaleString('it-IT')}`
+            : ''}
+        </p>
       </header>
 
       {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
       {success && <p style={{ color: 'var(--color-primary)' }}>{success}</p>}
+      {statusError && <p style={{ color: 'var(--color-accent)' }}>{statusError}</p>}
 
       <article className="card">
         <h2>Dettagli uscita</h2>
@@ -116,11 +303,138 @@ export default function UscitaDettaglio() {
           <dt>Tipo</dt>
           <dd>{uscita.tipo || '-'}</dd>
           <dt>Responsabile</dt>
-          <dd>{uscita.responsabile_full_name || 'Da assegnare'}</dd>
+          <dd>{uscita.responsabile_nome || uscita.responsabile_full_name || 'Da assegnare'}</dd>
+          <dt>Partecipanti</dt>
+          <dd>
+            {uscita.participants_ids?.length || uscita.participants_manual
+              ? [
+                  ...(uscita.participants_ids ?? [])
+                    .map((participantId) => membersMap.get(participantId))
+                    .filter(Boolean),
+                  uscita.participants_manual,
+                ]
+                  .filter(Boolean)
+                  .join(', ')
+              : 'Nessun partecipante indicato.'}
+          </dd>
           <dt>Note</dt>
           <dd>{uscita.note || 'Nessuna nota inserita.'}</dd>
         </dl>
       </article>
+
+      {role === 'admin' && (
+        <article className="card">
+          <h2>Feedback e foto</h2>
+          <textarea
+            rows={3}
+            placeholder="Commenti conclusivi sull'uscita..."
+            value={feedbackText}
+            onChange={(event) => setFeedbackText(event.target.value)}
+            disabled={isClosed}
+          />
+          <label htmlFor="photoUrls" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+            Link foto (uno per riga)
+          </label>
+          <textarea
+            id="photoUrls"
+            rows={3}
+            placeholder="https://..."
+            value={photosText}
+            onChange={(event) => setPhotosText(event.target.value)}
+            disabled={isClosed}
+          />
+          {PHOTO_BUCKET ? (
+            <>
+              <label htmlFor="photoUpload" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
+                Carica nuove foto
+              </label>
+              <input
+                id="photoUpload"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePhotoUpload}
+                disabled={uploadingPhotos || isClosed}
+              />
+            </>
+          ) : (
+            <p style={{ color: 'var(--color-muted)' }}>
+              Configura la variabile VITE_SUPABASE_PHOTOS_BUCKET per attivare l&apos;upload diretto delle foto.
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving || isClosed}>
+              {feedbackSaving ? 'Salvataggio...' : 'Salva feedback'}
+            </button>
+            <button
+              type="button"
+              style={{ background: '#adb5bd' }}
+              onClick={() => {
+                setFeedbackText(uscita.feedback ?? '');
+                setPhotosText((uscita.photo_urls ?? []).join('\n'));
+              }}
+              disabled={isClosed}
+            >
+              Ripristina
+            </button>
+          </div>
+          {feedbackError && <p style={{ color: 'var(--color-accent)' }}>{feedbackError}</p>}
+          {feedbackStatus && <p style={{ color: 'var(--color-primary)' }}>{feedbackStatus}</p>}
+          {uploadError && <p style={{ color: 'var(--color-accent)' }}>{uploadError}</p>}
+          {(uscita.photo_urls ?? []).length > 0 && (
+            <div style={{ marginTop: '0.75rem' }}>
+              <strong>Foto caricate:</strong>
+              <ul
+                style={{
+                  listStyle: 'none',
+                  padding: 0,
+                  margin: '0.5rem 0 0',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))',
+                  gap: '0.75rem',
+                }}
+              >
+                {uscita.photo_urls.map((url) => (
+                  <li
+                    key={url}
+                    style={{
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: '0.75rem',
+                      padding: '0.5rem',
+                      background: '#f8f9fa',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: '100%',
+                        aspectRatio: '4 / 3',
+                        borderRadius: '0.5rem',
+                        overflow: 'hidden',
+                        marginBottom: '0.4rem',
+                        background: '#fff',
+                      }}
+                    >
+                      <img
+                        src={url}
+                        alt="Anteprima foto uscita"
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.25rem', flexDirection: 'column' }}>
+                      <a href={url} target="_blank" rel="noopener noreferrer">
+                        Apri originale
+                      </a>
+                      <a href={url} download>
+                        Scarica
+                      </a>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </article>
+      )}
 
       {role === 'admin' && (
         <article className="card">
@@ -138,15 +452,54 @@ export default function UscitaDettaglio() {
               submitLabel="Aggiorna uscita"
             />
           ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setEditMode(true);
-                setSuccess('');
-              }}
-            >
-              Modifica uscita
-            </button>
+            <>
+              <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditMode(true);
+                    setSuccess('');
+                  }}
+                  disabled={isClosed}
+                  title={isClosed ? 'Non puoi modificare uscite concluse.' : undefined}
+                >
+                  Modifica uscita
+                </button>
+                <button
+                  type="button"
+                  style={{ background: 'var(--color-primary-dark)' }}
+                  onClick={() =>
+                    navigate(prestitoParams ? `/prestito-avanzato?${prestitoParams}` : '/prestito-avanzato')
+                  }
+                  disabled={checkingLoans || disableLoanButton}
+                  title={
+                    checkingLoans
+                      ? 'Verifico lo stato dei prestiti collegati...'
+                      : disableLoanButton
+                      ? 'Uscita conclusa: tutti i prestiti risultano chiusi'
+                      : undefined
+                  }
+                >
+                  Materiale necessario per questa uscita
+                </button>
+                <button
+                  type="button"
+                  style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
+                  onClick={() => handleStatusToggle(isClosed ? 'aperta' : 'chiusa')}
+                  disabled={statusChanging}
+                >
+                  {statusChanging ? 'Aggiornamento...' : isClosed ? 'Riapri uscita' : 'Chiudi uscita'}
+                </button>
+              </div>
+              {disableLoanButton && (
+                <small style={{ color: 'var(--color-muted)' }}>
+                  Hai chiuso tutti i prestiti collegati dopo la data dell&apos;uscita, non puoi crearne di nuovi.
+                </small>
+              )}
+              {isClosed && (
+                <small style={{ color: 'var(--color-muted)' }}>Riapri l&apos;uscita per modificare i dettagli.</small>
+              )}
+            </>
           )}
         </article>
       )}

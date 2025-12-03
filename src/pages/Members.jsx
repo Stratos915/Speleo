@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createMember, deleteMember, getMembers, updateMember } from '../services/members';
 
 const emptyMember = {
@@ -6,6 +6,7 @@ const emptyMember = {
   full_name: '',
   email: '',
   phone: '',
+  membership_paid: false,
 };
 
 export default function Members() {
@@ -13,14 +14,25 @@ export default function Members() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
   const [form, setForm] = useState(emptyMember);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [togglingId, setTogglingId] = useState(null);
+  const [supportsEmail, setSupportsEmail] = useState(true);
+  const [supportsPhone, setSupportsPhone] = useState(true);
+  const formRef = useRef(null);
 
   useEffect(() => {
     loadMembers();
   }, []);
+
+  useEffect(() => {
+    if (showForm && formRef.current) {
+      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [showForm]);
 
   async function loadMembers() {
     setLoading(true);
@@ -28,6 +40,8 @@ export default function Members() {
     try {
       const data = await getMembers();
       setMembers(data);
+      setSupportsEmail(data.some((item) => Object.prototype.hasOwnProperty.call(item, 'email')));
+      setSupportsPhone(data.some((item) => Object.prototype.hasOwnProperty.call(item, 'phone')));
     } catch (loadError) {
       setError(loadError.message ?? 'Impossibile caricare i soci.');
     } finally {
@@ -36,15 +50,19 @@ export default function Members() {
   }
 
   const filteredMembers = useMemo(() => {
-    if (!search.trim()) return members;
     const term = search.toLowerCase();
-    return members.filter(
-      (member) =>
+    return members.filter((member) => {
+      const matchesText =
+        !term ||
         member.full_name?.toLowerCase().includes(term) ||
-        String(member.membership_number ?? '').includes(term) ||
-        member.email?.toLowerCase().includes(term),
-    );
-  }, [members, search]);
+        String(member.old_id ?? '').includes(term) ||
+        member.email?.toLowerCase().includes(term);
+      const matchesStatus =
+        statusFilter === 'all' ||
+        (statusFilter === 'paid' ? member.membership_paid : !member.membership_paid);
+      return matchesText && matchesStatus;
+    });
+  }, [members, search, statusFilter]);
 
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -53,10 +71,11 @@ export default function Members() {
   function handleEdit(member) {
     setEditingId(member.id);
     setForm({
-      membership_number: member.membership_number ?? '',
+      membership_number: member.old_id ?? '',
       full_name: member.full_name ?? '',
-      email: member.email ?? '',
-      phone: member.phone ?? '',
+      email: supportsEmail ? member.email ?? '' : '',
+      phone: supportsPhone ? member.phone ?? '' : '',
+      membership_paid: Boolean(member.membership_paid),
     });
     setShowForm(true);
   }
@@ -70,12 +89,16 @@ export default function Members() {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    const membershipValue = form.membership_number ? Number(form.membership_number) : null;
     const payload = {
-      membership_number: form.membership_number ? Number(form.membership_number) : null,
       full_name: form.full_name.trim(),
-      email: form.email.trim() || null,
-      phone: form.phone.trim() || null,
+      email: supportsEmail ? form.email.trim() || null : undefined,
+      phone: supportsPhone ? form.phone.trim() || null : undefined,
+      membership_paid: Boolean(form.membership_paid),
+      old_id: membershipValue,
     };
+    if (!supportsEmail) delete payload.email;
+    if (!supportsPhone) delete payload.phone;
     try {
       if (editingId) {
         await updateMember(editingId, payload);
@@ -89,6 +112,19 @@ export default function Members() {
       setError(submitError.message ?? 'Errore durante il salvataggio del socio.');
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function toggleMembershipPayment(member) {
+    setTogglingId(member.id);
+    setError('');
+    try {
+      await updateMember(member.id, { membership_paid: !member.membership_paid });
+      await loadMembers();
+    } catch (toggleError) {
+      setError(toggleError.message ?? 'Impossibile aggiornare lo stato della tessera.');
+    } finally {
+      setTogglingId(null);
     }
   }
 
@@ -116,9 +152,25 @@ export default function Members() {
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
+      <div className="pill-group">
+        {[
+          { value: 'all', label: 'Tutti' },
+          { value: 'paid', label: 'Pagati' },
+          { value: 'unpaid', label: 'Da saldare' },
+        ].map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => setStatusFilter(item.value)}
+            className={`pill-button ${statusFilter === item.value ? 'pill-button--active' : ''}`}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
 
       {showForm && (
-        <div className="card">
+        <div className="card" ref={formRef}>
           <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
             <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
             <input
@@ -130,8 +182,20 @@ export default function Members() {
               required
             />
             <input placeholder="Nome e cognome" value={form.full_name} onChange={(event) => handleChange('full_name', event.target.value)} required />
-            <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
-            <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
+            {supportsEmail && (
+              <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
+            )}
+            {supportsPhone && (
+              <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={Boolean(form.membership_paid)}
+                onChange={(event) => handleChange('membership_paid', event.target.checked)}
+              />
+              <span>Quota annuale pagata</span>
+            </div>
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" disabled={submitting}>
                 {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
@@ -151,10 +215,10 @@ export default function Members() {
         <div className="card-list">
           {filteredMembers.map((member) => (
             <article className="card" key={member.id}>
-              <header style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h3 style={{ margin: 0 }}>{member.full_name}</h3>
-                  <span className="chip">Tessera #{member.membership_number ?? 'N/D'}</span>
+                  <span className="chip">Tessera #{member.old_id ?? 'N/D'}</span>
                 </div>
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button type="button" onClick={() => handleEdit(member)}>
@@ -165,8 +229,36 @@ export default function Members() {
                   </button>
                 </div>
               </header>
-              <p style={{ color: 'var(--color-muted)' }}>{member.email ?? 'Email non disponibile'}</p>
-              <p style={{ color: 'var(--color-muted)' }}>{member.phone ?? 'Telefono non disponibile'}</p>
+              {supportsEmail && (
+                <p style={{ color: 'var(--color-muted)' }}>{member.email ?? 'Email non disponibile'}</p>
+              )}
+              {supportsPhone && (
+                <p style={{ color: 'var(--color-muted)' }}>{member.phone ?? 'Telefono non disponibile'}</p>
+              )}
+              <div style={{ marginTop: '0.75rem' }}>
+                <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: 'var(--color-muted)' }}>Quota annuale</p>
+                <button
+                  type="button"
+                  onClick={() => toggleMembershipPayment(member)}
+                  disabled={togglingId === member.id}
+                  style={{
+                    width: '100%',
+                    borderRadius: '999px',
+                    border: 'none',
+                    padding: '0.4rem',
+                    background: member.membership_paid ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
+                    color: member.membership_paid ? '#2b8a3e' : '#d9480f',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {togglingId === member.id
+                    ? 'Aggiornamento...'
+                    : member.membership_paid
+                    ? 'Pagato'
+                    : 'Da saldare'}
+                </button>
+              </div>
             </article>
           ))}
           {!filteredMembers.length && <p>Nessun socio trovato.</p>}

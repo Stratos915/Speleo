@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext.jsx';
-import { supabase } from '../lib/supabaseClient';
-
-async function fetchCount(table) {
-  const { count, error } = await supabase.from(table).select('id', { count: 'exact', head: true });
-  if (error) throw error;
-  return count ?? 0;
-}
+import { getEquipment } from '../services/equipment';
+import { getMembers } from '../services/members';
+import { getUscite } from '../services/uscite';
 
 export default function Dashboard() {
   const { user, role } = useAuth();
@@ -17,12 +13,23 @@ export default function Dashboard() {
     async function loadStats() {
       setLoading(true);
       try {
-        const [equipment, members, uscite] = await Promise.all([
-          fetchCount('equipment'),
-          fetchCount('members'),
-          fetchCount('uscite'),
+        const [equipmentRes, membersRes, usciteRes] = await Promise.allSettled([
+          getEquipment(),
+          getMembers(),
+          getUscite(),
         ]);
-        setStats({ equipment, members, uscite });
+
+        const nextStats = {
+          equipment: equipmentRes.status === 'fulfilled' ? equipmentRes.value.length : 0,
+          members: membersRes.status === 'fulfilled' ? membersRes.value.length : 0,
+          uscite: usciteRes.status === 'fulfilled' ? usciteRes.value.length : 0,
+        };
+
+        if (equipmentRes.status === 'rejected' || membersRes.status === 'rejected' || usciteRes.status === 'rejected') {
+          console.warn('Dashboard parziale: impossibile leggere tutte le tabelle.');
+        }
+
+        setStats(nextStats);
       } catch (error) {
         console.error('Errore caricamento dashboard', error);
         setStats({ equipment: 0, members: 0, uscite: 0 });

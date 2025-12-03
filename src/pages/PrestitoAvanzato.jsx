@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext.jsx';
+import { getEquipment, setEquipmentAvailability } from '../services/equipment.js';
 
 const initialForm = {
   equipmentId: '',
@@ -10,54 +12,158 @@ const initialForm = {
   notes: '',
 };
 
+function formatDate(value) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleDateString('it-IT', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+function computeReservationDate(uscitaDate) {
+  if (!uscitaDate) return null;
+  const date = new Date(uscitaDate);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setDate(date.getDate() - 3);
+  return date;
+}
+
 export default function PrestitoAvanzato() {
-  const { role } = useAuth();
-  const isAdmin = role === 'admin';
   const [equipment, setEquipment] = useState([]);
-  const [members, setMembers] = useState([]);
   const [form, setForm] = useState(initialForm);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [searchParams] = useSearchParams();
+  const [activeLoans, setActiveLoans] = useState([]);
+  const [loansLoading, setLoansLoading] = useState(true);
+  const [loansError, setLoansError] = useState('');
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const borrowerName = useMemo(() => {
+    if (!user) return '';
+    return (
+      user.user_metadata?.full_name ??
+      user.user_metadata?.name ??
+      user.user_metadata?.display_name ??
+      user.app_metadata?.full_name ??
+      user.email ??
+      'Socio Speleo'
+    );
+  }, [user]);
+  const borrowerMemberNumber = useMemo(() => {
+    if (!user) return '';
+    return (
+      user.user_metadata?.membership_number ??
+      user.user_metadata?.old_id ??
+      user.raw_user_meta_data?.old_id ??
+      user.app_metadata?.membership_number ??
+      ''
+    );
+  }, [user]);
 
   useEffect(() => {
     loadData();
+    loadActiveLoans();
   }, []);
+
+  useEffect(() => {
+    setForm((prev) => {
+      const nextName = borrowerName || prev.borrowerName;
+      const nextNumber = borrowerMemberNumber ? String(borrowerMemberNumber) : '';
+      if (nextName === prev.borrowerName && nextNumber === prev.borrowerMemberNumber) {
+        return prev;
+      }
+      return {
+        ...prev,
+        borrowerName: nextName,
+        borrowerMemberNumber: nextNumber,
+      };
+    });
+  }, [borrowerName, borrowerMemberNumber]);
+
+  const uscitaTitle = searchParams.get('uscitaTitle');
+  const uscitaIdParam = searchParams.get('uscita');
+  const uscitaDateParam = searchParams.get('uscitaDate');
+  const reservedUntilDate = useMemo(() => computeReservationDate(uscitaDateParam), [uscitaDateParam]);
+
+  useEffect(() => {
+    if (uscitaTitle || reservedUntilDate) {
+      setForm((prev) => {
+        if (prev.notes) return prev;
+        const dueText = reservedUntilDate ? ` · rientro entro ${formatDate(reservedUntilDate)}` : '';
+        const label = uscitaTitle ? `Materiale per uscita: ${uscitaTitle}` : 'Materiale prenotato per uscita';
+        return {
+          ...prev,
+          notes: `${label}${dueText}`,
+        };
+      });
+    }
+  }, [uscitaTitle, reservedUntilDate]);
 
   async function loadData() {
     setLoading(true);
-    const [{ data: equipmentData, error: equipmentError }, { data: membersData, error: membersError }] = await Promise.all([
-      supabase.from('equipment').select('*').order('name', { ascending: true }),
-      supabase.from('members').select('*').order('full_name', { ascending: true }),
-    ]);
-    if (equipmentError || membersError) {
-      setError('Impossibile caricare materiali o soci. Riprova più tardi.');
-    } else {
-      setEquipment(equipmentData ?? []);
-      setMembers(membersData ?? []);
+    try {
+      const equipmentRes = await getEquipment();
+      setEquipment(equipmentRes);
+      setError('');
+    } catch (equipmentError) {
+      console.error('[PrestitoAvanzato] Errore caricamento materiali:', equipmentError);
+      setEquipment([]);
+      setError(equipmentError.message ?? 'Impossibile caricare l\'inventario, riprova.');
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }
+
+  const preselectedEquipmentId = searchParams.get('equipmentId');
+
+  useEffect(() => {
+    if (preselectedEquipmentId && equipment.length) {
+      const exists = equipment.find((item) => String(item.id ?? item.equipment_id) === preselectedEquipmentId);
+      if (exists) {
+        setForm((prev) => ({ ...prev, equipmentId: String(exists.id ?? exists.equipment_id) }));
+      }
+    }
+  }, [equipment, preselectedEquipmentId]);
 
   const selectedEquipment = useMemo(
     () => equipment.find((item) => String(item.id ?? item.equipment_id) === form.equipmentId),
     [equipment, form.equipmentId],
   );
 
-  function handleMemberSelection(value) {
-    if (!value) {
-      setForm((prev) => ({ ...prev, borrowerMemberNumber: '', borrowerName: prev.borrowerName }));
-      return;
+  const equipmentMap = useMemo(() => {
+    const map = new Map();
+    equipment.forEach((item) => {
+      const key = String(item.id ?? item.equipment_id ?? '');
+      if (key) {
+        map.set(key, item);
+      }
+    });
+    return map;
+  }, [equipment]);
+
+  async function loadActiveLoans() {
+    setLoansLoading(true);
+    setLoansError('');
+    const { data, error: loansFetchError } = await supabase
+      .from('loans')
+      .select('id,equipment_id,borrower_name,quantity,status,delivered_at,notes,reserved_until,uscita_id')
+      .eq('status', 'in_corso')
+      .order('delivered_at', { ascending: false });
+
+    if (loansFetchError) {
+      const friendly =
+        loansFetchError.message && loansFetchError.message.includes('public.loans')
+          ? 'La tabella "loans" non è stata ancora creata su Supabase. Apri docs/loans-table.sql e incolla lo script nel pannello SQL per abilitarla.'
+          : 'Impossibile caricare i prestiti attivi.';
+      setLoansError(friendly);
+      setActiveLoans([]);
+    } else {
+      setLoansError('');
+      setActiveLoans(data ?? []);
     }
-    const member = members.find((item) => String(item.membership_number) === value);
-    if (member) {
-      setForm((prev) => ({
-        ...prev,
-        borrowerMemberNumber: String(member.membership_number),
-        borrowerName: member.full_name,
-      }));
-    }
+    setLoansLoading(false);
   }
 
   async function handleSubmit(event) {
@@ -79,57 +185,63 @@ export default function PrestitoAvanzato() {
       return;
     }
 
-    if (quantity > Number(selectedEquipment.quantity ?? 0)) {
+    const totalAvailable = Number(selectedEquipment.quantity_available ?? selectedEquipment.quantity ?? 0);
+    if (quantity > totalAvailable) {
       setError('La quantità richiesta supera la disponibilità attuale.');
       setSubmitting(false);
       return;
     }
 
-    if (!form.borrowerName.trim()) {
-      setError('Inserisci il nome della persona a cui consegni il materiale.');
+    const borrower = (form.borrowerName || borrowerName || '').trim();
+    if (!borrower) {
+      setError('Impossibile identificare il socio collegato. Esegui di nuovo l\'accesso e riprova.');
       setSubmitting(false);
       return;
     }
 
+    const reservedUntilIso = reservedUntilDate ? reservedUntilDate.toISOString().split('T')[0] : null;
+
     const payload = {
       equipment_id: selectedEquipment.id ?? selectedEquipment.equipment_id,
-      borrower_name: form.borrowerName.trim(),
+      uscita_id: uscitaIdParam || null,
+      reserved_until: reservedUntilIso,
+      borrower_name: borrower,
       borrower_member_number: form.borrowerMemberNumber ? Number(form.borrowerMemberNumber) : null,
       quantity,
       notes: form.notes.trim() || null,
+      status: 'in_corso',
+      delivered_at: new Date().toISOString(),
     };
 
     const { error: insertError } = await supabase.from('loans').insert(payload);
     if (insertError) {
-      setError(insertError.message);
+      const friendly =
+        insertError.message && insertError.message.includes('public.loans')
+          ? 'La tabella "loans" non esiste ancora su Supabase. Apri docs/loans-table.sql e incolla il contenuto nell\'SQL Editor per crearla.'
+          : insertError.message;
+      setError(friendly);
       setSubmitting(false);
       return;
     }
 
-    const { error: updateError } = await supabase
-      .from('equipment')
-      .update({
-        quantity: Number(selectedEquipment.quantity ?? 0) - quantity,
-      })
-      .eq('id', selectedEquipment.id ?? selectedEquipment.equipment_id);
-
-    if (updateError) {
-      setError('Prestito registrato ma impossibile aggiornare il magazzino. Verifica manualmente.');
-    } else {
+    const newAvailability = Math.max(totalAvailable - quantity, 0);
+    try {
+      const filter = selectedEquipment.equipment_id
+        ? { column: 'equipment_id', value: selectedEquipment.equipment_id }
+        : selectedEquipment;
+      await setEquipmentAvailability(filter, newAvailability);
       setSuccess('Prestito registrato correttamente.');
       setForm(initialForm);
       loadData();
+      loadActiveLoans();
+    } catch (availabilityError) {
+      console.error('[PrestitoAvanzato] Errore aggiornamento disponibilità:', availabilityError);
+      setError(
+        availabilityError.message ??
+          'Prestito registrato ma impossibile aggiornare il magazzino. Verifica manualmente.',
+      );
     }
     setSubmitting(false);
-  }
-
-  if (!isAdmin) {
-    return (
-      <section>
-        <h1>Prestito avanzato</h1>
-        <p>Solo gli amministratori possono registrare nuovi prestiti.</p>
-      </section>
-    );
   }
 
   return (
@@ -139,11 +251,84 @@ export default function PrestitoAvanzato() {
         <p>Compila il modulo per consegnare materiale a soci o squadre operative.</p>
       </header>
 
+      <article className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Prestiti attivi</h2>
+            <p style={{ margin: 0, color: 'var(--color-muted)' }}>Monitoraggio rapido dei materiali fuori sede.</p>
+          </div>
+          <button type="button" style={{ background: '#adb5bd' }} onClick={() => navigate('/storico-prestiti')}>
+            Vai allo storico completo
+          </button>
+        </div>
+        {loansError && <p style={{ color: 'var(--color-accent)' }}>{loansError}</p>}
+        {loansLoading ? (
+          <p>Caricamento prestiti...</p>
+        ) : activeLoans.length ? (
+          <ul style={{ listStyle: 'none', padding: 0, margin: '0.75rem 0 0', display: 'grid', gap: '0.5rem' }}>
+            {activeLoans.map((loan) => {
+              const equipmentRow = equipmentMap.get(String(loan.equipment_id ?? ''));
+              const equipmentName = equipmentRow?.name ?? 'Materiale';
+              const reservedUntilLabel = loan.reserved_until ? formatDate(loan.reserved_until) : null;
+              return (
+                <li key={loan.id} style={{ border: '1px solid var(--color-border)', borderRadius: '0.75rem', padding: '0.75rem' }}>
+                  <strong>
+                    {equipmentName} · x{loan.quantity}
+                  </strong>
+                  <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>a: {loan.borrower_name}</p>
+                  <small style={{ color: 'var(--color-muted)' }}>
+                    consegnato il {loan.delivered_at ? new Date(loan.delivered_at).toLocaleString('it-IT') : '—'}
+                  </small>
+                  {reservedUntilLabel && (
+                    <p style={{ margin: '0.35rem 0 0', color: '#d9480f' }}>Rientro entro {reservedUntilLabel}</p>
+                  )}
+                  {loan.uscita_id && (
+                    <button
+                      type="button"
+                      style={{ marginTop: '0.35rem', background: 'var(--color-primary-dark)' }}
+                      onClick={() => navigate(`/uscite/${loan.uscita_id}`)}
+                    >
+                      Apri uscita collegata
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p style={{ marginTop: '0.75rem' }}>Non ci sono prestiti in corso.</p>
+        )}
+      </article>
+
       {loading ? (
         <p>Caricamento dati...</p>
       ) : (
         <div className="card">
           <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+            {(uscitaIdParam || reservedUntilDate) && (
+              <div
+                style={{
+                  background: 'rgba(14, 165, 233, 0.12)',
+                  borderRadius: '0.75rem',
+                  padding: '0.75rem',
+                  fontSize: '0.9rem',
+                  color: 'var(--color-primary-dark)',
+                }}
+              >
+                {uscitaTitle ? (
+                  <strong>Uscita collegata: {uscitaTitle}</strong>
+                ) : (
+                  <strong>Materiale prenotato per una uscita programmata.</strong>
+                )}
+                {reservedUntilDate && (
+                  <p style={{ margin: '0.35rem 0 0' }}>
+                    Deve essere disponibile in magazzino entro il {formatDate(reservedUntilDate)} (3 giorni prima
+                    dell&apos;uscita).
+                  </p>
+                )}
+              </div>
+            )}
+
             <select
               value={form.equipmentId}
               onChange={(event) => setForm((prev) => ({ ...prev, equipmentId: event.target.value }))}
@@ -152,7 +337,7 @@ export default function PrestitoAvanzato() {
               <option value="">Materiale</option>
               {equipment.map((item) => (
                 <option key={item.id ?? item.equipment_id} value={item.id ?? item.equipment_id}>
-                  {item.name} · Disponibile: {item.quantity ?? 0}
+                  {item.name} · Disponibile: {item.quantity_available ?? item.quantity ?? 0}/{item.quantity ?? item.quantity_available ?? 0}
                 </option>
               ))}
             </select>
@@ -166,21 +351,20 @@ export default function PrestitoAvanzato() {
               required
             />
 
-            <input
-              placeholder="Consegnato a"
-              value={form.borrowerName}
-              onChange={(event) => setForm((prev) => ({ ...prev, borrowerName: event.target.value }))}
-              required
-            />
-
-            <select value={form.borrowerMemberNumber} onChange={(event) => handleMemberSelection(event.target.value)}>
-              <option value="">Seleziona socio (facoltativo)</option>
-              {members.map((member) => (
-                <option key={member.membership_number} value={member.membership_number}>
-                  {member.membership_number} · {member.full_name}
-                </option>
-              ))}
-            </select>
+            <div>
+              <label htmlFor="borrowerName" style={{ display: 'block', marginBottom: '0.25rem' }}>
+                Consegnato a
+              </label>
+              <input
+                id="borrowerName"
+                value={form.borrowerName || borrowerName}
+                readOnly
+                style={{ background: '#f1f3f5' }}
+              />
+              <small style={{ color: 'var(--color-muted)' }}>
+                Associato automaticamente al profilo connesso ({user?.email ?? 'utente'}).
+              </small>
+            </div>
 
             <textarea
               rows={3}

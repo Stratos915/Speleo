@@ -43,7 +43,7 @@
 
 .bottom-nav {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
   background: #fff;
   border-top: 1px solid var(--color-border);
   box-shadow: 0 -6px 16px rgba(0, 0, 0, 0.05);
@@ -62,4 +62,61 @@
 
 .bottom-nav__item--active {
   color: var(--color-primary);
+}
+
+.top-nav {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.4rem clamp(0.5rem, 4vw, 2.5rem);
+  background: #fff;
+  border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.top-nav__item {
+  text-decoration: none;
+  color: var(--color-muted);
+  font-weight: 600;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.top-nav__item--active {
+  color: var(--color-primary);
+  background: rgba(14, 165, 233, 0.15);
+}
+
+.input-with-icon {
+  border: 1px solid var(--color-border);
+  border-radius: 0.75rem;
+  padding: 0.25rem 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fff;
+}
+
+.input-with-icon button {
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0.25rem;
+}
+
+.input-with-icon input {
+  border: none;
+  flex: 1;
+  font: inherit;
+  background: transparent;
+  padding: 0.35rem 0;
+}
+
+.input-with-icon input:focus {
+  outline: none;
 }

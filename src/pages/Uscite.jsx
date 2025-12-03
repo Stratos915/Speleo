@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext.jsx';
-import { deleteUscita, getUscite } from '../services/uscite';
+import { deleteUscita, getUscite, createUscita, updateUscita } from '../services/uscite';
+import { getMembers } from '../services/members';
+import UscitaForm from '../components/UscitaForm.jsx';
+import { supabase } from '../lib/supabaseClient';
 
 const TIPO_OPTIONS = [
   { value: '', label: 'Tutte' },
@@ -35,11 +38,20 @@ function buildMapsLink(luogo) {
 
 export default function Uscite() {
   const [uscite, setUscite] = useState([]);
+  const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({ query: '', tipo: '' });
+  const [showForm, setShowForm] = useState(false);
+  const [formError, setFormError] = useState('');
+  const [formSubmitting, setFormSubmitting] = useState(false);
+  const [formSuccess, setFormSuccess] = useState('');
   const { role } = useAuth();
   const navigate = useNavigate();
+  const [activeLoansMap, setActiveLoansMap] = useState(new Map());
+  const [statusFilter, setStatusFilter] = useState('open');
+  const [statusChangingId, setStatusChangingId] = useState(null);
+  const [supportsClosedAt, setSupportsClosedAt] = useState(false);
 
   useEffect(() => {
     loadUscite();
@@ -49,14 +61,42 @@ export default function Uscite() {
     setLoading(true);
     setError('');
     try {
-      const data = await getUscite();
-      setUscite(data);
+      const [usciteResponse, membersResponse] = await Promise.allSettled([getUscite(), getMembers()]);
+
+      if (usciteResponse.status === 'fulfilled') {
+        setUscite(usciteResponse.value);
+        const firstRow = usciteResponse.value[0];
+        setSupportsClosedAt((prev) =>
+          firstRow ? Object.prototype.hasOwnProperty.call(firstRow, 'closed_at') : prev,
+        );
+      } else {
+        throw usciteResponse.reason;
+      }
+
+      if (membersResponse.status === 'fulfilled') {
+        setMembers(membersResponse.value);
+      } else {
+        console.warn('[Uscite] Impossibile caricare i soci collegati:', membersResponse.reason?.message ?? membersResponse.reason);
+        setMembers([]);
+      }
     } catch (loadError) {
       console.error('[Uscite] Errore caricamento', loadError);
       setError('Impossibile caricare le uscite, riprova più tardi.');
     } finally {
       setLoading(false);
     }
+    loadActiveLoans();
+  }
+
+  async function loadActiveLoans() {
+    const { data } = await supabase.from('loans').select('uscita_id,status');
+    const map = new Map();
+    (data ?? []).forEach((loan) => {
+      if (loan.status === 'in_corso' && loan.uscita_id) {
+        map.set(loan.uscita_id, true);
+      }
+    });
+    setActiveLoansMap(map);
   }
 
   async function handleDelete(id) {
@@ -71,6 +111,73 @@ export default function Uscite() {
     }
   }
 
+  async function handleStatusChange(uscita, nextStatus) {
+    setStatusChangingId(uscita.id);
+    setError('');
+    try {
+      const payload = { status: nextStatus };
+      if (supportsClosedAt) {
+        payload.closed_at = nextStatus === 'chiusa' ? new Date().toISOString() : null;
+      }
+      await updateUscita(uscita.id, payload);
+      await loadUscite();
+    } catch (statusError) {
+      if (supportsClosedAt && /closed_at/i.test(statusError.message ?? '')) {
+        setSupportsClosedAt(false);
+        try {
+          await updateUscita(uscita.id, { status: nextStatus });
+          await loadUscite();
+          return;
+        } catch (fallbackError) {
+          setError(fallbackError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+        }
+      } else {
+        setError(statusError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+      }
+    } finally {
+      setStatusChangingId(null);
+    }
+  }
+
+  async function handleCreate(payload) {
+    setFormError('');
+    setFormSuccess('');
+    setFormSubmitting(true);
+    try {
+      await createUscita(payload);
+      setFormSuccess('Uscita registrata correttamente.');
+      setShowForm(false);
+      await loadUscite();
+      setFormSubmitting(false);
+    } catch (createError) {
+      setFormSubmitting(false);
+      const message =
+        createError.message && createError.message.includes('responsabile')
+          ? 'Aggiungi le colonne responsabile_id e responsabile_nome alla tabella "uscite" (vedi README) per salvare il responsabile.'
+          : createError.message ?? 'Impossibile creare l\'uscita.';
+      setFormError(message);
+    }
+  }
+
+  const membersMap = useMemo(() => {
+    const result = new Map();
+    members.forEach((member) => {
+      if (member.id) {
+        result.set(member.id, member.full_name);
+      }
+    });
+    return result;
+  }, [members]);
+
+  function goToPrestito(uscita) {
+    const params = new URLSearchParams();
+    if (uscita?.id) params.set('uscita', uscita.id);
+    if (uscita?.titolo) params.set('uscitaTitle', uscita.titolo);
+    if (uscita?.data) params.set('uscitaDate', uscita.data);
+    const queryString = params.toString();
+    navigate(queryString ? `/prestito-avanzato?${queryString}` : '/prestito-avanzato');
+  }
+
   const filteredUscite = useMemo(() => {
     return uscite.filter((uscita) => {
       const matchesQuery =
@@ -78,9 +185,12 @@ export default function Uscite() {
         uscita.titolo?.toLowerCase().includes(filters.query.toLowerCase()) ||
         uscita.luogo?.toLowerCase().includes(filters.query.toLowerCase());
       const matchesTipo = !filters.tipo || uscita.tipo?.toLowerCase() === filters.tipo.toLowerCase();
-      return matchesQuery && matchesTipo;
+      const isClosed = uscita.status === 'chiusa';
+      const matchesStatus =
+        statusFilter === 'all' || (statusFilter === 'closed' ? isClosed : !isClosed);
+      return matchesQuery && matchesTipo && matchesStatus;
     });
-  }, [uscite, filters]);
+  }, [uscite, filters, statusFilter]);
 
   return (
     <section className="page-grid">
@@ -103,6 +213,22 @@ export default function Uscite() {
             </option>
           ))}
         </select>
+        <div className="pill-group">
+          {[
+            { value: 'all', label: 'Tutte' },
+            { value: 'open', label: 'Prossime' },
+            { value: 'closed', label: 'Chiuse' },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setStatusFilter(item.value)}
+              className={`pill-button ${statusFilter === item.value ? 'pill-button--active' : ''}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
         <small style={{ color: 'var(--color-muted)' }}>
           {filteredUscite.length} uscite su {uscite.length}
         </small>
@@ -110,12 +236,35 @@ export default function Uscite() {
 
       {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
 
+      {showForm && (
+        <UscitaForm
+          onSubmit={handleCreate}
+          submitting={formSubmitting}
+          errorMessage={formError}
+          successMessage={formSuccess}
+          onCancel={() => {
+            setShowForm(false);
+            setFormSuccess('');
+            setFormError('');
+          }}
+          membersList={members.length ? members : null}
+        />
+      )}
+
       {loading ? (
         <p>Caricamento uscite...</p>
       ) : (
         <div className="card-list">
-          {filteredUscite.map((uscita) => (
-            <article className="card" key={uscita.id}>
+          {filteredUscite.map((uscita) => {
+            const participantsList = [
+              ...(uscita.participants_ids ?? []).map((id) => membersMap.get(id)).filter(Boolean),
+            ];
+            const uscitaDate = uscita.data ? new Date(uscita.data) : null;
+            const isPast = uscitaDate && uscitaDate < new Date();
+            const isClosed = uscita.status === 'chiusa';
+            const disableLoanButton = isClosed || (isPast && !activeLoansMap.get(uscita.id));
+            return (
+              <article className="card" key={uscita.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
                 <div>
                   <strong>{uscita.titolo}</strong>
@@ -129,20 +278,77 @@ export default function Uscite() {
                     )}
                   </p>
                 </div>
-                {uscita.tipo && <span className="chip">{uscita.tipo}</span>}
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  {uscita.tipo && <span className="chip">{uscita.tipo}</span>}
+                  {isClosed && (
+                    <span className="chip" style={{ background: 'rgba(173,181,189,0.3)', color: '#495057' }}>
+                      Chiusa
+                    </span>
+                  )}
+                </div>
               </header>
               <p style={{ color: 'var(--color-muted)' }}>
                 {formatDate(uscita.data)} · {formatTime(uscita.ora)}
               </p>
               <p style={{ marginTop: '0.5rem' }}>
                 Responsabile:{' '}
-                <strong>{uscita.responsabile_full_name ?? 'Da assegnare'}</strong>
+                <strong>
+                  {uscita.responsabile_nome ??
+                    membersMap.get(uscita.responsabile_id) ??
+                    'Da assegnare'}
+                </strong>
               </p>
+              {(participantsList.length || uscita.participants_manual) && (
+                <p style={{ color: 'var(--color-muted)' }}>
+                  Partecipanti:{' '}
+                  <strong>
+                    {[...participantsList, uscita.participants_manual]
+                      .filter(Boolean)
+                      .join(', ')}
+                  </strong>
+                </p>
+              )}
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <Link to={`/uscite/${uscita.id}`}>Apri scheda</Link>
                 {role === 'admin' && (
-                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => navigate(`/uscite/${uscita.id}`)}>
+                  <button
+                    type="button"
+                    onClick={() => goToPrestito(uscita)}
+                    disabled={disableLoanButton}
+                    title={
+                      disableLoanButton
+                        ? isClosed
+                          ? 'Uscita chiusa: non è possibile registrare materiale'
+                          : 'Uscita conclusa: prestiti non disponibili'
+                        : undefined
+                    }
+                  >
+                    Materiale necessario
+                  </button>
+                )}
+                {role === 'admin' && (
+                  <button
+                    type="button"
+                    style={{ background: '#adb5bd' }}
+                    onClick={() => navigate(`/uscite/${uscita.id}`)}
+                    disabled={isClosed || isPast}
+                    title={isClosed || isPast ? 'Non puoi modificare uscite concluse.' : undefined}
+                  >
                     Modifica
+                  </button>
+                )}
+                {role === 'admin' && (
+                  <button
+                    type="button"
+                    style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
+                    onClick={() => handleStatusChange(uscita, isClosed ? 'aperta' : 'chiusa')}
+                    disabled={statusChangingId === uscita.id}
+                  >
+                    {statusChangingId === uscita.id
+                      ? 'Aggiornamento...'
+                      : isClosed
+                      ? 'Riapri'
+                      : 'Chiudi'}
                   </button>
                 )}
                 {role === 'admin' && (
@@ -152,16 +358,23 @@ export default function Uscite() {
                 )}
               </div>
             </article>
-          ))}
+            );
+          })}
           {!filteredUscite.length && !loading && <p>Nessuna uscita trovata.</p>}
         </div>
       )}
 
-      {role === 'admin' && (
-        <button className="floating-button" type="button" onClick={() => navigate('/uscite/new')}>
-          Nuova uscita
-        </button>
-      )}
+      <button
+        className="floating-button"
+        type="button"
+        onClick={() => {
+          setShowForm((prev) => !prev);
+          setFormError('');
+          setFormSuccess('');
+        }}
+      >
+        {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
+      </button>
     </section>
   );
 }
