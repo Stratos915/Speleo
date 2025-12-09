@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
@@ -49,9 +49,25 @@ export default function UscitaDettaglio() {
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
+  const loadDettaglio = useCallback(async () => {
+    if (!id) return;
+    setLoading(true);
+    setError('');
+    try {
+      const data = await getUscitaById(id);
+      setUscita(data);
+      setFeedbackText(data.feedback ?? '');
+      setPhotosText((data.photo_urls ?? []).join('\n'));
+    } catch (loadError) {
+      setError(loadError.message ?? 'Uscita non trovata.');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     loadDettaglio();
-  }, [id]);
+  }, [loadDettaglio]);
 
   useEffect(() => {
     let ignore = false;
@@ -100,21 +116,6 @@ export default function UscitaDettaglio() {
     }
     loadMembers();
   }, []);
-
-  async function loadDettaglio() {
-    setLoading(true);
-    setError('');
-    try {
-      const data = await getUscitaById(id);
-      setUscita(data);
-      setFeedbackText(data.feedback ?? '');
-      setPhotosText((data.photo_urls ?? []).join('\n'));
-    } catch (loadError) {
-      setError(loadError.message ?? 'Uscita non trovata.');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   async function handleUpdate(payload) {
     setSaving(true);
@@ -241,8 +242,11 @@ export default function UscitaDettaglio() {
     setPrestitoParams(params.toString());
   }, [uscita]);
 
-  const uscitaDateObject = uscita?.data ? new Date(uscita.data) : null;
-  const isPast = uscitaDateObject ? uscitaDateObject < new Date() : false;
+  const uscitaDateObject = useMemo(() => {
+    if (!uscita?.data) return null;
+    const parsed = new Date(uscita.data);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }, [uscita?.data]);
 
   const disableLoanButton = useMemo(() => {
     if (isClosed) return true;

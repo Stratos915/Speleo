@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import { getEquipment, getEquipmentById, setEquipmentAvailability } from '../services/equipment.js';
 
 const FILTERS = [

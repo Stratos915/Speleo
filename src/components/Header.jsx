@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import RoleBadge from './RoleBadge.jsx';
 import logo from '../assets/logo-gsu.png';
 

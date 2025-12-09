@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import { getEquipment } from '../services/equipment';
 import { getMembers } from '../services/members';
 import { getUscite } from '../services/uscite';

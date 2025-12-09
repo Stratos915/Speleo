@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { getMembers } from '../services/members.js';
@@ -20,15 +20,78 @@ const csvColumns = {
     { key: 'full_name', label: 'Nome completo' },
     { key: 'old_id', label: 'Numero tessera' },
   ],
+  scuola_instructors: [
+    { key: 'year_label', label: 'Anno' },
+    { key: 'course_name', label: 'Corso' },
+    { key: 'course_status', label: 'Stato corso' },
+    { key: 'full_name', label: 'Nome completo' },
+    { key: 'membership_number', label: 'Numero tessera' },
+    { key: 'qualification', label: 'Qualifica' },
+    { key: 'custom_qualification', label: 'Note aggiuntive' },
+    { key: 'email', label: 'Email' },
+  ],
+  scuola_corsisti: [
+    { key: 'year_label', label: 'Anno' },
+    { key: 'course_name', label: 'Corso' },
+    { key: 'course_status', label: 'Stato corso' },
+    { key: 'first_name', label: 'Nome' },
+    { key: 'last_name', label: 'Cognome' },
+    { key: 'birth_date', label: 'Data di nascita' },
+    { key: 'payment_status', label: 'Pagamento' },
+    { key: 'regulation_read', label: 'Regolamento' },
+    { key: 'privacy_accepted', label: 'Privacy' },
+    { key: 'equipment_delivery', label: 'Consegna attrezzatura' },
+    { key: 'equipment_return', label: 'Restituzione attrezzatura' },
+    { key: 'equipment_notes', label: 'Note attrezzatura' },
+  ],
+  scuola_registry: [
+    { key: 'year_label', label: 'Anno' },
+    { key: 'full_name', label: 'Nome completo' },
+    { key: 'membership_number', label: 'Numero tessera' },
+    { key: 'qualification_date', label: 'Conseguimento' },
+    { key: 'last_maintenance_date', label: 'Ultimo mantenimento' },
+    { key: 'next_maintenance_date', label: 'Prossimo mantenimento' },
+    { key: 'activities', label: 'Attività ultimi 5 anni' },
+    { key: 'email', label: 'Email' },
+  ],
 };
+
+const SCUOLA_STORAGE_KEY = 'speleo-scuola-data-v2';
+
+const paymentStatusLabels = {
+  pending: 'Da saldare',
+  paid: 'Pagato',
+  exempt: 'Esente',
+};
+
+const qualificationLabels = {
+  istruttore: 'Istruttore',
+  aiuto_istruttore: 'Aiuto istruttore',
+};
+
+function formatDate(value) {
+  if (!value) return '';
+  const dateValue = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateValue.getTime())) return '';
+  return dateValue.toLocaleDateString('it-IT');
+}
 
 function formatCellValue(column, value) {
   if (value === null || value === undefined || value === '') return '';
   if (column.key === 'data' && value) {
-    const dateValue = value instanceof Date ? value : new Date(value);
-    if (!Number.isNaN(dateValue.getTime())) {
-      return dateValue.toISOString();
-    }
+    return formatDate(value);
+  }
+  if (column.key === 'birth_date' && value) {
+    return formatDate(value);
+  }
+  if (['equipment_delivery', 'equipment_return', 'qualification_date', 'last_maintenance_date', 'next_maintenance_date'].includes(column.key) && value) {
+    return formatDate(value);
+  }
+  if (column.key === 'payment_status') {
+    return paymentStatusLabels[value] ?? value;
+  }
+  if (column.key === 'regulation_read' || column.key === 'privacy_accepted') {
+    return value ? 'SI' : 'NO';
   }
   return String(value);
 }
@@ -322,7 +385,36 @@ export default function Report() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
+  const [scuolaData, setScuolaData] = useState(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const raw = window.localStorage.getItem(SCUOLA_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (storageError) {
+      console.error('[Report] Impossibile leggere i dati della scuola:', storageError);
+      return null;
+    }
+  });
   const navigate = useNavigate();
+
+  const refreshScuolaData = useCallback(() => {
+    if (typeof window === 'undefined') {
+      setScuolaData(null);
+      return;
+    }
+    try {
+      const raw = window.localStorage.getItem(SCUOLA_STORAGE_KEY);
+      if (!raw) {
+        setScuolaData(null);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      setScuolaData(parsed);
+    } catch (storageError) {
+      console.error('[Report] Impossibile leggere i dati della scuola:', storageError);
+      setScuolaData(null);
+    }
+  }, []);
 
   useEffect(() => {
     let ignore = false;
@@ -371,6 +463,25 @@ export default function Report() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const handleFocus = () => refreshScuolaData();
+    const handleStorage = (event) => {
+      if (!event.key || event.key === SCUOLA_STORAGE_KEY) {
+        refreshScuolaData();
+      }
+    };
+    const handleCustom = () => refreshScuolaData();
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('speleo-scuola-update', handleCustom);
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('speleo-scuola-update', handleCustom);
+    };
+  }, [refreshScuolaData]);
+
   const filteredMembers = useMemo(() => {
     if (!search.trim()) return members;
     const term = search.trim().toLowerCase();
@@ -380,6 +491,79 @@ export default function Report() {
       String(member.membership_number ?? '').includes(term),
     );
   }, [members, search]);
+
+  const membersMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+
+  const scuolaSummary = useMemo(() => {
+    if (!scuolaData) return null;
+    const exportedAt = scuolaData.updatedAt ? new Date(scuolaData.updatedAt) : null;
+    const yearFolders = Array.isArray(scuolaData.yearFolders) ? scuolaData.yearFolders : [];
+    const registry = Array.isArray(scuolaData.registry) ? scuolaData.registry : [];
+    return { exportedAt, yearFolders, registry };
+  }, [scuolaData]);
+
+  function buildInstructorRows(year, course) {
+    return (course.instructors ?? []).map((item) => {
+      const member = membersMap.get(item.memberId);
+      return {
+        id: `${year.id}-${course.id}-${item.memberId}`,
+        year_label: year.label,
+        course_id: course.id,
+        course_name: course.name,
+        course_status: course.isClosed ? 'chiuso' : 'aperto',
+        member_id: item.memberId,
+        full_name: member?.full_name ?? 'Socio senza nome',
+        membership_number: member?.old_id ?? member?.membership_number ?? '',
+        qualification: qualificationLabels[item.qualification] ?? item.qualification,
+        custom_qualification: item.customQualification || '',
+        email: member?.email ?? '',
+      };
+    });
+  }
+
+  function buildStudentRows(year, course) {
+    return (course.students ?? []).map((student) => ({
+      id: student.id,
+      year_label: year.label,
+      course_id: course.id,
+      course_name: course.name,
+      course_status: course.isClosed ? 'chiuso' : 'aperto',
+      first_name: student.firstName,
+      last_name: student.lastName,
+      birth_date: student.birthDate,
+      payment_status: student.paymentStatus,
+      regulation_read: Boolean(student.regulationRead),
+      privacy_accepted: Boolean(student.privacyAccepted),
+      equipment_delivery: student.equipmentDelivery,
+      equipment_return: student.equipmentReturn,
+      equipment_notes: student.equipmentNotes,
+    }));
+  }
+
+  const registryRows = useMemo(() => {
+    if (!scuolaSummary) return [];
+    const yearLabelMap = new Map(
+      (scuolaSummary.yearFolders ?? []).map((year) => [year.id, year.label]),
+    );
+    return (scuolaSummary.registry ?? []).map((entry) => {
+      const member = membersMap.get(entry.memberId);
+      return {
+        id: entry.id,
+        year_label: yearLabelMap.get(entry.yearId) ?? 'Anno non indicato',
+        member_id: entry.memberId,
+        full_name: member?.full_name ?? 'Socio senza nome',
+        membership_number: member?.old_id ?? member?.membership_number ?? '',
+        qualification_type: entry.qualificationType,
+        qualification: qualificationLabels[entry.qualificationType] ?? entry.qualificationType,
+        custom_qualification: entry.customQualification,
+        qualification_date: entry.qualificationDate,
+        last_maintenance_date: entry.lastMaintenanceDate,
+        next_maintenance_date: entry.nextMaintenanceDate,
+        activities: entry.activities,
+        email: member?.email ?? '',
+      };
+    });
+  }, [scuolaSummary, membersMap]);
 
   function handleExport(key, format = 'csv') {
     setError('');
@@ -402,11 +586,63 @@ export default function Report() {
     }
   }
 
+  function handleScuolaExport(yearId, courseId, target, format = 'csv') {
+    setError('');
+    if (!scuolaSummary) {
+      setError('Genera i dati dalla pagina Scuola prima di esportare.');
+      return;
+    }
+    const year = scuolaSummary.yearFolders.find((item) => item.id === yearId);
+    if (!year) {
+      setError('Anno non disponibile. Reinvialo dalla pagina Scuola.');
+      return;
+    }
+    const course = year.courses.find((item) => item.id === courseId);
+    if (!course) {
+      setError('Corso non disponibile. Reinvialo dalla pagina Scuola.');
+      return;
+    }
+    const rows = target === 'instructors' ? buildInstructorRows(year, course) : buildStudentRows(year, course);
+    if (!rows.length) {
+      setError(
+        target === 'instructors'
+          ? `La cartella "${course.name}" non ha istruttori nell'ultima esportazione.`
+          : `La cartella "${course.name}" non ha corsisti nell'ultima esportazione.`,
+      );
+      return;
+    }
+    const key = target === 'instructors' ? 'scuola_instructors' : 'scuola_corsisti';
+    if (format === 'pdf') {
+      downloadPdf(rows, key);
+    } else if (format === 'xlsx') {
+      downloadXlsx(rows, key);
+    } else {
+      downloadCsv(rows, key);
+    }
+  }
+
   function prepareUsciteForExport() {
     return uscite.map((item) => ({
       ...item,
       data: item.data ? new Date(item.data).toISOString() : '',
     }));
+  }
+
+  function handleRegistryExport(format = 'csv') {
+    setError('');
+    const rows = registryRows;
+    if (!rows.length) {
+      setError('Il registro istruttori non contiene dati esportabili.');
+      return;
+    }
+    const key = 'scuola_registry';
+    if (format === 'pdf') {
+      downloadPdf(rows, key);
+    } else if (format === 'xlsx') {
+      downloadXlsx(rows, key);
+    } else {
+      downloadCsv(rows, key);
+    }
   }
 
   return (
@@ -418,6 +654,174 @@ export default function Report() {
 
       {loading && <p>Raccolta dati in corso...</p>}
       {error && <p style={{ color: '#c92a2a' }}>{error}</p>}
+
+      <article className="card">
+        <h2>Cartelle corso (Scuola)</h2>
+        {scuolaSummary ? (
+          scuolaSummary.yearFolders.length ? (
+            <>
+              <div
+                style={{
+                  marginTop: '0.25rem',
+                  color: 'var(--color-muted)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  gap: '0.75rem',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span>
+                  Ultimo aggiornamento:{' '}
+                  {scuolaSummary.exportedAt ? scuolaSummary.exportedAt.toLocaleString('it-IT') : 'non disponibile'}.
+                </span>
+                <button type="button" style={{ background: '#adb5bd' }} onClick={refreshScuolaData}>
+                  Aggiorna elenco
+                </button>
+              </div>
+              <div className="card-list" style={{ marginTop: '1rem' }}>
+                {scuolaSummary.yearFolders.map((year) => (
+                  <article key={year.id} className="card" style={{ padding: '1rem' }}>
+                    <header style={{ marginBottom: '0.5rem' }}>
+                      <strong>{year.label}</strong>
+                      <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                        Corsi esportati: {year.courses.length}
+                      </p>
+                    </header>
+                    <div style={{ display: 'grid', gap: '1rem' }}>
+                      {year.courses.map((course) => {
+                        const instructorRows = buildInstructorRows(year, course);
+                        const studentRows = buildStudentRows(year, course);
+                        const courseStatus = course.status ?? (course.isClosed ? 'chiuso' : 'aperto');
+                        const isClosed = courseStatus === 'chiuso';
+                        const closedAt = course.closed_at ?? course.closedAt ?? null;
+                        const linkedCount = course.linked_uscite?.length ?? 0;
+                        return (
+                          <div key={course.id} className="card" style={{ padding: '0.75rem' }}>
+                            <header style={{ marginBottom: '0.35rem' }}>
+                              <strong>{course.name}</strong>
+                              <p style={{ margin: '0.15rem 0', color: 'var(--color-muted)' }}>
+                                Istruttori: {course.instructors.length} · Corsisti: {course.students.length}
+                              </p>
+                              <p style={{ margin: '0.15rem 0', color: isClosed ? '#c92a2a' : '#2f9e44' }}>
+                                Stato: <strong>{isClosed ? 'Chiuso' : 'Aperto'}</strong>
+                                {closedAt ? ` · chiuso il ${new Date(closedAt).toLocaleDateString('it-IT')}` : ''}
+                              </p>
+                            </header>
+                            <div style={{ display: 'grid', gap: '0.75rem' }}>
+                              <div>
+                                <strong>Esporta istruttori</strong>
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                  <button type="button" onClick={() => handleScuolaExport(year.id, course.id, 'instructors')}>
+                                    CSV
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{ background: '#228be6' }}
+                                    onClick={() => handleScuolaExport(year.id, course.id, 'instructors', 'pdf')}
+                                  >
+                                    PDF
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{ background: '#adb5bd' }}
+                                    onClick={() => handleScuolaExport(year.id, course.id, 'instructors', 'xlsx')}
+                                  >
+                                    XLSX
+                                  </button>
+                                </div>
+                              </div>
+                              <div>
+                                <strong>Esporta corsisti</strong>
+                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                                  <button type="button" onClick={() => handleScuolaExport(year.id, course.id, 'students')}>
+                                    CSV
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{ background: '#228be6' }}
+                                    onClick={() => handleScuolaExport(year.id, course.id, 'students', 'pdf')}
+                                  >
+                                    PDF
+                                  </button>
+                                  <button
+                                    type="button"
+                                    style={{ background: '#adb5bd' }}
+                                    onClick={() => handleScuolaExport(year.id, course.id, 'students', 'xlsx')}
+                                  >
+                                    XLSX
+                                  </button>
+                                </div>
+                              </div>
+                              <small style={{ color: 'var(--color-muted)' }}>
+                                Uscite collegate: {linkedCount ? `${linkedCount} (integrazione in arrivo)` : 'nessuna, integrazione in arrivo'}
+                              </small>
+                              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', color: 'var(--color-muted)', fontSize: '0.9rem' }}>
+                                <span>Istruttori registrati: {instructorRows.length}</span>
+                                <span>Corsisti registrati: {studentRows.length}</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {!year.courses.length && (
+                        <p style={{ color: 'var(--color-muted)' }}>Nessun corso registrato per questo anno.</p>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+              <small style={{ display: 'block', marginTop: '0.75rem', color: 'var(--color-muted)' }}>
+                I dati si aggiornano automaticamente quando modifichi la pagina Scuola. Puoi forzare un aggiornamento con il pulsante
+                &quot;Aggiorna elenco&quot;.
+              </small>
+            </>
+          ) : (
+            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+              Nessuna cartella corso presente nell&apos;ultima esportazione. Aggiorna dalla pagina Scuola.
+            </p>
+          )
+        ) : (
+          <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+            Non ci sono ancora dati della Scuola salvati. Compila corsi, istruttori e corsisti dalla pagina Scuola per consultarli qui.
+          </p>
+        )}
+      </article>
+
+      <article className="card">
+        <h2>Registro istruttori</h2>
+        {scuolaSummary ? (
+          registryRows.length ? (
+            <>
+              <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+                Ultimo aggiornamento:{' '}
+                {scuolaSummary.exportedAt ? scuolaSummary.exportedAt.toLocaleString('it-IT') : 'non disponibile'}.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.75rem 0' }}>
+                <button type="button" onClick={() => handleRegistryExport()}>
+                  CSV
+                </button>
+                <button type="button" style={{ background: '#228be6' }} onClick={() => handleRegistryExport('pdf')}>
+                  PDF
+                </button>
+                <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleRegistryExport('xlsx')}>
+                  XLSX
+                </button>
+              </div>
+              <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+                Totale nominativi registrati: {registryRows.length}. Utilizza i pulsanti qui sopra per esportare il dettaglio completo.
+              </p>
+            </>
+          ) : (
+            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+              Nessun dato nel registro istruttori. Compila il registro nella pagina Scuola per vederlo qui.
+            </p>
+          )
+        ) : (
+          <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+            Non sono presenti dati del registro. Modifica la pagina Scuola per iniziare a popolare questa sezione.
+          </p>
+        )}
+      </article>
 
       <div className="card-list">
         <ReportCard

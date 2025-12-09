@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import {
   createEquipment,
   deleteEquipment,
@@ -232,7 +232,7 @@ export default function Magazzino() {
               placeholder={
                 notesField
                   ? 'Es. Acquistato da Petzl a giugno 2024'
-                  : 'Aggiungi una colonna \"notes\" nella tabella equipment per salvare queste informazioni'
+                  : 'Aggiungi una colonna "notes" nella tabella equipment per salvare queste informazioni'
               }
               value={form.notes}
               disabled={!notesField}

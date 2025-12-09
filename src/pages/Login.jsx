@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import logo from '../assets/logo-gsu.png';
+import { supabase } from '../lib/supabaseClient';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -9,6 +10,7 @@ export default function Login() {
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
   const { isAuthenticated, role, loading, login } = useAuth();
 
@@ -31,6 +33,22 @@ export default function Login() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  async function handleGoogleLogin() {
+    setError('');
+    setGoogleLoading(true);
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: window.location.origin,
+      },
+    });
+    if (oauthError) {
+      setError(oauthError.message ?? 'Accesso con Google non riuscito.');
+      setGoogleLoading(false);
+    }
+    // In caso di successo l'utente viene reindirizzato e lo stato verrà ripristinato automaticamente.
   }
 
   return (
@@ -69,6 +87,30 @@ export default function Login() {
             {submitting ? 'Accesso...' : 'Entra'}
           </button>
         </form>
+        <div style={{ margin: '1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <span style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.1)' }} />
+          <span style={{ color: 'var(--color-muted)', fontSize: '0.85rem' }}>oppure</span>
+          <span style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.1)' }} />
+        </div>
+        <button
+          type="button"
+          onClick={handleGoogleLogin}
+          disabled={submitting || googleLoading}
+          style={{
+            background: '#fff',
+            color: '#000',
+            border: '1px solid #ced4da',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span role="img" aria-label="Google" style={{ fontSize: '1.25rem' }}>
+            🌐
+          </span>
+          {googleLoading ? 'Apertura Google...' : 'Accedi con Google'}
+        </button>
         {error && <p style={{ color: 'var(--color-accent)', marginTop: '0.5rem' }}>{error}</p>}
       </div>
     </div>

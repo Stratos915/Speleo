@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext.jsx';
+import useAuth from '../context/useAuth.js';
 import { deleteUscita, getUscite, createUscita, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
 import UscitaForm from '../components/UscitaForm.jsx';
@@ -53,11 +53,7 @@ export default function Uscite() {
   const [statusChangingId, setStatusChangingId] = useState(null);
   const [supportsClosedAt, setSupportsClosedAt] = useState(false);
 
-  useEffect(() => {
-    loadUscite();
-  }, []);
-
-  async function loadUscite() {
+  const loadUscite = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -86,7 +82,11 @@ export default function Uscite() {
       setLoading(false);
     }
     loadActiveLoans();
-  }
+  }, []);
+
+  useEffect(() => {
+    loadUscite();
+  }, [loadUscite]);
 
   async function loadActiveLoans() {
     const { data } = await supabase.from('loans').select('uscita_id,status');

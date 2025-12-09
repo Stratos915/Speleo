@@ -1,10 +1,11 @@
 import { NavLink } from 'react-router-dom';
 
-export const NAV_ITEMS = [
+const NAV_ITEMS = [
   { to: '/dashboard', label: 'Home', icon: '🏠' },
   { to: '/magazzino', label: 'Inventario', icon: '📦' },
   { to: '/uscite', label: 'Uscite', icon: '🧭' },
   { to: '/prestito-avanzato', label: 'Prestiti', icon: '🔁' },
+  { to: '/corsi', label: 'Scuola', icon: '🎓' },
   { to: '/report', label: 'Report', icon: '📑' },
   { to: '/soci', label: 'Soci', icon: '👥' },
 ];
