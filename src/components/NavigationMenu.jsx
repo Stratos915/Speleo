@@ -6,6 +6,7 @@ const NAV_ITEMS = [
   { to: '/uscite', label: 'Uscite', icon: '🧭' },
   { to: '/prestito-avanzato', label: 'Prestiti', icon: '🔁' },
   { to: '/corsi', label: 'Scuola', icon: '🎓' },
+  { to: '/biblioteca', label: 'Biblioteca', icon: '📚' },
   { to: '/report', label: 'Report', icon: '📑' },
   { to: '/soci', label: 'Soci', icon: '👥' },
 ];

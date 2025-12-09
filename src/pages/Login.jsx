@@ -11,6 +11,8 @@ export default function Login() {
   const [submitting, setSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [resetInfo, setResetInfo] = useState('');
+  const [resetting, setResetting] = useState(false);
   const navigate = useNavigate();
   const { isAuthenticated, role, loading, login } = useAuth();
 
@@ -49,6 +51,27 @@ export default function Login() {
       setGoogleLoading(false);
     }
     // In caso di successo l'utente viene reindirizzato e lo stato verrà ripristinato automaticamente.
+  }
+
+  async function handlePasswordReset() {
+    if (!email) {
+      setResetInfo('Inserisci l\'email per ricevere il link di recupero.');
+      return;
+    }
+    setResetInfo('Invio email di recupero...');
+    setResetting(true);
+    const redirectTo = import.meta.env.DEV
+      ? `${window.location.origin}/reset-password`
+      : 'https://creative-gelato-81d26e.netlify.app/reset-password';
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo,
+    });
+    setResetting(false);
+    if (resetError) {
+      setResetInfo(resetError.message ?? 'Impossibile inviare l\'email di recupero.');
+    } else {
+      setResetInfo('Email di recupero inviata. Controlla la casella e segui il link per impostare la nuova password.');
+    }
   }
 
   return (
@@ -112,6 +135,20 @@ export default function Login() {
           {googleLoading ? 'Apertura Google...' : 'Accedi con Google'}
         </button>
         {error && <p style={{ color: 'var(--color-accent)', marginTop: '0.5rem' }}>{error}</p>}
+        <button
+          type="button"
+          onClick={handlePasswordReset}
+          disabled={resetting || submitting}
+          style={{
+            marginTop: '1rem',
+            background: 'var(--color-primary)',
+            border: 'none',
+            color: '#fff',
+          }}
+        >
+          {resetting ? 'Invio in corso...' : 'Password dimenticata?'}
+        </button>
+        {resetInfo && <p style={{ color: 'var(--color-muted)', marginTop: '0.5rem' }}>{resetInfo}</p>}
       </div>
     </div>
   );

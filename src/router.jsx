@@ -19,6 +19,7 @@ import ProtectedRoute from './components/ProtectedRoute.jsx';
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
   { path: '/reset', element: <ResetPassword /> },
+  { path: '/reset-password', element: <ResetPassword /> },
   {
     path: '/',
     element: (

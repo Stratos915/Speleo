@@ -48,6 +48,7 @@ const csvColumns = {
     { key: 'year_label', label: 'Anno' },
     { key: 'full_name', label: 'Nome completo' },
     { key: 'membership_number', label: 'Numero tessera' },
+    { key: 'qualification', label: 'Qualifica' },
     { key: 'qualification_date', label: 'Conseguimento' },
     { key: 'last_maintenance_date', label: 'Ultimo mantenimento' },
     { key: 'next_maintenance_date', label: 'Prossimo mantenimento' },

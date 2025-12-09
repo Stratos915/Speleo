@@ -106,6 +106,7 @@ export default function Corso() {
   const [registryFolderExpanded, setRegistryFolderExpanded] = useState(false);
   const [registrySelectedYearId, setRegistrySelectedYearId] = useState(initialYear.id);
   const [registryError, setRegistryError] = useState('');
+  const [registryFilter, setRegistryFilter] = useState('all');
   const [hydrated, setHydrated] = useState(false);
 
   const loadMembers = useCallback(async () => {
@@ -213,6 +214,41 @@ export default function Corso() {
       })),
     [registry, yearFolders],
   );
+  const registryStats = useMemo(() => {
+    const summary = { total: registryEntriesWithYear.length, ai: 0, it: 0 };
+    registryEntriesWithYear.forEach((entry) => {
+      if (entry.qualificationType === 'aiuto_istruttore') summary.ai += 1;
+      else summary.it += 1;
+    });
+    return summary;
+  }, [registryEntriesWithYear]);
+  const filteredRegistryEntries = useMemo(
+    () =>
+      registryEntriesWithYear.filter((entry) =>
+        registryFilter === 'all' ? true : entry.qualificationType === registryFilter,
+      ),
+    [registryEntriesWithYear, registryFilter],
+  );
+  const registryYearOptions = useMemo(() => {
+    const START_YEAR = 2025;
+    const END_YEAR = 2050;
+    const yearMap = new Map();
+    yearFolders.forEach((year) => {
+      yearMap.set(year.label, { id: year.id, label: year.label });
+    });
+    for (let year = START_YEAR; year <= END_YEAR; year += 1) {
+      const label = `Anno ${year}`;
+      if (!yearMap.has(label)) {
+        yearMap.set(label, { id: `virtual-${year}`, label });
+      }
+    }
+    return Array.from(yearMap.values()).sort((a, b) => {
+      const yearA = Number(a.label.replace(/\D+/g, '')) || 0;
+      const yearB = Number(b.label.replace(/\D+/g, '')) || 0;
+      if (yearA && yearB) return yearA - yearB;
+      return a.label.localeCompare(b.label, 'it', { numeric: true });
+    });
+  }, [yearFolders]);
 
   function updateYearFolder(yearId, updater) {
     setYearFolders((prev) =>
@@ -824,6 +860,22 @@ function updateCourse(yearId, courseId, updater) {
   }
 
   function handleRegistryYearChange(value) {
+    if (!value) {
+      setRegistrySelectedYearId(null);
+      return;
+    }
+
+    if (value.startsWith('virtual-')) {
+      const yearNumber = Number(value.replace('virtual-', ''));
+      const fallbackLabel = Number.isFinite(yearNumber) ? `Anno ${yearNumber}` : `Cartella ${new Date().getFullYear()}`;
+      const createdYear = buildYearFolder(fallbackLabel, `Corso ${yearNumber || fallbackLabel}`);
+      setYearFolders((prev) => [...prev, createdYear]);
+      setActiveYearId(createdYear.id);
+      setExpandedYearId(createdYear.id);
+      setRegistrySelectedYearId(createdYear.id);
+      return;
+    }
+
     setRegistrySelectedYearId(value);
     setRegistryError('');
   }
@@ -1051,51 +1103,29 @@ function updateCourse(yearId, courseId, updater) {
         </div>
         {registryFolderExpanded && (
           <>
-            <form
-              onSubmit={handleAddRegistryEntry}
+            <div
               style={{
-                display: 'grid',
+                display: 'flex',
+                flexWrap: 'wrap',
                 gap: '0.75rem',
+                alignItems: 'center',
                 marginTop: '1rem',
-                borderBottom: '1px solid rgba(0,0,0,0.08)',
-                paddingBottom: '1rem',
+                padding: '0.75rem',
+                border: '1px solid rgba(0,0,0,0.08)',
+                borderRadius: '0.75rem',
+                background: '#f8f9fa',
               }}
             >
-              <label>
-                Cartella anno
-                <select
-                  value={registrySelectedYearId ?? ''}
-                  onChange={(event) => handleRegistryYearChange(event.target.value || null)}
-                >
-                  <option value="">--</option>
-                  {yearFolders.map((year) => (
-                    <option key={year.id} value={year.id}>
-                      {year.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Seleziona istruttore
-                <select
-                  value={registryForm.memberId}
-                  onChange={(event) => handleRegistryFormChange('memberId', event.target.value)}
-                  disabled={membersLoading}
-                >
-                  <option value="">--</option>
-                  {members.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Qualifica nel registro
-                <select
-                  value={registryForm.qualificationType}
-                  onChange={(event) => handleRegistryFormChange('qualificationType', event.target.value)}
-                >
+              <div style={{ flex: '2 0 220px' }}>
+                <strong>Totale registrazioni: {registryStats.total}</strong>
+                <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                  IT: {registryStats.it} · AI: {registryStats.ai}
+                </p>
+              </div>
+              <label style={{ flex: '1 0 200px' }}>
+                Filtro qualifica
+                <select value={registryFilter} onChange={(event) => setRegistryFilter(event.target.value)}>
+                  <option value="all">Tutte le qualifiche</option>
                   {REGISTRY_QUALIFICATION_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
@@ -1103,56 +1133,10 @@ function updateCourse(yearId, courseId, updater) {
                   ))}
                 </select>
               </label>
-              <label>
-                Altre qualifiche
-                <input
-                  placeholder="Es. referente sicurezza, formatore interno..."
-                  value={registryForm.customQualification}
-                  onChange={(event) => handleRegistryFormChange('customQualification', event.target.value)}
-                />
-              </label>
-              <label>
-                Data conseguimento qualifica
-                <input
-                  type="date"
-                  value={registryForm.qualificationDate}
-                  onChange={(event) => handleRegistryFormChange('qualificationDate', event.target.value)}
-                />
-              </label>
-              <label>
-                Ultimo mantenimento
-                <input
-                  type="date"
-                  value={registryForm.lastMaintenanceDate}
-                  onChange={(event) => handleRegistryFormChange('lastMaintenanceDate', event.target.value)}
-                />
-              </label>
-              <label>
-                Attività negli ultimi 5 anni
-                <textarea
-                  rows={2}
-                  placeholder="Corsi seguiti, esercitazioni, stage..."
-                  value={registryForm.activities}
-                  onChange={(event) => handleRegistryFormChange('activities', event.target.value)}
-                />
-              </label>
-              <label>
-                Prossimo mantenimento
-                <input
-                  type="date"
-                  value={registryForm.nextMaintenanceDate}
-                  onChange={(event) => handleRegistryFormChange('nextMaintenanceDate', event.target.value)}
-                />
-              </label>
-              <button type="submit" disabled={membersLoading || !registrySelectedYearId}>
-                Aggiungi al registro
-              </button>
-              {registryError && <p style={{ color: 'var(--color-accent)' }}>{registryError}</p>}
-            </form>
-
+            </div>
             <div className="card-list" style={{ marginTop: '1rem' }}>
-              {registryEntriesWithYear.length ? (
-                registryEntriesWithYear.map((entry) => {
+              {filteredRegistryEntries.length ? (
+                filteredRegistryEntries.map((entry) => {
                   const member = membersMap.get(entry.memberId);
                   const abbreviation = entry.qualificationType === 'aiuto_istruttore' ? 'AI' : 'IT';
                   const isExpanded = registryExpandedEntry === entry.id;
@@ -1243,10 +1227,109 @@ function updateCourse(yearId, courseId, updater) {
                 })
               ) : (
                 <p style={{ color: 'var(--color-muted)' }}>
-                  Nessun istruttore registrato in questa cartella. Aggiungi i nominativi per popolare il registro.
+                  Nessun istruttore con la qualifica selezionata. Modifica il filtro per visualizzare altre registrazioni.
                 </p>
               )}
             </div>
+
+            <form
+              onSubmit={handleAddRegistryEntry}
+              style={{
+                display: 'grid',
+                gap: '0.75rem',
+                marginTop: '1.5rem',
+                borderTop: '1px solid rgba(0,0,0,0.08)',
+                paddingTop: '1.5rem',
+              }}
+            >
+              <label>
+                Cartella anno
+                <select
+                  value={registrySelectedYearId ?? ''}
+                  onChange={(event) => handleRegistryYearChange(event.target.value || null)}
+                >
+                  <option value="">--</option>
+                  {registryYearOptions.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Seleziona istruttore
+                <select
+                  value={registryForm.memberId}
+                  onChange={(event) => handleRegistryFormChange('memberId', event.target.value)}
+                  disabled={membersLoading}
+                >
+                  <option value="">--</option>
+                  {members.map((member) => (
+                    <option key={member.id} value={member.id}>
+                      {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Qualifica nel registro
+                <select
+                  value={registryForm.qualificationType}
+                  onChange={(event) => handleRegistryFormChange('qualificationType', event.target.value)}
+                >
+                  {REGISTRY_QUALIFICATION_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Altre qualifiche
+                <input
+                  placeholder="Es. referente sicurezza, formatore interno..."
+                  value={registryForm.customQualification}
+                  onChange={(event) => handleRegistryFormChange('customQualification', event.target.value)}
+                />
+              </label>
+              <label>
+                Data conseguimento qualifica
+                <input
+                  type="date"
+                  value={registryForm.qualificationDate}
+                  onChange={(event) => handleRegistryFormChange('qualificationDate', event.target.value)}
+                />
+              </label>
+              <label>
+                Ultimo mantenimento
+                <input
+                  type="date"
+                  value={registryForm.lastMaintenanceDate}
+                  onChange={(event) => handleRegistryFormChange('lastMaintenanceDate', event.target.value)}
+                />
+              </label>
+              <label>
+                Attività negli ultimi 5 anni
+                <textarea
+                  rows={2}
+                  placeholder="Corsi seguiti, esercitazioni, stage..."
+                  value={registryForm.activities}
+                  onChange={(event) => handleRegistryFormChange('activities', event.target.value)}
+                />
+              </label>
+              <label>
+                Prossimo mantenimento
+                <input
+                  type="date"
+                  value={registryForm.nextMaintenanceDate}
+                  onChange={(event) => handleRegistryFormChange('nextMaintenanceDate', event.target.value)}
+                />
+              </label>
+              <button type="submit" disabled={membersLoading || !registrySelectedYearId}>
+                Aggiungi al registro
+              </button>
+              {registryError && <p style={{ color: 'var(--color-accent)' }}>{registryError}</p>}
+            </form>
           </>
         )}
       </article>

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import logo from '../assets/logo-gsu.png';
 
+// Pagina raggiunta dai link email di Supabase (recovery/reset) per impostare una nuova password.
 export default function ResetPassword() {
   const navigate = useNavigate();
   const [ready, setReady] = useState(false);
@@ -60,6 +61,7 @@ export default function ResetPassword() {
     }
 
     setSubmitting(true);
+    // Supabase aggiorna la password dell'utente autenticato tramite il token di recovery nella URL.
     const { error: updateError } = await supabase.auth.updateUser({ password });
     setSubmitting(false);
 
