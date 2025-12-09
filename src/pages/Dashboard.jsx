@@ -14,15 +14,17 @@ function countManualParticipants(value) {
 }
 
 export default function Dashboard() {
-  const { user, role } = useAuth();
+  const { user, role, loading: authLoading } = useAuth();
   const [stats, setStats] = useState({ equipment: 0, members: 0, uscite: 0 });
-  const [loading, setLoading] = useState(true);
+  const [statsLoading, setStatsLoading] = useState(true);
   const [insights, setInsights] = useState({ participants: 0, upcoming: 0, loans: 0 });
   const [trend, setTrend] = useState([]);
 
   useEffect(() => {
+    if (authLoading) return;
+
     async function loadStats() {
-      setLoading(true);
+      setStatsLoading(true);
       try {
         const [equipmentRes, membersRes, usciteRes, loansRes] = await Promise.allSettled([
           getEquipment(),
@@ -71,7 +73,7 @@ export default function Dashboard() {
           setTrend(Array.from(months.values()));
           const activeLoans =
             loansRes.status === 'fulfilled'
-              ? (loansRes.value ?? []).filter((loan) => loan.status === 'in_corso').length
+              ? (loansRes.value ?? []).filter((loan) => loan.status === 'in_corso' || loan.status === 'active').length
               : 0;
           setInsights({ participants, upcoming, loans: activeLoans });
         } else {
@@ -88,11 +90,11 @@ export default function Dashboard() {
         console.error('Errore caricamento dashboard', error);
         setStats({ equipment: 0, members: 0, uscite: 0 });
       } finally {
-        setLoading(false);
+        setStatsLoading(false);
       }
     }
     loadStats();
-  }, []);
+  }, [authLoading, user]);
 
   return (
     <section className="page-grid">
@@ -101,9 +103,9 @@ export default function Dashboard() {
         <p>Benvenuto {user?.email ?? 'socio'} (ruolo: {role ?? 'socio'}).</p>
       </div>
       <div className="page-grid" style={{ gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
-        <DashboardCard title="Materiali" value={stats.equipment} loading={loading} />
-        <DashboardCard title="Soci" value={stats.members} loading={loading} />
-        <DashboardCard title="Uscite" value={stats.uscite} loading={loading} />
+        <DashboardCard title="Materiali" value={stats.equipment} loading={statsLoading} />
+        <DashboardCard title="Soci" value={stats.members} loading={statsLoading} />
+        <DashboardCard title="Uscite" value={stats.uscite} loading={statsLoading} />
       </div>
       <article className="card">
         <h2>Indicatori rapidi</h2>

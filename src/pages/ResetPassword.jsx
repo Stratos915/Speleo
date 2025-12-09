@@ -3,6 +3,28 @@ import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import logo from '../assets/logo-gsu.png';
 
+function extractRecoveryTokens() {
+  const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+  if (hashParams.get('type') === 'recovery' && hashParams.get('access_token') && hashParams.get('refresh_token')) {
+    return {
+      access_token: hashParams.get('access_token'),
+      refresh_token: hashParams.get('refresh_token'),
+    };
+  }
+  const searchParams = new URLSearchParams(window.location.search);
+  if (
+    searchParams.get('type') === 'recovery' &&
+    searchParams.get('access_token') &&
+    searchParams.get('refresh_token')
+  ) {
+    return {
+      access_token: searchParams.get('access_token'),
+      refresh_token: searchParams.get('refresh_token'),
+    };
+  }
+  return null;
+}
+
 // Pagina raggiunta dai link email di Supabase (recovery/reset) per impostare una nuova password.
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -16,33 +38,33 @@ export default function ResetPassword() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    let active = true;
     async function bootstrapRecoverySession() {
-      const hash = window.location.hash.replace('#', '');
-      const params = new URLSearchParams(hash);
-      const type = params.get('type');
-      const accessToken = params.get('access_token');
-      const refreshToken = params.get('refresh_token');
-
-      if (type !== 'recovery' || !accessToken || !refreshToken) {
-        setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
-        setInitializing(false);
-        return;
+      try {
+        const tokens = extractRecoveryTokens();
+        if (!tokens) {
+          setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
+          return;
+        }
+        const { error: sessionError } = await supabase.auth.setSession(tokens);
+        if (sessionError) {
+          setError('Impossibile aprire la sessione di recupero. Richiedi un nuovo link.');
+        } else {
+          setReady(true);
+        }
+      } catch (bootstrapError) {
+        console.error('[ResetPassword] bootstrap error:', bootstrapError);
+        setError('Errore inatteso. Richiedi un nuovo link di recupero.');
+      } finally {
+        if (active) {
+          setInitializing(false);
+        }
       }
-
-      const { error: sessionError } = await supabase.auth.setSession({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-      });
-
-      if (sessionError) {
-        setError('Impossibile aprire la sessione di recupero. Richiedi un nuovo link.');
-      } else {
-        setReady(true);
-      }
-      setInitializing(false);
     }
-
     bootstrapRecoverySession();
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function handleSubmit(event) {

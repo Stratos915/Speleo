@@ -141,9 +141,11 @@ export default function Login() {
           disabled={resetting || submitting}
           style={{
             marginTop: '1rem',
-            background: 'var(--color-primary)',
+            background: 'transparent',
             border: 'none',
-            color: '#fff',
+            color: 'var(--color-primary)',
+            textDecoration: 'underline',
+            cursor: 'pointer',
           }}
         >
           {resetting ? 'Invio in corso...' : 'Password dimenticata?'}
