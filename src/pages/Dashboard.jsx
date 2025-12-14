@@ -1,9 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
 import { supabase } from '../lib/supabaseClient';
 import { getEquipment } from '../services/equipment';
 import { getMembers } from '../services/members';
 import { getUscite } from '../services/uscite';
+import AlertList from '../components/AlertList.jsx';
+import useAlerts from '../hooks/useAlerts.js';
+import { dedupeMembers } from '../utils/members.js';
 
 function countManualParticipants(value) {
   if (!value) return 0;
@@ -15,86 +19,106 @@ function countManualParticipants(value) {
 
 export default function Dashboard() {
   const { user, role, loading: authLoading } = useAuth();
+  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
+  const navigate = useNavigate();
   const [stats, setStats] = useState({ equipment: 0, members: 0, uscite: 0 });
   const [statsLoading, setStatsLoading] = useState(true);
   const [insights, setInsights] = useState({ participants: 0, upcoming: 0, loans: 0 });
   const [trend, setTrend] = useState([]);
 
-  useEffect(() => {
-    if (authLoading) return;
+  const loadStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      let equipmentCount = 0;
+      let membersCount = 0;
+      let usciteList = [];
+      let loansList = [];
 
-    async function loadStats() {
-      setStatsLoading(true);
       try {
-        const [equipmentRes, membersRes, usciteRes, loansRes] = await Promise.allSettled([
-          getEquipment(),
-          getMembers(),
-          getUscite(),
-          supabase.from('loans').select('id,status,delivered_at'),
-        ]);
-
-        const nextStats = {
-          equipment: equipmentRes.status === 'fulfilled' ? equipmentRes.value.length : 0,
-          members: membersRes.status === 'fulfilled' ? membersRes.value.length : 0,
-          uscite: usciteRes.status === 'fulfilled' ? usciteRes.value.length : 0,
-        };
-
-        if (usciteRes.status === 'fulfilled') {
-          const uscitaList = usciteRes.value ?? [];
-          const today = new Date();
-          const participants = uscitaList.reduce((sum, uscita) => {
-            const idsCount = uscita.participants_ids?.length ?? 0;
-            const manualCount = countManualParticipants(uscita.participants_manual);
-            return sum + idsCount + manualCount;
-          }, 0);
-          const upcoming = uscitaList.filter((uscita) => {
-            if (!uscita.data) return false;
-            const uscitaDate = new Date(uscita.data);
-            if (Number.isNaN(uscitaDate.getTime())) return false;
-            return uscitaDate >= today;
-          }).length;
-
-          const months = new Map();
-          const now = new Date();
-          for (let i = 5; i >= 0; i -= 1) {
-            const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
-            const key = `${ref.getFullYear()}-${ref.getMonth()}`;
-            months.set(key, { label: ref.toLocaleString('it-IT', { month: 'short' }), value: 0 });
-          }
-          uscitaList.forEach((uscita) => {
-            if (!uscita.data) return;
-            const uscitaDate = new Date(uscita.data);
-            if (Number.isNaN(uscitaDate.getTime())) return;
-            const key = `${uscitaDate.getFullYear()}-${uscitaDate.getMonth()}`;
-            if (months.has(key)) {
-              months.get(key).value += 1;
-            }
-          });
-          setTrend(Array.from(months.values()));
-          const activeLoans =
-            loansRes.status === 'fulfilled'
-              ? (loansRes.value ?? []).filter((loan) => loan.status === 'in_corso' || loan.status === 'active').length
-              : 0;
-          setInsights({ participants, upcoming, loans: activeLoans });
-        } else {
-          setTrend([]);
-          setInsights({ participants: 0, upcoming: 0, loans: 0 });
-        }
-
-        if (equipmentRes.status === 'rejected' || membersRes.status === 'rejected' || usciteRes.status === 'rejected') {
-          console.warn('Dashboard parziale: impossibile leggere tutte le tabelle.');
-        }
-
-        setStats(nextStats);
-      } catch (error) {
-        console.error('Errore caricamento dashboard', error);
-        setStats({ equipment: 0, members: 0, uscite: 0 });
-      } finally {
-        setStatsLoading(false);
+        const equipment = await getEquipment();
+        equipmentCount = equipment.length;
+      } catch (equipmentError) {
+        console.warn('[Dashboard] Impossibile leggere i materiali:', equipmentError);
       }
+
+      try {
+        const members = await getMembers();
+        membersCount = dedupeMembers(members).length;
+      } catch (membersError) {
+        console.warn('[Dashboard] Impossibile leggere i soci:', membersError);
+      }
+
+      try {
+        usciteList = await getUscite();
+      } catch (usciteError) {
+        console.warn('[Dashboard] Impossibile leggere le uscite:', usciteError);
+      }
+
+      try {
+        const { data } = await supabase.from('loans').select('id,status,delivered_at');
+        loansList = data ?? [];
+      } catch (loansError) {
+        console.warn('[Dashboard] Impossibile leggere i prestiti attivi:', loansError);
+      }
+
+      const nextStats = {
+        equipment: equipmentCount,
+        members: membersCount,
+        uscite: usciteList.length,
+      };
+
+      if (usciteList.length) {
+        const today = new Date();
+        const participants = usciteList.reduce((sum, uscita) => {
+          const idsCount = uscita.participants_ids?.length ?? 0;
+          const manualCount = countManualParticipants(uscita.participants_manual);
+          return sum + idsCount + manualCount;
+        }, 0);
+        const upcoming = usciteList.filter((uscita) => {
+          if (!uscita.data) return false;
+          const uscitaDate = new Date(uscita.data);
+          if (Number.isNaN(uscitaDate.getTime())) return false;
+          return uscitaDate >= today;
+        }).length;
+
+        const months = new Map();
+        const now = new Date();
+        for (let i = 5; i >= 0; i -= 1) {
+          const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
+          const key = `${ref.getFullYear()}-${ref.getMonth()}`;
+          months.set(key, { label: ref.toLocaleString('it-IT', { month: 'short' }), value: 0 });
+        }
+        usciteList.forEach((uscita) => {
+          if (!uscita.data) return;
+          const uscitaDate = new Date(uscita.data);
+          if (Number.isNaN(uscitaDate.getTime())) return;
+          const key = `${uscitaDate.getFullYear()}-${uscitaDate.getMonth()}`;
+          if (months.has(key)) {
+            months.get(key).value += 1;
+          }
+        });
+        setTrend(Array.from(months.values()));
+        const activeLoans = loansList.filter((loan) => loan.status === 'in_corso' || loan.status === 'active').length;
+        setInsights({ participants, upcoming, loans: activeLoans });
+      } else {
+        setTrend([]);
+        setInsights({ participants: 0, upcoming: 0, loans: 0 });
+      }
+
+      setStats(nextStats);
+    } catch (error) {
+      console.error('Errore caricamento dashboard', error);
+      setStats({ equipment: 0, members: 0, uscite: 0 });
+    } finally {
+      setStatsLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    if (authLoading || !user) return;
     loadStats();
-  }, [authLoading, user]);
+  }, [authLoading, user, loadStats]);
+
 
   return (
     <section className="page-grid">
@@ -102,6 +126,11 @@ export default function Dashboard() {
         <h1>Dashboard</h1>
         <p>Benvenuto {user?.email ?? 'socio'} (ruolo: {role ?? 'socio'}).</p>
       </div>
+      <AlertList
+        alerts={role && ['admin', 'presidente'].includes(role) ? adminAlerts : userAlerts}
+        navigate={navigate}
+        onDismiss={dismissAlert}
+      />
       <div className="page-grid" style={{ gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
         <DashboardCard title="Materiali" value={stats.equipment} loading={statsLoading} />
         <DashboardCard title="Soci" value={stats.members} loading={statsLoading} />

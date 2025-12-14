@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { getMembers } from '../services/members.js';
 import { getEquipment } from '../services/equipment.js';
+import { getActivityLogs } from '../services/activityLogs.js';
+import useAuth from '../context/useAuth.js';
+import { formatMemberLabel } from '../utils/members.js';
 
 const csvColumns = {
   uscita: [
@@ -10,6 +12,10 @@ const csvColumns = {
     { key: 'luogo', label: 'Luogo' },
     { key: 'data', label: 'Data' },
     { key: 'tipo', label: 'Tipo' },
+    { key: 'responsabile', label: 'Responsabile' },
+    { key: 'participants', label: 'Partecipanti soci' },
+    { key: 'participants_manual', label: 'Partecipanti esterni' },
+    { key: 'note', label: 'Note' },
   ],
   magazzino: [
     { key: 'name', label: 'Nome' },
@@ -19,6 +25,14 @@ const csvColumns = {
   soci: [
     { key: 'full_name', label: 'Nome completo' },
     { key: 'old_id', label: 'Numero tessera' },
+  ],
+  soci_full: [
+    { key: 'year', label: 'Anno' },
+    { key: 'full_name', label: 'Nome completo' },
+    { key: 'old_id', label: 'Numero tessera' },
+    { key: 'email', label: 'Email' },
+    { key: 'phone', label: 'Telefono' },
+    { key: 'status_label', label: 'Quota' },
   ],
   scuola_instructors: [
     { key: 'year_label', label: 'Anno' },
@@ -55,6 +69,15 @@ const csvColumns = {
     { key: 'activities', label: 'Attività ultimi 5 anni' },
     { key: 'email', label: 'Email' },
   ],
+  activity_logs: [
+    { key: 'created_at', label: 'Data' },
+    { key: 'user_email', label: 'Utente' },
+    { key: 'user_role', label: 'Ruolo' },
+    { key: 'action', label: 'Azione' },
+    { key: 'entity', label: 'Entità' },
+    { key: 'entity_id', label: 'ID' },
+    { key: 'message', label: 'Messaggio' },
+  ],
 };
 
 const SCUOLA_STORAGE_KEY = 'speleo-scuola-data-v2';
@@ -65,10 +88,29 @@ const paymentStatusLabels = {
   exempt: 'Esente',
 };
 
+const YEAR_START = 2025;
+const YEAR_END = 2050;
+
 const qualificationLabels = {
   istruttore: 'Istruttore',
   aiuto_istruttore: 'Aiuto istruttore',
 };
+
+const sociSummaryColumns = [
+  { key: 'year', label: 'Anno' },
+  { key: 'total', label: 'Totale soci' },
+  { key: 'paid', label: 'Quote pagate' },
+  { key: 'unpaid', label: 'Quote da saldare' },
+];
+
+function resolveYearValue(input) {
+  if (Number.isFinite(input)) return Number(input);
+  const numeric = Number(input);
+  if (Number.isFinite(numeric)) return numeric;
+  const match = String(input ?? '').match(/(20\d{2})/);
+  if (match) return Number(match[0]);
+  return null;
+}
 
 function formatDate(value) {
   if (!value) return '';
@@ -380,12 +422,14 @@ function downloadXlsx(rows, key) {
 }
 
 export default function Report() {
+  const { role } = useAuth();
+  const canViewActivityLog = role === 'admin' || role === 'presidente';
   const [members, setMembers] = useState([]);
   const [uscite, setUscite] = useState([]);
   const [magazzino, setMagazzino] = useState([]);
+  const [activityLogs, setActivityLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [search, setSearch] = useState('');
   const [scuolaData, setScuolaData] = useState(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -396,9 +440,7 @@ export default function Report() {
       return null;
     }
   });
-  const navigate = useNavigate();
-
-  const refreshScuolaData = useCallback(() => {
+    const refreshScuolaData = useCallback(() => {
     if (typeof window === 'undefined') {
       setScuolaData(null);
       return;
@@ -422,10 +464,12 @@ export default function Report() {
     async function loadData() {
       setLoading(true);
       setError('');
-      const [membersRes, usciteRes, equipmentRes] = await Promise.allSettled([
+      const logsPromise = canViewActivityLog ? getActivityLogs(500) : Promise.resolve([]);
+      const [membersRes, usciteRes, equipmentRes, logsRes] = await Promise.allSettled([
         getMembers(),
         supabase.from('uscite').select('id, titolo, luogo, data, tipo').order('data', { ascending: false }),
         getEquipment(),
+        logsPromise,
       ]);
       if (ignore) return;
 
@@ -447,10 +491,17 @@ export default function Report() {
         console.warn('[Report] Impossibile caricare il magazzino:', equipmentRes.reason?.message ?? equipmentRes.reason);
       }
 
+      if (logsRes.status === 'fulfilled') {
+        setActivityLogs(canViewActivityLog ? logsRes.value ?? [] : []);
+      } else if (canViewActivityLog) {
+        console.warn('[Report] Impossibile caricare i log:', logsRes.reason?.message ?? logsRes.reason);
+      }
+
       if (
         membersRes.status === 'rejected' ||
         usciteRes.status === 'rejected' ||
-        equipmentRes.status === 'rejected'
+        equipmentRes.status === 'rejected' ||
+        (canViewActivityLog && logsRes.status === 'rejected')
       ) {
         setError('Impossibile caricare tutti i dati, riprova più tardi.');
       }
@@ -462,7 +513,7 @@ export default function Report() {
     return () => {
       ignore = true;
     };
-  }, []);
+  }, [canViewActivityLog]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -483,17 +534,103 @@ export default function Report() {
     };
   }, [refreshScuolaData]);
 
-  const filteredMembers = useMemo(() => {
-    if (!search.trim()) return members;
-    const term = search.trim().toLowerCase();
-    return members.filter((member) =>
-      member.full_name?.toLowerCase().includes(term) ||
-      String(member.old_id ?? '').includes(term) ||
-      String(member.membership_number ?? '').includes(term),
-    );
-  }, [members, search]);
+  const membersMap = useMemo(
+    () => new Map(members.map((member) => [String(member.id), member])),
+    [members],
+  );
 
-  const membersMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+  const detectMembershipYear = useCallback((member) => {
+    if (member.membership_year) return member.membership_year;
+    if (member.year) return member.year;
+    if (member.anno) return member.anno;
+    if (member.created_at) {
+      const parsed = new Date(member.created_at);
+      if (!Number.isNaN(parsed.getTime())) return parsed.getFullYear();
+    }
+    return 'N/D';
+  }, []);
+
+  const [membersYearFilter, setMembersYearFilter] = useState('all');
+  const [scuolaYearFilter, setScuolaYearFilter] = useState('all');
+
+  const membersSummary = useMemo(() => {
+    const map = new Map();
+    members.forEach((member) => {
+      const year = detectMembershipYear(member);
+      const entry = map.get(year) ?? { year, total: 0, paid: 0, unpaid: 0 };
+      entry.total += 1;
+      if (member.membership_paid) entry.paid += 1;
+      else entry.unpaid += 1;
+      map.set(year, entry);
+    });
+    return Array.from(map.values()).sort((a, b) => {
+      const yearA = Number(a.year);
+      const yearB = Number(b.year);
+      if (!Number.isNaN(yearA) && !Number.isNaN(yearB)) {
+        return yearB - yearA;
+      }
+      return String(a.year).localeCompare(String(b.year));
+    });
+  }, [members, detectMembershipYear]);
+
+  const activityRows = useMemo(
+    () =>
+      activityLogs.map((log) => ({
+        created_at: log.created_at ? new Date(log.created_at).toLocaleString('it-IT') : '',
+        user_email: log.user_email ?? 'N/D',
+        user_role: log.user_role ?? 'N/D',
+        action: log.action,
+        entity: log.entity ?? '',
+        entity_id: log.entity_id ?? '',
+        message: log.message ?? '',
+      })),
+    [activityLogs],
+  );
+
+  const memberYears = useMemo(() => {
+    const set = new Set();
+    for (let year = YEAR_START; year <= YEAR_END; year += 1) {
+      set.add(String(year));
+    }
+    members.forEach((member) => {
+      const year = detectMembershipYear(member);
+      if (year) {
+        set.add(String(year));
+      }
+    });
+    return Array.from(set).sort((a, b) => Number(b) - Number(a));
+  }, [members, detectMembershipYear]);
+
+  const membersFullRows = useMemo(() => {
+    const rows = members.map((member) => {
+      const year = detectMembershipYear(member);
+      const numericCard = Number(member.old_id ?? member.membership_number);
+      return {
+        id: member.id,
+        year,
+        full_name: member.full_name ?? 'Socio senza nome',
+        old_id: member.old_id ?? member.membership_number ?? '',
+        email: member.email ?? '',
+        phone: member.phone ?? '',
+        status_label: member.membership_paid ? 'Pagato' : 'Da saldare',
+        order_number: Number.isNaN(numericCard) ? null : numericCard,
+      };
+    });
+    rows.sort((a, b) => {
+      if (a.order_number !== null || b.order_number !== null) {
+        if (a.order_number === null) return 1;
+        if (b.order_number === null) return -1;
+        if (a.order_number !== b.order_number) return a.order_number - b.order_number;
+      }
+      return a.full_name.localeCompare(b.full_name, 'it', { sensitivity: 'base' });
+    });
+    return rows;
+  }, [members, detectMembershipYear]);
+
+  const filteredMembersFullRows = useMemo(() => {
+    if (membersYearFilter === 'all') return membersFullRows;
+    return membersFullRows.filter((row) => String(row.year) === membersYearFilter);
+  }, [membersFullRows, membersYearFilter]);
 
   const scuolaSummary = useMemo(() => {
     if (!scuolaData) return null;
@@ -502,6 +639,62 @@ export default function Report() {
     const registry = Array.isArray(scuolaData.registry) ? scuolaData.registry : [];
     return { exportedAt, yearFolders, registry };
   }, [scuolaData]);
+
+  const scuolaYearOptions = useMemo(() => {
+    const options = [];
+    for (let year = YEAR_START; year <= YEAR_END; year += 1) {
+      options.push(String(year));
+    }
+    return options;
+  }, []);
+
+  const filteredYearFolders = useMemo(() => {
+    if (!scuolaSummary) return [];
+    if (scuolaYearFilter === 'all') return scuolaSummary.yearFolders;
+    return scuolaSummary.yearFolders.filter((folder) => {
+      const folderYear = resolveYearValue(folder.year ?? folder.value ?? folder.label ?? folder.id);
+      if (!folderYear) return false;
+      return String(folderYear) === scuolaYearFilter;
+    });
+  }, [scuolaSummary, scuolaYearFilter]);
+
+  const courseOptions = useMemo(() => {
+    if (!filteredYearFolders.length) return [];
+    return filteredYearFolders.flatMap((folder) =>
+      (folder.courses ?? []).map((course) => ({
+        key: `${folder.id}::${course.id}`,
+        yearId: folder.id,
+        yearLabel: folder.label,
+        courseId: course.id,
+        courseName: course.name,
+        instructors: course.instructors ?? [],
+        students: course.students ?? [],
+      })),
+    );
+  }, [filteredYearFolders]);
+
+  const [selectedCourseKey, setSelectedCourseKey] = useState(null);
+
+  useEffect(() => {
+    if (!courseOptions.length) {
+      setSelectedCourseKey(null);
+    } else if (!selectedCourseKey || !courseOptions.some((option) => option.key === selectedCourseKey)) {
+      setSelectedCourseKey(courseOptions[0].key);
+    }
+  }, [courseOptions, selectedCourseKey]);
+
+  const selectedCourse = courseOptions.find((option) => option.key === selectedCourseKey) ?? null;
+
+  const filteredCourseStats = useMemo(() => {
+    const instructors = courseOptions.reduce((sum, course) => sum + course.instructors.length, 0);
+    const students = courseOptions.reduce((sum, course) => sum + course.students.length, 0);
+    return {
+      folders: filteredYearFolders.length,
+      courses: courseOptions.length,
+      instructors,
+      students,
+    };
+  }, [courseOptions, filteredYearFolders]);
 
   function buildInstructorRows(year, course) {
     return (course.instructors ?? []).map((item) => {
@@ -623,10 +816,27 @@ export default function Report() {
   }
 
   function prepareUsciteForExport() {
-    return uscite.map((item) => ({
-      ...item,
-      data: item.data ? new Date(item.data).toISOString() : '',
-    }));
+    return uscite.map((item) => {
+      const responsabileMember = item.responsabile_id ? membersMap.get(item.responsabile_id) : null;
+      const responsabileLabel =
+        (responsabileMember && formatMemberLabel(responsabileMember)) ||
+        (item.responsabile_nome?.trim() || 'Non assegnato');
+      const participantNames = (item.participants_ids ?? [])
+        .map((id) => membersMap.get(id))
+        .filter(Boolean)
+        .map((member) => formatMemberLabel(member));
+
+      return {
+        titolo: item.titolo,
+        luogo: item.luogo,
+        data: item.data ? formatDate(item.data) : '',
+        tipo: item.tipo ?? '',
+        responsabile: responsabileLabel,
+        participants: participantNames.join(', '),
+        participants_manual: item.participants_manual ?? '',
+        note: item.note ?? '',
+      };
+    });
   }
 
   function handleRegistryExport(format = 'csv') {
@@ -646,6 +856,89 @@ export default function Report() {
     }
   }
 
+  function handleMembersSummaryExport(format = 'csv') {
+    setError('');
+    if (!membersSummary.length) {
+      setError('Nessun dato riepilogativo soci disponibile.');
+      return;
+    }
+    if (format === 'pdf') {
+      const lines = buildPdfLines('Riepilogo soci per anno', sociSummaryColumns, membersSummary);
+      const pdfContent = generateSimplePdf(lines);
+      triggerDownload(pdfContent, `soci-summary-${new Date().toISOString()}.pdf`, 'application/pdf');
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(sociSummaryColumns, membersSummary);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `soci-summary-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(membersSummary, sociSummaryColumns);
+      triggerDownload(csv, `soci-summary-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
+    }
+  }
+
+  function handleMembersFullExport(format = 'csv') {
+    setError('');
+    const rows = filteredMembersFullRows;
+    if (!rows.length) {
+      setError('Nessun socio disponibile da esportare.');
+      return;
+    }
+    const suffix = membersYearFilter !== 'all' ? `-${membersYearFilter}` : '';
+    if (format === 'pdf') {
+      const lines = buildPdfLines('Elenco soci completo', csvColumns.soci_full, rows);
+      const pdfContent = generateSimplePdf(lines);
+      triggerDownload(pdfContent, `soci-full${suffix}-${new Date().toISOString()}.pdf`, 'application/pdf');
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(csvColumns.soci_full, rows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `soci-full${suffix}-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(rows, csvColumns.soci_full);
+      triggerDownload(csv, `soci-full${suffix}-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
+    }
+  }
+
+  function handleActivityExport(format = 'csv') {
+    setError('');
+    if (!activityRows.length) {
+      setError('Nessun log attività disponibile.');
+      return;
+    }
+    if (format === 'pdf') {
+      const lines = buildPdfLines('Activity log', csvColumns.activity_logs, activityRows);
+      const pdfContent = generateSimplePdf(lines);
+      triggerDownload(pdfContent, `activity-log-${new Date().toISOString()}.pdf`, 'application/pdf');
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(csvColumns.activity_logs, activityRows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `activity-log-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(activityRows, csvColumns.activity_logs);
+      triggerDownload(csv, `activity-log-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
+    }
+  }
+
   return (
     <section className="page-grid">
       <header>
@@ -657,7 +950,8 @@ export default function Report() {
       {error && <p style={{ color: '#c92a2a' }}>{error}</p>}
 
       <article className="card">
-        <h2>Cartelle corso (Scuola)</h2>
+        <h2>Scuola</h2>
+        <h3 style={{ margin: '0.25rem 0' }}>Corsi</h3>
         {scuolaSummary ? (
           scuolaSummary.yearFolders.length ? (
             <>
@@ -679,97 +973,153 @@ export default function Report() {
                   Aggiorna elenco
                 </button>
               </div>
-              <div className="card-list" style={{ marginTop: '1rem' }}>
-                {scuolaSummary.yearFolders.map((year) => (
-                  <article key={year.id} className="card" style={{ padding: '1rem' }}>
-                    <header style={{ marginBottom: '0.5rem' }}>
-                      <strong>{year.label}</strong>
-                      <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                        Corsi esportati: {year.courses.length}
-                      </p>
-                    </header>
-                    <div style={{ display: 'grid', gap: '1rem' }}>
-                      {year.courses.map((course) => {
-                        const instructorRows = buildInstructorRows(year, course);
-                        const studentRows = buildStudentRows(year, course);
-                        const courseStatus = course.status ?? (course.isClosed ? 'chiuso' : 'aperto');
-                        const isClosed = courseStatus === 'chiuso';
-                        const closedAt = course.closed_at ?? course.closedAt ?? null;
-                        const linkedCount = course.linked_uscite?.length ?? 0;
-                        return (
-                          <div key={course.id} className="card" style={{ padding: '0.75rem' }}>
-                            <header style={{ marginBottom: '0.35rem' }}>
-                              <strong>{course.name}</strong>
-                              <p style={{ margin: '0.15rem 0', color: 'var(--color-muted)' }}>
-                                Istruttori: {course.instructors.length} · Corsisti: {course.students.length}
-                              </p>
-                              <p style={{ margin: '0.15rem 0', color: isClosed ? '#c92a2a' : '#2f9e44' }}>
-                                Stato: <strong>{isClosed ? 'Chiuso' : 'Aperto'}</strong>
-                                {closedAt ? ` · chiuso il ${new Date(closedAt).toLocaleDateString('it-IT')}` : ''}
-                              </p>
-                            </header>
-                            <div style={{ display: 'grid', gap: '0.75rem' }}>
-                              <div>
-                                <strong>Esporta istruttori</strong>
-                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                                  <button type="button" onClick={() => handleScuolaExport(year.id, course.id, 'instructors')}>
-                                    CSV
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={{ background: '#228be6' }}
-                                    onClick={() => handleScuolaExport(year.id, course.id, 'instructors', 'pdf')}
-                                  >
-                                    PDF
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={{ background: '#adb5bd' }}
-                                    onClick={() => handleScuolaExport(year.id, course.id, 'instructors', 'xlsx')}
-                                  >
-                                    XLSX
-                                  </button>
-                                </div>
-                              </div>
-                              <div>
-                                <strong>Esporta corsisti</strong>
-                                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
-                                  <button type="button" onClick={() => handleScuolaExport(year.id, course.id, 'students')}>
-                                    CSV
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={{ background: '#228be6' }}
-                                    onClick={() => handleScuolaExport(year.id, course.id, 'students', 'pdf')}
-                                  >
-                                    PDF
-                                  </button>
-                                  <button
-                                    type="button"
-                                    style={{ background: '#adb5bd' }}
-                                    onClick={() => handleScuolaExport(year.id, course.id, 'students', 'xlsx')}
-                                  >
-                                    XLSX
-                                  </button>
-                                </div>
-                              </div>
-                              <small style={{ color: 'var(--color-muted)' }}>
-                                Uscite collegate: {linkedCount ? `${linkedCount} (integrazione in arrivo)` : 'nessuna, integrazione in arrivo'}
-                              </small>
-                              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', color: 'var(--color-muted)', fontSize: '0.9rem' }}>
-                                <span>Istruttori registrati: {instructorRows.length}</span>
-                                <span>Corsisti registrati: {studentRows.length}</span>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                      {!year.courses.length && (
-                        <p style={{ color: 'var(--color-muted)' }}>Nessun corso registrato per questo anno.</p>
-                      )}
+              <div
+                className="card"
+                style={{
+                  marginTop: '1rem',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  alignItems: 'center',
+                }}
+              >
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px' }}>
+                  Anno corsi
+                  <select value={scuolaYearFilter} onChange={(event) => setScuolaYearFilter(event.target.value)}>
+                    <option value="all">Tutti</option>
+                    {scuolaYearOptions.map((yearOption) => (
+                      <option key={yearOption} value={yearOption}>
+                        {yearOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                  Riepilogo cartelle: {filteredCourseStats.folders} · Corsi: {filteredCourseStats.courses} · Istruttori: {filteredCourseStats.instructors} ·
+                  Corsisti: {filteredCourseStats.students}
+                </p>
+              </div>
+              <div
+                className="card"
+                style={{
+                  marginTop: '1rem',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  alignItems: 'center',
+                }}
+              >
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px' }}>
+                  Seleziona corso
+                  <select
+                    value={selectedCourseKey ?? ''}
+                    onChange={(event) => setSelectedCourseKey(event.target.value)}
+                    disabled={!courseOptions.length}
+                  >
+                    {!courseOptions.length && <option value="">Nessun corso disponibile</option>}
+                    {courseOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.courseName} · {option.yearLabel}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div>
+                    <strong>Esporta istruttori</strong>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'instructors')}
+                        disabled={!selectedCourse}
+                      >
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#228be6' }}
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'instructors', 'pdf')}
+                        disabled={!selectedCourse}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#adb5bd' }}
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'instructors', 'xlsx')}
+                        disabled={!selectedCourse}
+                      >
+                        XLSX
+                      </button>
                     </div>
-                  </article>
-                ))}
+                  </div>
+                  <div>
+                    <strong>Esporta corsisti</strong>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'students')}
+                        disabled={!selectedCourse}
+                      >
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#228be6' }}
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'students', 'pdf')}
+                        disabled={!selectedCourse}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#adb5bd' }}
+                        onClick={() => selectedCourse && handleScuolaExport(selectedCourse.yearId, selectedCourse.courseId, 'students', 'xlsx')}
+                        disabled={!selectedCourse}
+                      >
+                        XLSX
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div
+                className="card"
+                style={{
+                  marginTop: '1rem',
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '1rem',
+                  alignItems: 'center',
+                }}
+              >
+                <div>
+                  <h3 style={{ margin: '0 0 0.25rem' }}>Registro corpo istruttori</h3>
+                  <p style={{ color: 'var(--color-muted)', margin: '0 0 0.5rem' }}>
+                    Totale registrazioni: {registryRows.length}. Esporta l&apos;anagrafica completa del registro.
+                  </p>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button type="button" onClick={() => handleRegistryExport()} disabled={!registryRows.length}>
+                      CSV
+                    </button>
+                    <button
+                      type="button"
+                      style={{ background: '#228be6' }}
+                      onClick={() => handleRegistryExport('pdf')}
+                      disabled={!registryRows.length}
+                    >
+                      PDF
+                    </button>
+                    <button
+                      type="button"
+                      style={{ background: '#adb5bd' }}
+                      onClick={() => handleRegistryExport('xlsx')}
+                      disabled={!registryRows.length}
+                    >
+                      XLSX
+                    </button>
+                  </div>
+                </div>
               </div>
               <small style={{ display: 'block', marginTop: '0.75rem', color: 'var(--color-muted)' }}>
                 I dati si aggiornano automaticamente quando modifichi la pagina Scuola. Puoi forzare un aggiornamento con il pulsante
@@ -788,51 +1138,26 @@ export default function Report() {
         )}
       </article>
 
-      <article className="card">
-        <h2>Registro istruttori</h2>
-        {scuolaSummary ? (
-          registryRows.length ? (
-            <>
-              <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-                Ultimo aggiornamento:{' '}
-                {scuolaSummary.exportedAt ? scuolaSummary.exportedAt.toLocaleString('it-IT') : 'non disponibile'}.
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', margin: '0.75rem 0' }}>
-                <button type="button" onClick={() => handleRegistryExport()}>
-                  CSV
-                </button>
-                <button type="button" style={{ background: '#228be6' }} onClick={() => handleRegistryExport('pdf')}>
-                  PDF
-                </button>
-                <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleRegistryExport('xlsx')}>
-                  XLSX
-                </button>
-              </div>
-              <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-                Totale nominativi registrati: {registryRows.length}. Utilizza i pulsanti qui sopra per esportare il dettaglio completo.
-              </p>
-            </>
-          ) : (
-            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-              Nessun dato nel registro istruttori. Compila il registro nella pagina Scuola per vederlo qui.
-            </p>
-          )
-        ) : (
-          <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-            Non sono presenti dati del registro. Modifica la pagina Scuola per iniziare a popolare questa sezione.
+      {memberYears.length > 0 && (
+        <article className="card" style={{ marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px' }}>
+            Anno da esportare
+            <select value={membersYearFilter} onChange={(event) => setMembersYearFilter(event.target.value)}>
+              <option value="all">Tutti</option>
+              {memberYears.map((year) => (
+                <option key={year} value={String(year)}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+            Seleziona l&apos;anno prima di scaricare l&apos;elenco soci completo per esportare solo la cartella desiderata.
           </p>
-        )}
-      </article>
+        </article>
+      )}
 
       <div className="card-list">
-        <ReportCard
-          title="Elenco soci"
-          description="Scarica anagrafica soci aggiornata."
-          onCsv={() => handleExport('soci')}
-          onPdf={() => handleExport('soci', 'pdf')}
-          onXlsx={() => handleExport('soci', 'xlsx')}
-          disabled={loading}
-        />
         <ReportCard
           title="Uscite"
           description="Esporta elenco uscite registrate."
@@ -849,30 +1174,32 @@ export default function Report() {
           onXlsx={() => handleExport('magazzino', 'xlsx')}
           disabled={loading}
         />
-      </div>
-
-      <div className="card">
-        <h2>Gestione soci</h2>
-        <input
-          type="search"
-          placeholder="Cerca per nome o tessera"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
+        <ReportCard
+          title="Elenco soci completo"
+          description="Scarica l'anagrafica dettagliata con anno e stato quota."
+          onCsv={() => handleMembersFullExport()}
+          onPdf={() => handleMembersFullExport('pdf')}
+          onXlsx={() => handleMembersFullExport('xlsx')}
+          disabled={loading}
         />
-        <div className="card-list" style={{ marginTop: '1rem' }}>
-          {filteredMembers.map((member) => (
-            <div key={member.id} style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div>
-                <strong>{member.full_name}</strong>
-                <p style={{ margin: 0, color: 'var(--color-muted)' }}>Tessera: {member.old_id ?? 'N/D'}</p>
-              </div>
-              <button type="button" style={{ background: '#adb5bd' }} onClick={() => navigate('/soci')}>
-                Apri soci
-              </button>
-            </div>
-          ))}
-          {!filteredMembers.length && <p>Nessun socio trovato.</p>}
-        </div>
+        <ReportCard
+          title="Riepilogo soci per anno"
+          description="Totale soci e quote pagate suddivisi per anno."
+          onCsv={() => handleMembersSummaryExport()}
+          onPdf={() => handleMembersSummaryExport('pdf')}
+          onXlsx={() => handleMembersSummaryExport('xlsx')}
+          disabled={loading}
+        />
+        {canViewActivityLog && (
+          <ReportCard
+            title="Log attività"
+            description="Eventi recenti eseguiti dagli utenti nell'app."
+            onCsv={() => handleActivityExport()}
+            onPdf={() => handleActivityExport('pdf')}
+            onXlsx={() => handleActivityExport('xlsx')}
+            disabled={loading}
+          />
+        )}
       </div>
     </section>
   );

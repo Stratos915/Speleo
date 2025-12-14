@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getMembers } from '../services/members';
+import { dedupeMembers, formatMemberLabel, buildMemberTooltip } from '../utils/members.js';
 
 const EMPTY_FORM = {
   titolo: '',
@@ -66,6 +67,7 @@ export default function UscitaForm({
   const [membersLoading, setMembersLoading] = useState(!membersList);
   const [membersError, setMembersError] = useState('');
   const [participantsSearch, setParticipantsSearch] = useState('');
+  const [selectedParticipantId, setSelectedParticipantId] = useState('');
   const timeInputRef = useRef(null);
   const prestitoParams = useMemo(() => {
     if (!initialValues?.id) return null;
@@ -88,11 +90,12 @@ export default function UscitaForm({
       participants_manual: initialValues?.participants_manual ?? '',
     });
     setParticipantsSearch('');
+    setSelectedParticipantId('');
   }, [initialValues]);
 
   useEffect(() => {
     if (membersList) {
-      setMembers(membersList);
+      setMembers(dedupeMembers(Array.isArray(membersList) ? membersList : []));
       setMembersLoading(false);
       return undefined;
     }
@@ -104,7 +107,7 @@ export default function UscitaForm({
       try {
         const data = await getMembers();
         if (!ignore) {
-          setMembers(data);
+          setMembers(dedupeMembers(data));
         }
       } catch (error) {
         if (!ignore) {
@@ -140,6 +143,19 @@ export default function UscitaForm({
         String(member.membership_number ?? '').includes(term),
     );
   }, [members, participantsSearch]);
+
+  const memberLabelsMap = useMemo(() => {
+    const map = new Map();
+    members.forEach((member, index) => {
+      if (!member) return;
+      const memberId = member?.id ? String(member.id) : null;
+      if (!memberId) return;
+      const label =
+        formatMemberLabel(member, { fallback: '' }) || `Socio senza nome (ID ${memberId})`;
+      map.set(memberId, label);
+    });
+    return map;
+  }, [members]);
 
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -258,11 +274,22 @@ export default function UscitaForm({
               disabled={!members.length}
             >
               <option value="">{members.length ? 'Seleziona responsabile' : 'Nessun socio disponibile'}</option>
-              {members.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.membership_number ? `${member.membership_number} · ${member.full_name}` : member.full_name}
-                </option>
-              ))}
+              {members.map((member, index) => {
+                const optionValue = member?.id ? String(member.id) : '';
+                const optionKey = member?.id ?? member?.old_id ?? member?.membership_number ?? `member-${index}`;
+                const optionLabel =
+                  formatMemberLabel(member, { includeMembership: false, fallback: '' }) ||
+                  (member?.id ? `Socio senza nome (ID ${member.id})` : 'Socio senza nome');
+                return (
+                  <option
+                    key={optionKey}
+                    value={optionValue}
+                    style={{ color: '#0f2a2a', fontWeight: 600 }}
+                  >
+                    {optionLabel}
+                  </option>
+                );
+              })}
             </select>
             {!members.length && !membersError && (
               <small style={{ color: 'var(--color-muted)' }}>
@@ -286,50 +313,98 @@ export default function UscitaForm({
               value={participantsSearch}
               onChange={(event) => setParticipantsSearch(event.target.value)}
             />
+            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+              <select
+                id="participants"
+                value={selectedParticipantId}
+                onChange={(event) => setSelectedParticipantId(event.target.value)}
+                style={{ flex: '1 1 220px' }}
+                disabled={!filteredParticipants.length}
+              >
+                <option value="">
+                  {filteredParticipants.length ? 'Seleziona socio da aggiungere' : 'Nessun socio trovato'}
+                </option>
+                {filteredParticipants.map((member, index) => {
+                  const memberId = member?.id ? String(member.id) : '';
+                  const optionKey =
+                    member?.id ?? member?.old_id ?? member?.membership_number ?? `member-${index}`;
+                  const optionLabel =
+                    formatMemberLabel(member, { fallback: '' }) ||
+                    (member?.id ? `Socio senza nome (ID ${member.id})` : 'Socio senza nome');
+                  return (
+                    <option key={optionKey} value={memberId} title={buildMemberTooltip(member)}>
+                      {optionLabel}
+                    </option>
+                  );
+                })}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!selectedParticipantId) return;
+                  if (form.participants_ids.includes(selectedParticipantId)) return;
+                  handleChange('participants_ids', [...form.participants_ids, selectedParticipantId]);
+                  setSelectedParticipantId('');
+                }}
+                disabled={!selectedParticipantId || form.participants_ids.includes(selectedParticipantId)}
+              >
+                Aggiungi partecipante
+              </button>
+            </div>
+
             <div
-              id="participants"
               style={{
-                maxHeight: '12rem',
-                overflowY: 'auto',
-                border: '1px solid rgba(0,0,0,0.1)',
+                marginTop: '0.75rem',
+                border: '1px solid rgba(0,0,0,0.08)',
                 borderRadius: '0.75rem',
-                padding: '0.5rem',
-                marginTop: '0.5rem',
+                padding: '0.75rem',
+                background: '#f8f9fa',
               }}
             >
-              {!filteredParticipants.length && <p style={{ color: 'var(--color-muted)' }}>Nessun socio trovato.</p>}
-              {filteredParticipants.map((member) => {
-                const memberId = String(member.id);
-                const checked = form.participants_ids.includes(memberId);
-                return (
-                  <label
-                    key={memberId}
-                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.15rem 0' }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={(event) => {
-                        const { checked: isChecked } = event.target;
-                        if (isChecked) {
-                          handleChange('participants_ids', [...new Set([...form.participants_ids, memberId])]);
-                        } else {
+              {form.participants_ids.length ? (
+                <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {form.participants_ids.map((participantId) => (
+                    <li
+                      key={participantId}
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        padding: '0.2rem 0.5rem',
+                        borderRadius: '999px',
+                        background: 'rgba(14, 151, 154, 0.08)',
+                        border: '1px solid rgba(14,151,154,0.2)',
+                      }}
+                    >
+                      <span style={{ fontWeight: 600 }}>
+                        {memberLabelsMap.get(participantId) ?? `ID ${participantId}`}
+                      </span>
+                      <button
+                        type="button"
+                        style={{
+                          background: 'transparent',
+                          color: 'var(--color-primary-dark)',
+                          padding: '0 0.4rem',
+                        }}
+                        onClick={() =>
                           handleChange(
                             'participants_ids',
-                            form.participants_ids.filter((value) => value !== memberId),
-                          );
+                            form.participants_ids.filter((value) => value !== participantId),
+                          )
                         }
-                      }}
-                    />
-                    <span>
-                      {member.membership_number ? `${member.membership_number} · ${member.full_name}` : member.full_name}
-                    </span>
-                  </label>
-                );
-              })}
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p style={{ margin: 0, color: 'var(--color-muted)' }}>Nessun partecipante aggiunto.</p>
+              )}
             </div>
+
             <small style={{ color: 'var(--color-muted)' }}>
-              Spunta più nomi contemporaneamente o usa il campo qui sotto per partecipanti esterni.
+              Usa la ricerca per trovare i soci e aggiungili con il pulsante, oppure compila il campo qui sotto per i partecipanti esterni.
             </small>
           </>
         )}

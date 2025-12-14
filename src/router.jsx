@@ -15,6 +15,7 @@ import StoricoPrestiti from './pages/StoricoPrestiti.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import NotFound from './pages/NotFound.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import { getPageEditRoles } from './utils/permissions.js';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
@@ -28,12 +29,26 @@ export const router = createBrowserRouter([
       </ProtectedRoute>
     ),
     children: [
-      { path: 'dashboard', element: <Dashboard /> },
-      { path: 'uscite', element: <Uscite /> },
+      {
+        path: 'dashboard',
+        element: (
+          <ProtectedRoute page="dashboard">
+            <Dashboard />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'uscite',
+        element: (
+          <ProtectedRoute page="uscite">
+            <Uscite />
+          </ProtectedRoute>
+        ),
+      },
       {
         path: 'uscite/new',
         element: (
-          <ProtectedRoute roles={['admin']}>
+          <ProtectedRoute page="uscite" roles={getPageEditRoles('uscite')}>
             <UscitaNuova />
           </ProtectedRoute>
         ),
@@ -41,7 +56,7 @@ export const router = createBrowserRouter([
       {
         path: 'uscite/:id',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="uscite">
             <UscitaDettaglio />
           </ProtectedRoute>
         ),
@@ -49,7 +64,7 @@ export const router = createBrowserRouter([
       {
         path: 'magazzino',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="magazzino">
             <Magazzino />
           </ProtectedRoute>
         ),
@@ -57,7 +72,7 @@ export const router = createBrowserRouter([
       {
         path: 'soci',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="soci">
             <Members />
           </ProtectedRoute>
         ),
@@ -65,7 +80,7 @@ export const router = createBrowserRouter([
       {
         path: 'prestito-avanzato',
         element: (
-          <ProtectedRoute roles={['admin']}>
+          <ProtectedRoute page="prestiti">
             <PrestitoAvanzato />
           </ProtectedRoute>
         ),
@@ -73,7 +88,7 @@ export const router = createBrowserRouter([
       {
         path: 'storico-prestiti',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="prestiti">
             <StoricoPrestiti />
           </ProtectedRoute>
         ),
@@ -81,7 +96,7 @@ export const router = createBrowserRouter([
       {
         path: 'corsi',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="scuola">
             <Corso />
           </ProtectedRoute>
         ),
@@ -89,7 +104,7 @@ export const router = createBrowserRouter([
       {
         path: 'biblioteca',
         element: (
-          <ProtectedRoute>
+          <ProtectedRoute page="biblioteca">
             <Biblioteca />
           </ProtectedRoute>
         ),
@@ -97,7 +112,7 @@ export const router = createBrowserRouter([
       {
         path: 'report',
         element: (
-          <ProtectedRoute roles={['admin']}>
+          <ProtectedRoute page="report">
             <Report />
           </ProtectedRoute>
         ),

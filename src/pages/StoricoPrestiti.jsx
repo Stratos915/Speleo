@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useAuth from '../context/useAuth.js';
+import usePermissions from '../hooks/usePermissions.js';
 import { getEquipment, getEquipmentById, setEquipmentAvailability } from '../services/equipment.js';
 
 const FILTERS = [
@@ -12,7 +13,8 @@ const FILTERS = [
 
 export default function StoricoPrestiti() {
   const { role } = useAuth();
-  const isAdmin = role === 'admin';
+  const { canEditSection } = usePermissions();
+  const canManageLoans = canEditSection('prestiti');
   const navigate = useNavigate();
   const [loans, setLoans] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
@@ -78,7 +80,7 @@ export default function StoricoPrestiti() {
   }, [loans, filter, query, equipmentMap]);
 
   async function handleRestitution(loan) {
-    if (!isAdmin) return;
+    if (!canManageLoans) return;
     setProcessingId(loan.id);
     setError('');
     const now = new Date().toISOString();
@@ -200,7 +202,7 @@ export default function StoricoPrestiti() {
                       Apri uscita
                     </button>
                   )}
-                  {isAdmin && loan.status === 'in_corso' && (
+                  {canManageLoans && loan.status === 'in_corso' && (
                     <button type="button" disabled={processingId === loan.id} onClick={() => handleRestitution(loan)}>
                       {processingId === loan.id ? 'Aggiornamento...' : 'Restituisci'}
                     </button>

@@ -19,7 +19,7 @@ export default function Login() {
   useEffect(() => {
     if (loading) return;
     if (isAuthenticated) {
-      navigate(role === 'admin' ? '/dashboard' : '/magazzino', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, role, loading, navigate]);
 
@@ -28,8 +28,8 @@ export default function Login() {
     setError('');
     setSubmitting(true);
     try {
-      const { role: authenticatedRole } = await login(email, password);
-      navigate(authenticatedRole === 'admin' ? '/dashboard' : '/magazzino', { replace: true });
+      await login(email, password);
+      navigate('/dashboard', { replace: true });
     } catch (authError) {
       setError(authError.message ?? 'Credenziali non valide');
     } finally {

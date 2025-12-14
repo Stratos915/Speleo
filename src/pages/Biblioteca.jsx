@@ -10,6 +10,12 @@ import {
   createLibraryLoan,
   getLibraryLoans,
 } from '../services/libraryLoans.js';
+import useAuth from '../context/useAuth.js';
+import { safeLogActivity } from '../services/activityLogs.js';
+import usePermissions from '../hooks/usePermissions.js';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
+import { useNavigate } from 'react-router-dom';
 
 const emptyBookForm = {
   code: '',
@@ -48,6 +54,12 @@ export default function Biblioteca() {
   const [loansLoading, setLoansLoading] = useState(true);
   const [loanError, setLoanError] = useState('');
   const [loanFilter, setLoanFilter] = useState('active');
+  const { user } = useAuth();
+  const { canEditSection, canUseAction } = usePermissions();
+  const canEditLibrary = canEditSection('biblioteca');
+  const canLoanLibrary = canUseAction('biblioteca', 'loan');
+  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadBooks();
@@ -153,10 +165,28 @@ export default function Biblioteca() {
     };
     try {
       if (editingId) {
-        await updateLibraryBook(editingId, payload);
+        const updated = await updateLibraryBook(editingId, payload);
+        safeLogActivity(
+          {
+            action: 'update_library_book',
+            entity: 'library_books',
+            entityId: updated.id,
+            details: { title: updated.title },
+          },
+          user,
+        );
         setEditingId(null);
       } else {
-        await createLibraryBook({ ...payload, status: 'available' });
+        const created = await createLibraryBook({ ...payload, status: 'available' });
+        safeLogActivity(
+          {
+            action: 'create_library_book',
+            entity: 'library_books',
+            entityId: created.id,
+            details: { title: created.title },
+          },
+          user,
+        );
       }
       setBookForm(emptyBookForm);
       loadBooks();
@@ -188,7 +218,17 @@ export default function Biblioteca() {
   function handleBookRemove(bookId) {
     if (!window.confirm('Eliminare questo libro dal catalogo?')) return;
     deleteLibraryBook(bookId)
-      .then(() => loadBooks())
+      .then(() => {
+        safeLogActivity(
+          {
+            action: 'delete_library_book',
+            entity: 'library_books',
+            entityId: bookId,
+          },
+          user,
+        );
+        loadBooks();
+      })
       .catch((removeError) => {
         console.error('[Biblioteca] Errore eliminazione libro:', removeError);
         setMessage(removeError.message ?? 'Impossibile eliminare il libro.');
@@ -208,13 +248,22 @@ export default function Biblioteca() {
       loaned_at: new Date().toISOString(),
     };
     try {
-      await updateLibraryBook(bookId, payload);
+      const updated = await updateLibraryBook(bookId, payload);
       await createLibraryLoan({
         book_id: bookId,
         borrower_name: borrower,
         borrower_contact: contact || null,
         notes: notes || null,
       });
+      safeLogActivity(
+        {
+          action: 'library_loan_create',
+          entity: 'library_loans',
+          entityId: bookId,
+          details: { borrower, title: updated.title },
+        },
+        user,
+      );
       setMessage('');
       await Promise.all([loadBooks(), loadLoans()]);
     } catch (loanError) {
@@ -257,7 +306,7 @@ export default function Biblioteca() {
   async function handleReturn(bookId) {
     const activeLoan = loans.find((loan) => loan.book_id === bookId && loan.status === 'active');
     try {
-      await updateLibraryBook(bookId, {
+      const updated = await updateLibraryBook(bookId, {
         status: 'available',
         borrower_name: null,
         borrower_contact: null,
@@ -267,6 +316,15 @@ export default function Biblioteca() {
       if (activeLoan) {
         await completeLibraryLoan(activeLoan.id);
       }
+      safeLogActivity(
+        {
+          action: 'library_loan_return',
+          entity: 'library_loans',
+          entityId: bookId,
+          details: { title: updated?.title ?? 'N/D' },
+        },
+        user,
+      );
       await Promise.all([loadBooks(), loadLoans()]);
     } catch (returnError) {
       console.error('[Biblioteca] Errore restituzione libro:', returnError);
@@ -276,6 +334,11 @@ export default function Biblioteca() {
 
   return (
     <section className="page-grid">
+      <AlertList
+        alerts={(canEditLibrary ? adminAlerts : []).concat(canLoanLibrary ? userAlerts : [])}
+        navigate={navigate}
+        onDismiss={dismissAlert}
+      />
       <header>
         <h1>Biblioteca sociale</h1>
         <p>
@@ -291,47 +354,53 @@ export default function Biblioteca() {
         </p>
       </article>
 
-      <article className="card">
-        <h2>{editingId ? 'Modifica libro' : 'Aggiungi libro'}</h2>
-        <form
-          onSubmit={handleBookSubmit}
-          style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}
-        >
-          <label>
-            Codice libro
-            <input value={bookForm.code} onChange={(event) => handleBookChange('code', event.target.value)} required placeholder="Es. BIB-001" />
-          </label>
-          <label>
-            Titolo
-            <input value={bookForm.title} onChange={(event) => handleBookChange('title', event.target.value)} required placeholder="Titolo completo" />
-          </label>
-          <label>
-            Autore
-            <input value={bookForm.author} onChange={(event) => handleBookChange('author', event.target.value)} placeholder="Autore/i" />
-          </label>
-          <label>
-            Posizione scaffale
-            <input value={bookForm.shelf} onChange={(event) => handleBookChange('shelf', event.target.value)} placeholder="Es. Scaffale B - Ripiano 3" />
-          </label>
-          <label>
-            Unità tematica
-            <input value={bookForm.topic} onChange={(event) => handleBookChange('topic', event.target.value)} placeholder="Tecnica, storia, catasto..." />
-          </label>
-          <label style={{ gridColumn: '1 / -1' }}>
-            Note
-            <textarea rows={2} value={bookForm.notes} onChange={(event) => handleBookChange('notes', event.target.value)} placeholder="Stato di conservazione, edizione, ecc." />
-          </label>
-          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <button type="submit">{editingId ? 'Aggiorna libro' : 'Aggiungi al catalogo'}</button>
-            {editingId && (
-              <button type="button" style={{ background: '#adb5bd' }} onClick={handleCancelEdit}>
-                Annulla modifica
-              </button>
-            )}
-          </div>
-        </form>
-        {message && <p style={{ marginTop: '0.5rem', color: 'var(--color-accent)' }}>{message}</p>}
-      </article>
+      {canEditLibrary ? (
+        <article className="card">
+          <h2>{editingId ? 'Modifica libro' : 'Aggiungi libro'}</h2>
+          <form
+            onSubmit={handleBookSubmit}
+            style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}
+          >
+            <label>
+              Codice libro
+              <input value={bookForm.code} onChange={(event) => handleBookChange('code', event.target.value)} required placeholder="Es. BIB-001" />
+            </label>
+            <label>
+              Titolo
+              <input value={bookForm.title} onChange={(event) => handleBookChange('title', event.target.value)} required placeholder="Titolo completo" />
+            </label>
+            <label>
+              Autore
+              <input value={bookForm.author} onChange={(event) => handleBookChange('author', event.target.value)} placeholder="Autore/i" />
+            </label>
+            <label>
+              Posizione scaffale
+              <input value={bookForm.shelf} onChange={(event) => handleBookChange('shelf', event.target.value)} placeholder="Es. Scaffale B - Ripiano 3" />
+            </label>
+            <label>
+              Unità tematica
+              <input value={bookForm.topic} onChange={(event) => handleBookChange('topic', event.target.value)} placeholder="Tecnica, storia, catasto..." />
+            </label>
+            <label style={{ gridColumn: '1 / -1' }}>
+              Note
+              <textarea rows={2} value={bookForm.notes} onChange={(event) => handleBookChange('notes', event.target.value)} placeholder="Stato di conservazione, edizione, ecc." />
+            </label>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <button type="submit">{editingId ? 'Aggiorna libro' : 'Aggiungi al catalogo'}</button>
+              {editingId && (
+                <button type="button" style={{ background: '#adb5bd' }} onClick={handleCancelEdit}>
+                  Annulla modifica
+                </button>
+              )}
+            </div>
+          </form>
+          {message && <p style={{ marginTop: '0.5rem', color: 'var(--color-accent)' }}>{message}</p>}
+        </article>
+      ) : (
+        <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
+          Non puoi modificare il catalogo della biblioteca. Visualizzi solo i dati.
+        </p>
+      )}
 
       <article className="card">
         <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -366,14 +435,21 @@ export default function Biblioteca() {
                       {book.author || 'Autore non indicato'} · {book.topic ? `Unità tematica: ${book.topic}` : 'Unità tematica non indicata'}
                     </p>
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <button type="button" onClick={() => handleBookEdit(book)}>
-                      Modifica
-                    </button>
-                    <button type="button" style={{ background: '#e03131' }} onClick={() => handleBookRemove(book.id)}>
-                      Rimuovi
-                    </button>
-                  </div>
+                  {(canEditLibrary || canLoanLibrary) && (
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button type="button" onClick={() => handleBookEdit(book)} disabled={!canEditLibrary} style={{ opacity: canEditLibrary ? 1 : 0.5 }}>
+                        Modifica
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#e03131', opacity: canEditLibrary ? 1 : 0.5 }}
+                        onClick={() => canEditLibrary && handleBookRemove(book.id)}
+                        disabled={!canEditLibrary}
+                      >
+                        Rimuovi
+                      </button>
+                    </div>
+                  )}
                 </header>
 
                 {book.notes && (
@@ -393,13 +469,20 @@ export default function Biblioteca() {
                       <br />
                       Dal: {formatDate(book.loaned_at) || 'data non disponibile'}
                       {book.loan_notes ? ` · Note: ${book.loan_notes}` : ''}
-                      <div style={{ marginTop: '0.5rem' }}>
-                        <button type="button" style={{ background: '#2f9e44' }} onClick={() => handleReturn(book.id)}>
-                          Segna restituzione
-                        </button>
-                      </div>
+                      {(canEditLibrary || canLoanLibrary) && (
+                        <div style={{ marginTop: '0.5rem' }}>
+                          <button
+                            type="button"
+                            style={{ background: '#2f9e44' }}
+                            onClick={() => handleReturn(book.id)}
+                            disabled={!canEditLibrary && !canLoanLibrary}
+                          >
+                            Segna restituzione
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ) : book.status === 'available' ? (
+                  ) : book.status === 'available' && (canEditLibrary || canLoanLibrary) ? (
                     <form
                       onSubmit={(event) => handleLoanSubmit(event, book.id)}
                       style={{
@@ -428,6 +511,10 @@ export default function Biblioteca() {
                         Registra prestito
                       </button>
                     </form>
+                  ) : book.status === 'available' ? (
+                    <p style={{ marginTop: '0.5rem', color: 'var(--color-muted)' }}>
+                      Puoi registrare i prestiti solo con un ruolo autorizzato.
+                    </p>
                   ) : (
                     <p style={{ marginTop: '0.5rem', color: 'var(--color-muted)' }}>
                       Il libro è in manutenzione. Aggiorna lo stato su Supabase per renderlo disponibile.
@@ -453,48 +540,50 @@ export default function Biblioteca() {
           </select>
         </div>
         {loanError && <p style={{ color: 'var(--color-accent)' }}>{loanError}</p>}
-        <form
-          onSubmit={handleNewLoanSubmit}
-          style={{
-            display: 'grid',
-            gap: '0.5rem',
-            margin: '1rem 0',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-          }}
-        >
-          <select
-            value={newLoanForm.bookId}
-            onChange={(event) => handleNewLoanChange('bookId', event.target.value)}
-            disabled={!availableBooks.length}
+        {canEditLibrary && (
+          <form
+            onSubmit={handleNewLoanSubmit}
+            style={{
+              display: 'grid',
+              gap: '0.5rem',
+              margin: '1rem 0',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+            }}
           >
-            <option value="">
-              {availableBooks.length ? 'Seleziona un libro disponibile' : 'Nessun libro disponibile'}
-            </option>
-            {availableBooks.map((book) => (
-              <option key={book.id} value={book.id}>
-                {book.code} · {book.title}
+            <select
+              value={newLoanForm.bookId}
+              onChange={(event) => handleNewLoanChange('bookId', event.target.value)}
+              disabled={!availableBooks.length}
+            >
+              <option value="">
+                {availableBooks.length ? 'Seleziona un libro disponibile' : 'Nessun libro disponibile'}
               </option>
-            ))}
-          </select>
-          <input
-            placeholder="Socio / destinatario"
-            value={newLoanForm.borrower}
-            onChange={(event) => handleNewLoanChange('borrower', event.target.value)}
-          />
-          <input
-            placeholder="Contatto"
-            value={newLoanForm.contact}
-            onChange={(event) => handleNewLoanChange('contact', event.target.value)}
-          />
-          <input
-            placeholder="Note prestito"
-            value={newLoanForm.notes}
-            onChange={(event) => handleNewLoanChange('notes', event.target.value)}
-          />
-          <button type="submit" disabled={!availableBooks.length}>
-            Nuovo prestito
-          </button>
-        </form>
+              {availableBooks.map((book) => (
+                <option key={book.id} value={book.id}>
+                  {book.code} · {book.title}
+                </option>
+              ))}
+            </select>
+            <input
+              placeholder="Socio / destinatario"
+              value={newLoanForm.borrower}
+              onChange={(event) => handleNewLoanChange('borrower', event.target.value)}
+            />
+            <input
+              placeholder="Contatto"
+              value={newLoanForm.contact}
+              onChange={(event) => handleNewLoanChange('contact', event.target.value)}
+            />
+            <input
+              placeholder="Note prestito"
+              value={newLoanForm.notes}
+              onChange={(event) => handleNewLoanChange('notes', event.target.value)}
+            />
+            <button type="submit" disabled={!availableBooks.length}>
+              Nuovo prestito
+            </button>
+          </form>
+        )}
         {loansLoading ? (
           <p>Caricamento prestiti...</p>
         ) : filteredLoans.length ? (
@@ -510,7 +599,7 @@ export default function Biblioteca() {
                         Codice: {book?.code ?? 'N/D'} · Stato prestito: {loan.status === 'active' ? 'Attivo' : 'Restituito'}
                       </p>
                     </div>
-                    {loan.status === 'active' && (
+                    {loan.status === 'active' && canEditLibrary && (
                       <button type="button" style={{ background: '#2f9e44' }} onClick={() => handleReturn(loan.book_id)}>
                         Segna restituzione
                       </button>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
+import usePermissions from '../hooks/usePermissions.js';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
@@ -28,6 +29,8 @@ export default function UscitaDettaglio() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { role } = useAuth();
+  const { canEditSection } = usePermissions();
+  const canEditUscite = canEditSection('uscita');
   const [uscita, setUscita] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -111,7 +114,11 @@ export default function UscitaDettaglio() {
     async function loadMembers() {
       const list = await getMembers();
       const map = new Map();
-      list.forEach((member) => map.set(member.id, member.full_name));
+      list.forEach((member) => {
+        if (member?.id) {
+          map.set(String(member.id), member.full_name);
+        }
+      });
       setMembersMap(map);
     }
     loadMembers();
@@ -326,7 +333,7 @@ export default function UscitaDettaglio() {
         </dl>
       </article>
 
-      {role === 'admin' && (
+      {canEditUscite && (
         <article className="card">
           <h2>Feedback e foto</h2>
           <textarea
@@ -440,7 +447,7 @@ export default function UscitaDettaglio() {
         </article>
       )}
 
-      {role === 'admin' && (
+      {canEditUscite && (
         <article className="card">
           {editMode ? (
             <UscitaForm

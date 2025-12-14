@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getMembers } from '../services/members';
+import usePermissions from '../hooks/usePermissions.js';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
+import { useNavigate } from 'react-router-dom';
 
 const QUALIFICATION_OPTIONS = [
   { value: 'istruttore', label: 'Istruttore' },
@@ -47,6 +51,13 @@ const emptyRegistryForm = {
   nextMaintenanceDate: '',
 };
 
+function normalizeRegistryEntry(entry) {
+  return {
+    ...entry,
+    documents: Array.isArray(entry.documents) ? entry.documents : [],
+  };
+}
+
 function generateId() {
   const cryptoRef = typeof globalThis !== 'undefined' ? globalThis.crypto : null;
   if (cryptoRef?.randomUUID) {
@@ -87,6 +98,29 @@ function buildYearFolder(label, initialCourseName = '') {
 export default function Corso() {
   const currentYear = new Date().getFullYear();
   const initialYear = useMemo(() => buildYearFolder(`Anno ${currentYear}`, `Corso ${currentYear}`), [currentYear]);
+  const { canEditSection, canViewPage } = usePermissions();
+  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
+  const navigate = useNavigate();
+  const canViewScuola = canViewPage('scuola');
+  const canEditScuola = canEditSection('scuola');
+
+  if (!canViewScuola) {
+    return (
+      <section className="page-grid">
+        <p>Non hai i permessi per accedere a questa pagina.</p>
+      </section>
+    );
+  }
+
+  if (!canEditScuola) {
+    return (
+      <section className="page-grid">
+        <h1>Scuola</h1>
+        <p>Puoi consultare corsi e registro dalla pagina Report. Solo il direttore scuola o gli amministratori possono modificarli.</p>
+        <AlertList alerts={userAlerts} navigate={navigate} onDismiss={dismissAlert} />
+      </section>
+    );
+  }
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState('');
@@ -107,6 +141,14 @@ export default function Corso() {
   const [registrySelectedYearId, setRegistrySelectedYearId] = useState(initialYear.id);
   const [registryError, setRegistryError] = useState('');
   const [registryFilter, setRegistryFilter] = useState('all');
+  const [registryDragEntry, setRegistryDragEntry] = useState(null);
+  const [registryUploadStatus, setRegistryUploadStatus] = useState({});
+  const [registryUploadErrors, setRegistryUploadErrors] = useState({});
+  const [coursesFolderExpanded, setCoursesFolderExpanded] = useState(false);
+  const [materialsFolderExpanded, setMaterialsFolderExpanded] = useState(false);
+  const [teachingMaterials, setTeachingMaterials] = useState([]);
+  const [teachingMaterialsUploadStatus, setTeachingMaterialsUploadStatus] = useState(false);
+  const [teachingMaterialsError, setTeachingMaterialsError] = useState('');
   const [hydrated, setHydrated] = useState(false);
 
   const loadMembers = useCallback(async () => {
@@ -160,7 +202,10 @@ export default function Corso() {
         setRegistrySelectedYearId(nextRegistrySelectedYear);
       }
       if (Array.isArray(parsed.registry)) {
-        setRegistry(parsed.registry);
+        setRegistry(parsed.registry.map((entry) => normalizeRegistryEntry(entry)));
+      }
+      if (Array.isArray(parsed.teachingMaterials)) {
+        setTeachingMaterials(parsed.teachingMaterials);
       }
     } catch (storageError) {
       console.error('[Scuola] Impossibile caricare i dati salvati:', storageError);
@@ -176,6 +221,7 @@ export default function Corso() {
         updatedAt: new Date().toISOString(),
         yearFolders,
         registry,
+        teachingMaterials,
         state: {
           activeYearId,
           activeCourseId,
@@ -187,7 +233,7 @@ export default function Corso() {
     } catch (storageError) {
       console.error('[Scuola] Impossibile salvare i dati della scuola:', storageError);
     }
-  }, [hydrated, yearFolders, registry, activeYearId, activeCourseId, registrySelectedYearId]);
+  }, [hydrated, yearFolders, registry, teachingMaterials, activeYearId, activeCourseId, registrySelectedYearId]);
 
   useEffect(() => {
     const year = yearFolders.find((item) => item.id === activeYearId) ?? yearFolders[0] ?? null;
@@ -206,10 +252,15 @@ export default function Corso() {
   const isActiveCourseClosed = Boolean(activeCourse?.isClosed);
   const instructors = activeCourse?.instructors ?? [];
   const students = activeCourse?.students ?? [];
+  const coursesSummary = useMemo(() => {
+    const totalCourses = yearFolders.reduce((sum, year) => sum + (year.courses?.length ?? 0), 0);
+    return { years: yearFolders.length, courses: totalCourses };
+  }, [yearFolders]);
   const registryEntriesWithYear = useMemo(
     () =>
       registry.map((entry) => ({
         ...entry,
+        documents: Array.isArray(entry.documents) ? entry.documents : [],
         yearLabel: yearFolders.find((year) => year.id === entry.yearId)?.label ?? 'Anno non indicato',
       })),
     [registry, yearFolders],
@@ -907,6 +958,7 @@ function updateCourse(yearId, courseId, updater) {
       lastMaintenanceDate: form.lastMaintenanceDate,
       activities: form.activities.trim(),
       nextMaintenanceDate: form.nextMaintenanceDate || addYears(form.lastMaintenanceDate || form.qualificationDate),
+      documents: [],
     };
     setRegistry((prev) => [...prev, nextEntry]);
     setRegistryForm(emptyRegistryForm);
@@ -917,6 +969,7 @@ function updateCourse(yearId, courseId, updater) {
       prev.map((entry) => {
         if (entry.id !== id) return entry;
         const next = { ...entry, [field]: value };
+        if (!Array.isArray(next.documents)) next.documents = entry.documents ?? [];
         if (field === 'lastMaintenanceDate' || field === 'qualificationDate') {
           next.nextMaintenanceDate =
             field === 'lastMaintenanceDate'
@@ -928,12 +981,106 @@ function updateCourse(yearId, courseId, updater) {
     );
   }
 
+  function formatFileSize(bytes) {
+    if (!Number.isFinite(bytes)) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error(`Impossibile leggere il file ${file.name}`));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleRegistryDocumentsUpload(entryId, fileList) {
+    const files = Array.from(fileList ?? []).filter(Boolean);
+    if (!files.length) return;
+    setRegistryUploadErrors((prev) => ({ ...prev, [entryId]: '' }));
+    setRegistryUploadStatus((prev) => ({ ...prev, [entryId]: true }));
+    try {
+      const documents = await Promise.all(
+        files.map(async (file) => ({
+          id: generateId(),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          dataUrl: await readFileAsDataUrl(file),
+          uploadedAt: new Date().toISOString(),
+        })),
+      );
+      setRegistry((prev) =>
+        prev.map((entry) => {
+          if (entry.id !== entryId) return entry;
+          return {
+            ...entry,
+            documents: [...(entry.documents ?? []), ...documents],
+          };
+        }),
+      );
+    } catch (uploadError) {
+      console.error('[Scuola] Errore upload documenti registro:', uploadError);
+      setRegistryUploadErrors((prev) => ({
+        ...prev,
+        [entryId]: uploadError.message ?? 'Impossibile caricare i documenti.',
+      }));
+    } finally {
+      setRegistryUploadStatus((prev) => ({ ...prev, [entryId]: false }));
+    }
+  }
+
+  function handleRegistryDocumentRemove(entryId, documentId) {
+    setRegistry((prev) =>
+      prev.map((entry) => {
+        if (entry.id !== entryId) return entry;
+        return {
+          ...entry,
+          documents: (entry.documents ?? []).filter((document) => document.id !== documentId),
+        };
+      }),
+    );
+  }
+
   function handleRegistryRemove(id) {
     setRegistry((prev) => prev.filter((entry) => entry.id !== id));
   }
 
+  async function handleTeachingMaterialsUpload(fileList) {
+    const files = Array.from(fileList ?? []).filter(Boolean);
+    if (!files.length) return;
+    setTeachingMaterialsError('');
+    setTeachingMaterialsUploadStatus(true);
+    try {
+      const documents = await Promise.all(
+        files.map(async (file) => ({
+          id: generateId(),
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          dataUrl: await readFileAsDataUrl(file),
+          uploadedAt: new Date().toISOString(),
+        })),
+      );
+      setTeachingMaterials((prev) => [...prev, ...documents]);
+    } catch (uploadError) {
+      console.error('[Scuola] Errore upload materiale didattico:', uploadError);
+      setTeachingMaterialsError(uploadError.message ?? 'Impossibile caricare i file.');
+    } finally {
+      setTeachingMaterialsUploadStatus(false);
+    }
+  }
+
+  function handleTeachingMaterialRemove(id) {
+    setTeachingMaterials((prev) => prev.filter((doc) => doc.id !== id));
+  }
+
   return (
     <section className="page-grid">
+      <AlertList alerts={[...adminAlerts, ...userAlerts]} navigate={navigate} onDismiss={dismissAlert} />
       <header>
         <h1>Scuola e formazione</h1>
         <p>
@@ -946,24 +1093,41 @@ function updateCourse(yearId, courseId, updater) {
       </header>
 
       <article className="card">
-        <h2>Cartelle anno</h2>
-        <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-          Ogni anno contiene uno o più corsi. Espandi una cartella per vederne i corsi in dettaglio.
-        </p>
-        <form
-          onSubmit={handleAddYear}
-          style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}
-        >
-          <input
-            placeholder="Es. Anno 2025"
-            value={yearFormLabel}
-            onChange={(event) => setYearFormLabel(event.target.value)}
-            style={{ flex: '1 0 200px' }}
-          />
-          <button type="submit">Nuovo anno</button>
-        </form>
+        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Cartella corsi GSU</h2>
+            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+              Cartelle anno: {coursesSummary.years} · Corsi registrati: {coursesSummary.courses}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCoursesFolderExpanded((prev) => !prev)}
+            style={{ background: coursesFolderExpanded ? '#adb5bd' : 'var(--color-primary)' }}
+          >
+            {coursesFolderExpanded ? 'Chiudi cartella' : 'Apri cartella'}
+          </button>
+        </div>
+        {coursesFolderExpanded && (
+          <>
+            <h2>Cartelle anno</h2>
+            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+              Ogni anno contiene uno o più corsi. Espandi una cartella per vederne i corsi in dettaglio.
+            </p>
+            <form
+              onSubmit={handleAddYear}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '1rem' }}
+            >
+              <input
+                placeholder="Es. Anno 2025"
+                value={yearFormLabel}
+                onChange={(event) => setYearFormLabel(event.target.value)}
+                style={{ flex: '1 0 200px' }}
+              />
+              <button type="submit">Nuovo anno</button>
+            </form>
 
-        <div className="card-list" style={{ marginTop: '1.5rem' }}>
+            <div className="card-list" style={{ marginTop: '1.5rem' }}>
           {yearFolders.map((year) => (
             <article key={year.id} className="card" style={{ padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -1082,7 +1246,9 @@ function updateCourse(yearId, courseId, updater) {
               )}
             </article>
           ))}
-        </div>
+            </div>
+          </>
+        )}
       </article>
       <article className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
@@ -1220,6 +1386,105 @@ function updateCourse(yearId, courseId, updater) {
                               onChange={(event) => handleRegistryUpdate(entry.id, 'nextMaintenanceDate', event.target.value)}
                             />
                           </label>
+                          <div
+                            onDragOver={(event) => {
+                              event.preventDefault();
+                              setRegistryDragEntry(entry.id);
+                            }}
+                            onDragLeave={(event) => {
+                              event.preventDefault();
+                              setRegistryDragEntry((current) => (current === entry.id ? null : current));
+                            }}
+                            onDrop={(event) => {
+                              event.preventDefault();
+                              setRegistryDragEntry(null);
+                              handleRegistryDocumentsUpload(entry.id, event.dataTransfer.files);
+                            }}
+                            style={{
+                              border:
+                                registryDragEntry === entry.id
+                                  ? '2px dashed var(--color-primary)'
+                                  : '1px dashed rgba(0,0,0,0.2)',
+                              borderRadius: '0.75rem',
+                              padding: '0.75rem',
+                              background: '#fff',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.5rem',
+                            }}
+                          >
+                            <div>
+                              <label htmlFor={`registryDocs-${entry.id}`} style={{ fontWeight: 600 }}>
+                                CV e attestati
+                              </label>
+                              <p style={{ margin: '0.15rem 0', color: 'var(--color-muted)' }}>
+                                Trascina i file qui oppure utilizza il pulsante di upload.
+                              </p>
+                            </div>
+                            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                              <input
+                                id={`registryDocs-${entry.id}`}
+                                type="file"
+                                multiple
+                                onChange={(event) => {
+                                  handleRegistryDocumentsUpload(entry.id, event.target.files);
+                                  event.target.value = '';
+                                }}
+                                disabled={Boolean(registryUploadStatus[entry.id])}
+                              />
+                              {registryUploadStatus[entry.id] && <span>Caricamento...</span>}
+                            </div>
+                            {registryUploadErrors[entry.id] && (
+                              <p style={{ color: 'var(--color-accent)' }}>{registryUploadErrors[entry.id]}</p>
+                            )}
+                            {(entry.documents ?? []).length ? (
+                              <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '0.5rem' }}>
+                                {entry.documents.map((document) => {
+                                  const uploadedDate = document.uploadedAt ? new Date(document.uploadedAt) : null;
+                                  const uploadedLabel =
+                                    uploadedDate && !Number.isNaN(uploadedDate.getTime())
+                                      ? uploadedDate.toLocaleDateString('it-IT')
+                                      : 'Data non disponibile';
+                                  return (
+                                    <li
+                                      key={document.id}
+                                      style={{
+                                        display: 'flex',
+                                        flexWrap: 'wrap',
+                                        justifyContent: 'space-between',
+                                        gap: '0.5rem',
+                                        padding: '0.5rem',
+                                        border: '1px solid rgba(0,0,0,0.08)',
+                                        borderRadius: '0.5rem',
+                                        background: '#f8f9fa',
+                                      }}
+                                    >
+                                      <div>
+                                        <strong>{document.name}</strong>
+                                        <p style={{ margin: 0, color: 'var(--color-muted)', fontSize: '0.85rem' }}>
+                                          {formatFileSize(document.size)} · {uploadedLabel}
+                                        </p>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                                        <a href={document.dataUrl} download={document.name}>
+                                          Scarica
+                                        </a>
+                                        <button
+                                          type="button"
+                                          style={{ background: '#e03131' }}
+                                          onClick={() => handleRegistryDocumentRemove(entry.id, document.id)}
+                                        >
+                                          Rimuovi
+                                        </button>
+                                      </div>
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : (
+                              <p style={{ margin: 0, color: 'var(--color-muted)' }}>Nessun documento caricato.</p>
+                            )}
+                          </div>
                         </div>
                       )}
                     </article>
@@ -1232,107 +1497,207 @@ function updateCourse(yearId, courseId, updater) {
               )}
             </div>
 
-            <form
-              onSubmit={handleAddRegistryEntry}
+        <form
+          onSubmit={handleAddRegistryEntry}
+          style={{
+            display: 'grid',
+            gap: '0.75rem',
+            marginTop: '1.5rem',
+            borderTop: '1px solid rgba(0,0,0,0.08)',
+            paddingTop: '1.5rem',
+          }}
+        >
+          <label>
+            Cartella anno
+            <select
+              value={registrySelectedYearId ?? ''}
+              onChange={(event) => handleRegistryYearChange(event.target.value || null)}
+            >
+              <option value="">--</option>
+              {registryYearOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Seleziona istruttore
+            <select
+              value={registryForm.memberId}
+              onChange={(event) => handleRegistryFormChange('memberId', event.target.value)}
+              disabled={membersLoading}
+            >
+              <option value="">--</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Qualifica nel registro
+            <select
+              value={registryForm.qualificationType}
+              onChange={(event) => handleRegistryFormChange('qualificationType', event.target.value)}
+            >
+              {REGISTRY_QUALIFICATION_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Altre qualifiche
+            <input
+              placeholder="Es. referente sicurezza, formatore interno..."
+              value={registryForm.customQualification}
+              onChange={(event) => handleRegistryFormChange('customQualification', event.target.value)}
+            />
+          </label>
+          <label>
+            Data conseguimento qualifica
+            <input
+              type="date"
+              value={registryForm.qualificationDate}
+              onChange={(event) => handleRegistryFormChange('qualificationDate', event.target.value)}
+            />
+          </label>
+          <label>
+            Ultimo mantenimento
+            <input
+              type="date"
+              value={registryForm.lastMaintenanceDate}
+              onChange={(event) => handleRegistryFormChange('lastMaintenanceDate', event.target.value)}
+            />
+          </label>
+          <label>
+            Attività negli ultimi 5 anni
+            <textarea
+              rows={2}
+              placeholder="Corsi seguiti, esercitazioni, stage..."
+              value={registryForm.activities}
+              onChange={(event) => handleRegistryFormChange('activities', event.target.value)}
+            />
+          </label>
+          <label>
+            Prossimo mantenimento
+            <input
+              type="date"
+              value={registryForm.nextMaintenanceDate}
+              onChange={(event) => handleRegistryFormChange('nextMaintenanceDate', event.target.value)}
+            />
+          </label>
+          <button type="submit" disabled={membersLoading || !registrySelectedYearId}>
+            Aggiungi al registro
+          </button>
+          {registryError && <p style={{ color: 'var(--color-accent)' }}>{registryError}</p>}
+        </form>
+      </>
+    )}
+  </article>
+      <article className="card">
+        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Cartella materiale didattico</h2>
+            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
+              File caricati: {teachingMaterials.length}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMaterialsFolderExpanded((prev) => !prev)}
+            style={{ background: materialsFolderExpanded ? '#adb5bd' : 'var(--color-primary)' }}
+          >
+            {materialsFolderExpanded ? 'Chiudi cartella' : 'Apri cartella'}
+          </button>
+        </div>
+        {materialsFolderExpanded && (
+          <div style={{ marginTop: '1rem', display: 'grid', gap: '0.75rem' }}>
+            <p style={{ color: 'var(--color-muted)', margin: 0 }}>
+              Usa l&apos;area seguente per caricare dispense, modulistica e altri documenti utili agli istruttori e ai corsisti.
+            </p>
+            <div
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                handleTeachingMaterialsUpload(event.dataTransfer.files);
+              }}
               style={{
-                display: 'grid',
-                gap: '0.75rem',
-                marginTop: '1.5rem',
-                borderTop: '1px solid rgba(0,0,0,0.08)',
-                paddingTop: '1.5rem',
+                border: '1px dashed rgba(0,0,0,0.2)',
+                borderRadius: '0.75rem',
+                padding: '0.75rem',
+                background: '#fff',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
               }}
             >
-              <label>
-                Cartella anno
-                <select
-                  value={registrySelectedYearId ?? ''}
-                  onChange={(event) => handleRegistryYearChange(event.target.value || null)}
-                >
-                  <option value="">--</option>
-                  {registryYearOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Seleziona istruttore
-                <select
-                  value={registryForm.memberId}
-                  onChange={(event) => handleRegistryFormChange('memberId', event.target.value)}
-                  disabled={membersLoading}
-                >
-                  <option value="">--</option>
-                  {members.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Qualifica nel registro
-                <select
-                  value={registryForm.qualificationType}
-                  onChange={(event) => handleRegistryFormChange('qualificationType', event.target.value)}
-                >
-                  {REGISTRY_QUALIFICATION_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Altre qualifiche
+              <div>
+                <label htmlFor="teachingMaterialsUpload" style={{ fontWeight: 600 }}>
+                  Carica file
+                </label>
+                <p style={{ margin: '0.15rem 0', color: 'var(--color-muted)' }}>
+                  Trascina i file qui oppure utilizza il pulsante Sfoglia.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
                 <input
-                  placeholder="Es. referente sicurezza, formatore interno..."
-                  value={registryForm.customQualification}
-                  onChange={(event) => handleRegistryFormChange('customQualification', event.target.value)}
+                  id="teachingMaterialsUpload"
+                  type="file"
+                  multiple
+                  onChange={(event) => {
+                    handleTeachingMaterialsUpload(event.target.files);
+                    event.target.value = '';
+                  }}
+                  disabled={teachingMaterialsUploadStatus}
                 />
-              </label>
-              <label>
-                Data conseguimento qualifica
-                <input
-                  type="date"
-                  value={registryForm.qualificationDate}
-                  onChange={(event) => handleRegistryFormChange('qualificationDate', event.target.value)}
-                />
-              </label>
-              <label>
-                Ultimo mantenimento
-                <input
-                  type="date"
-                  value={registryForm.lastMaintenanceDate}
-                  onChange={(event) => handleRegistryFormChange('lastMaintenanceDate', event.target.value)}
-                />
-              </label>
-              <label>
-                Attività negli ultimi 5 anni
-                <textarea
-                  rows={2}
-                  placeholder="Corsi seguiti, esercitazioni, stage..."
-                  value={registryForm.activities}
-                  onChange={(event) => handleRegistryFormChange('activities', event.target.value)}
-                />
-              </label>
-              <label>
-                Prossimo mantenimento
-                <input
-                  type="date"
-                  value={registryForm.nextMaintenanceDate}
-                  onChange={(event) => handleRegistryFormChange('nextMaintenanceDate', event.target.value)}
-                />
-              </label>
-              <button type="submit" disabled={membersLoading || !registrySelectedYearId}>
-                Aggiungi al registro
-              </button>
-              {registryError && <p style={{ color: 'var(--color-accent)' }}>{registryError}</p>}
-            </form>
-          </>
+                {teachingMaterialsUploadStatus && <span>Caricamento...</span>}
+              </div>
+              {teachingMaterialsError && <p style={{ color: 'var(--color-accent)' }}>{teachingMaterialsError}</p>}
+            </div>
+            {teachingMaterials.length ? (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.5rem' }}>
+                {teachingMaterials.map((doc) => (
+                  <li
+                    key={doc.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem',
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: '0.5rem',
+                      padding: '0.5rem',
+                      background: '#f8f9fa',
+                    }}
+                  >
+                    <div>
+                      <strong>{doc.name}</strong>
+                      <p style={{ margin: 0, color: 'var(--color-muted)', fontSize: '0.85rem' }}>
+                        {formatFileSize(doc.size)} ·{' '}
+                        {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('it-IT') : 'Data non disponibile'}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                      <a href={doc.dataUrl} download={doc.name}>
+                        Scarica
+                      </a>
+                      <button type="button" style={{ background: '#e03131' }} onClick={() => handleTeachingMaterialRemove(doc.id)}>
+                        Rimuovi
+                      </button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p style={{ margin: 0, color: 'var(--color-muted)' }}>Nessun materiale caricato.</p>
+            )}
+          </div>
         )}
       </article>
-    </section>
+</section>
   );
 }

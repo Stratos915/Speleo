@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
+import usePermissions from '../hooks/usePermissions.js';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
 import {
   createEquipment,
   deleteEquipment,
@@ -8,6 +11,7 @@ import {
   getEquipmentColumnNames,
   updateEquipment,
 } from '../services/equipment';
+import { safeLogActivity } from '../services/activityLogs.js';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -32,8 +36,11 @@ export default function Magazzino() {
   const [availableField, setAvailableField] = useState('quantity_available');
   const [notesField, setNotesField] = useState(null);
   const formRef = useRef(null);
-  const { role } = useAuth();
-  const isAdmin = role === 'admin';
+  const { role, user } = useAuth();
+  const { canEditSection, canUseAction } = usePermissions();
+  const canEditInventory = canEditSection('inventory');
+  const canLoanInventory = canUseAction('magazzino', 'loan');
+  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -137,10 +144,29 @@ export default function Magazzino() {
     }
 
     try {
+      let savedEquipment;
       if (editingId) {
-        await updateEquipment(editingId, payload);
+        savedEquipment = await updateEquipment(editingId, payload);
+        safeLogActivity(
+          {
+            action: 'update_equipment',
+            entity: 'equipment',
+            entityId: savedEquipment.id,
+            details: { name: savedEquipment.name },
+          },
+          user,
+        );
       } else {
-        await createEquipment(payload);
+        savedEquipment = await createEquipment(payload);
+        safeLogActivity(
+          {
+            action: 'create_equipment',
+            entity: 'equipment',
+            entityId: savedEquipment.id,
+            details: { name: savedEquipment.name },
+          },
+          user,
+        );
       }
       setForm(emptyMaterial);
       setEditingId(null);
@@ -182,6 +208,14 @@ export default function Magazzino() {
     setError('');
     try {
       await deleteEquipment(id);
+      safeLogActivity(
+        {
+          action: 'delete_equipment',
+          entity: 'equipment',
+          entityId: id,
+        },
+        user,
+      );
       loadMaterials();
     } catch (deleteError) {
       setError(deleteError.message ?? 'Impossibile eliminare il materiale.');
@@ -190,6 +224,11 @@ export default function Magazzino() {
 
   return (
     <section className="page-grid">
+      <AlertList
+        alerts={[...adminAlerts, ...(canLoanInventory ? userAlerts : [])]}
+        navigate={navigate}
+        onDismiss={dismissAlert}
+      />
       <div>
         <h1>Magazzino materiali</h1>
         <p>Gestisci l&apos;inventario dell&apos;attrezzatura speleo già importata su Supabase.</p>
@@ -202,7 +241,13 @@ export default function Magazzino() {
         onChange={(event) => setSearch(event.target.value)}
       />
 
-      {showForm && (
+      {!canEditInventory && (
+        <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
+          Non hai i permessi per modificare il magazzino. Puoi consultare i materiali ma non aggiornarli.
+        </p>
+      )}
+
+      {showForm && canEditInventory && (
         <div className="card" ref={formRef}>
           <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
             <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
@@ -296,47 +341,59 @@ export default function Magazzino() {
                 {notesField && material[notesField] && (
                   <p style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>Note: {material[notesField]}</p>
                 )}
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      startEdit(material);
-                      setShowForm(true);
-                    }}
-                  >
-                    Modifica
-                  </button>
-                  <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(material.id)}>
-                    Elimina
-                  </button>
-                  {isAdmin && (
+                {(canEditInventory || canLoanInventory) && (
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
                       type="button"
-                      style={{ background: 'var(--color-primary-dark)' }}
-                      onClick={() => navigate(`/prestito-avanzato?equipmentId=${material.id}`)}
+                      onClick={() => {
+                        if (!canEditInventory) return;
+                        startEdit(material);
+                        setShowForm(true);
+                      }}
+                      disabled={!canEditInventory}
+                      style={{ opacity: canEditInventory ? 1 : 0.5, cursor: canEditInventory ? 'pointer' : 'not-allowed' }}
                     >
-                      Presta
+                      Modifica
                     </button>
-                  )}
-                </div>
+                    <button
+                      type="button"
+                      style={{ background: '#e03131', opacity: canEditInventory ? 1 : 0.5, cursor: canEditInventory ? 'pointer' : 'not-allowed' }}
+                      onClick={() => canEditInventory && handleDelete(material.id)}
+                      disabled={!canEditInventory}
+                    >
+                      Elimina
+                    </button>
+                    {canLoanInventory && (
+                      <button
+                        type="button"
+                        style={{ background: 'var(--color-primary-dark)' }}
+                        onClick={() => navigate(`/prestito-avanzato?equipmentId=${material.id}`)}
+                      >
+                        Presta
+                      </button>
+                    )}
+                  </div>
+                )}
               </article>
             );
           })}
           {!filtered.length && <p>Nessun materiale trovato.</p>}
         </div>
       )}
-      <button
-        type="button"
-        className="floating-button"
-      onClick={() => {
-        setShowForm((prev) => !prev);
-        setEditingId(null);
-        setEditingBorrowed(0);
-        setForm(emptyMaterial);
-      }}
-    >
-        {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
-      </button>
+      {canEditInventory && (
+        <button
+          type="button"
+          className="floating-button"
+          onClick={() => {
+            setShowForm((prev) => !prev);
+            setEditingId(null);
+            setEditingBorrowed(0);
+            setForm(emptyMaterial);
+          }}
+        >
+          {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
+        </button>
+      )}
     </section>
   );
 }

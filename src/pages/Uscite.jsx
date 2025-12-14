@@ -1,10 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
+import usePermissions from '../hooks/usePermissions.js';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
 import { deleteUscita, getUscite, createUscita, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { supabase } from '../lib/supabaseClient';
+import { safeLogActivity } from '../services/activityLogs.js';
+import { dedupeMembers } from '../utils/members.js';
 
 const TIPO_OPTIONS = [
   { value: '', label: 'Tutte' },
@@ -46,7 +51,10 @@ export default function Uscite() {
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formSuccess, setFormSuccess] = useState('');
-  const { role } = useAuth();
+  const { role, user } = useAuth();
+  const { canEditSection } = usePermissions();
+  const canEditUscite = canEditSection('uscita');
+  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
   const [activeLoansMap, setActiveLoansMap] = useState(new Map());
   const [statusFilter, setStatusFilter] = useState('open');
@@ -70,7 +78,7 @@ export default function Uscite() {
       }
 
       if (membersResponse.status === 'fulfilled') {
-        setMembers(membersResponse.value);
+        setMembers(dedupeMembers(membersResponse.value ?? []));
       } else {
         console.warn('[Uscite] Impossibile caricare i soci collegati:', membersResponse.reason?.message ?? membersResponse.reason);
         setMembers([]);
@@ -105,6 +113,14 @@ export default function Uscite() {
     }
     try {
       await deleteUscita(id);
+      safeLogActivity(
+        {
+          action: 'delete_uscita',
+          entity: 'uscite',
+          entityId: id,
+        },
+        user,
+      );
       await loadUscite();
     } catch (deleteError) {
       setError(deleteError.message ?? 'Errore durante l\'eliminazione dell\'uscita.');
@@ -119,13 +135,31 @@ export default function Uscite() {
       if (supportsClosedAt) {
         payload.closed_at = nextStatus === 'chiusa' ? new Date().toISOString() : null;
       }
-      await updateUscita(uscita.id, payload);
+      const updated = await updateUscita(uscita.id, payload);
+      safeLogActivity(
+        {
+          action: 'change_uscita_status',
+          entity: 'uscite',
+          entityId: updated.id,
+          details: { status: nextStatus },
+        },
+        user,
+      );
       await loadUscite();
     } catch (statusError) {
       if (supportsClosedAt && /closed_at/i.test(statusError.message ?? '')) {
         setSupportsClosedAt(false);
         try {
-          await updateUscita(uscita.id, { status: nextStatus });
+          const fallbackUpdated = await updateUscita(uscita.id, { status: nextStatus });
+          safeLogActivity(
+            {
+              action: 'change_uscita_status',
+              entity: 'uscite',
+              entityId: fallbackUpdated.id,
+              details: { status: nextStatus },
+            },
+            user,
+          );
           await loadUscite();
           return;
         } catch (fallbackError) {
@@ -144,7 +178,16 @@ export default function Uscite() {
     setFormSuccess('');
     setFormSubmitting(true);
     try {
-      await createUscita(payload);
+      const created = await createUscita(payload);
+      safeLogActivity(
+        {
+          action: 'create_uscita',
+          entity: 'uscite',
+          entityId: created.id,
+          details: { titolo: created.titolo, data: created.data },
+        },
+        user,
+      );
       setFormSuccess('Uscita registrata correttamente.');
       setShowForm(false);
       await loadUscite();
@@ -162,8 +205,8 @@ export default function Uscite() {
   const membersMap = useMemo(() => {
     const result = new Map();
     members.forEach((member) => {
-      if (member.id) {
-        result.set(member.id, member.full_name);
+      if (member?.id) {
+        result.set(String(member.id), member.full_name);
       }
     });
     return result;
@@ -194,6 +237,7 @@ export default function Uscite() {
 
   return (
     <section className="page-grid">
+      <AlertList alerts={[...adminAlerts, ...userAlerts]} navigate={navigate} onDismiss={dismissAlert} />
       <header>
         <h1>Uscite</h1>
         <p>Elenco aggiornato di spedizioni, corsi e attività in programma.</p>
@@ -236,7 +280,13 @@ export default function Uscite() {
 
       {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
 
-      {showForm && (
+      {!canEditUscite && (
+        <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
+          Non puoi modificare le uscite. Hai accesso in sola lettura.
+        </p>
+      )}
+
+      {showForm && canEditUscite && (
         <UscitaForm
           onSubmit={handleCreate}
           submitting={formSubmitting}
@@ -247,7 +297,7 @@ export default function Uscite() {
             setFormSuccess('');
             setFormError('');
           }}
-          membersList={members.length ? members : null}
+          membersList={members}
         />
       )}
 
@@ -262,7 +312,7 @@ export default function Uscite() {
             const uscitaDate = uscita.data ? new Date(uscita.data) : null;
             const isPast = uscitaDate && uscitaDate < new Date();
             const isClosed = uscita.status === 'chiusa';
-            const disableLoanButton = isClosed || (isPast && !activeLoansMap.get(uscita.id));
+            const disableLoanButton = isClosed;
             return (
               <article className="card" key={uscita.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -310,34 +360,32 @@ export default function Uscite() {
               )}
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <Link to={`/uscite/${uscita.id}`}>Apri scheda</Link>
-                {role === 'admin' && (
+                {canEditUscite && (
                   <button
                     type="button"
                     onClick={() => goToPrestito(uscita)}
                     disabled={disableLoanButton}
                     title={
                       disableLoanButton
-                        ? isClosed
-                          ? 'Uscita chiusa: non è possibile registrare materiale'
-                          : 'Uscita conclusa: prestiti non disponibili'
+                        ? 'Uscita chiusa: non è possibile registrare materiale'
                         : undefined
                     }
                   >
                     Materiale necessario
                   </button>
                 )}
-                {role === 'admin' && (
+                {canEditUscite && (
                   <button
                     type="button"
                     style={{ background: '#adb5bd' }}
                     onClick={() => navigate(`/uscite/${uscita.id}`)}
-                    disabled={isClosed || isPast}
-                    title={isClosed || isPast ? 'Non puoi modificare uscite concluse.' : undefined}
+                    disabled={isClosed}
+                    title={isClosed ? 'Non puoi modificare uscite concluse.' : undefined}
                   >
                     Modifica
                   </button>
                 )}
-                {role === 'admin' && (
+                {canEditUscite && (
                   <button
                     type="button"
                     style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
@@ -351,7 +399,7 @@ export default function Uscite() {
                       : 'Chiudi'}
                   </button>
                 )}
-                {role === 'admin' && (
+                {canEditUscite && (
                   <button type="button" style={{ background: '#f27367' }} onClick={() => handleDelete(uscita.id)}>
                     Elimina
                   </button>
@@ -364,17 +412,19 @@ export default function Uscite() {
         </div>
       )}
 
-      <button
-        className="floating-button"
-        type="button"
-        onClick={() => {
-          setShowForm((prev) => !prev);
-          setFormError('');
-          setFormSuccess('');
-        }}
-      >
-        {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
-      </button>
+      {canEditUscite && (
+        <button
+          className="floating-button"
+          type="button"
+          onClick={() => {
+            setShowForm((prev) => !prev);
+            setFormError('');
+            setFormSuccess('');
+          }}
+        >
+          {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
+        </button>
+      )}
     </section>
   );
 }
