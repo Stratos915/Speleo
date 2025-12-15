@@ -22,6 +22,19 @@ const emptyInstructorForm = {
   customQualification: '',
 };
 
+const TEACHING_MATERIAL_CATEGORIES = [
+  { value: 'general', label: 'Varie e comunicazioni' },
+  { value: 'dispense', label: 'Dispense teoria' },
+  { value: 'modulistica', label: 'Modulistica corsisti' },
+  { value: 'esercitazioni', label: 'Esercitazioni e uscite' },
+  { value: 'supporto', label: 'Supporto per corsisti' },
+];
+
+const TEACHING_MATERIAL_SORT_OPTIONS = [
+  { value: 'recent', label: 'Più recenti' },
+  { value: 'name', label: 'Nome (A-Z)' },
+];
+
 const emptyStudentForm = {
   firstName: '',
   lastName: '',
@@ -56,6 +69,24 @@ function normalizeRegistryEntry(entry) {
     ...entry,
     documents: Array.isArray(entry.documents) ? entry.documents : [],
   };
+}
+
+function normalizeTeachingMaterial(material) {
+  const fallbackCategory = TEACHING_MATERIAL_CATEGORIES[0].value;
+  return {
+    ...material,
+    category: TEACHING_MATERIAL_CATEGORIES.some((option) => option.value === material.category)
+      ? material.category
+      : fallbackCategory,
+  };
+}
+
+function isValidTeachingMaterialSort(value) {
+  return TEACHING_MATERIAL_SORT_OPTIONS.some((option) => option.value === value);
+}
+
+function isValidTeachingMaterialCategory(value) {
+  return TEACHING_MATERIAL_CATEGORIES.some((option) => option.value === value);
 }
 
 function generateId() {
@@ -147,6 +178,11 @@ export default function Corso() {
   const [coursesFolderExpanded, setCoursesFolderExpanded] = useState(false);
   const [materialsFolderExpanded, setMaterialsFolderExpanded] = useState(false);
   const [teachingMaterials, setTeachingMaterials] = useState([]);
+  const [teachingMaterialsSort, setTeachingMaterialsSort] = useState(TEACHING_MATERIAL_SORT_OPTIONS[0].value);
+  const [teachingMaterialsFilter, setTeachingMaterialsFilter] = useState('all');
+  const [teachingMaterialsNewCategory, setTeachingMaterialsNewCategory] = useState(
+    TEACHING_MATERIAL_CATEGORIES[0].value,
+  );
   const [teachingMaterialsUploadStatus, setTeachingMaterialsUploadStatus] = useState(false);
   const [teachingMaterialsError, setTeachingMaterialsError] = useState('');
   const [hydrated, setHydrated] = useState(false);
@@ -205,7 +241,30 @@ export default function Corso() {
         setRegistry(parsed.registry.map((entry) => normalizeRegistryEntry(entry)));
       }
       if (Array.isArray(parsed.teachingMaterials)) {
-        setTeachingMaterials(parsed.teachingMaterials);
+        setTeachingMaterials(parsed.teachingMaterials.map((material) => normalizeTeachingMaterial(material)));
+      }
+      if (parsed.state) {
+        if (typeof parsed.state.coursesFolderExpanded === 'boolean') {
+          setCoursesFolderExpanded(parsed.state.coursesFolderExpanded);
+        }
+        if (typeof parsed.state.registryFolderExpanded === 'boolean') {
+          setRegistryFolderExpanded(parsed.state.registryFolderExpanded);
+        }
+        if (typeof parsed.state.materialsFolderExpanded === 'boolean') {
+          setMaterialsFolderExpanded(parsed.state.materialsFolderExpanded);
+        }
+        if (
+          parsed.state.teachingMaterialsFilter === 'all' ||
+          isValidTeachingMaterialCategory(parsed.state.teachingMaterialsFilter)
+        ) {
+          setTeachingMaterialsFilter(parsed.state.teachingMaterialsFilter);
+        }
+        if (isValidTeachingMaterialSort(parsed.state.teachingMaterialsSort)) {
+          setTeachingMaterialsSort(parsed.state.teachingMaterialsSort);
+        }
+        if (isValidTeachingMaterialCategory(parsed.state.teachingMaterialsNewCategory)) {
+          setTeachingMaterialsNewCategory(parsed.state.teachingMaterialsNewCategory);
+        }
       }
     } catch (storageError) {
       console.error('[Scuola] Impossibile caricare i dati salvati:', storageError);
@@ -226,6 +285,12 @@ export default function Corso() {
           activeYearId,
           activeCourseId,
           registrySelectedYearId,
+          coursesFolderExpanded,
+          registryFolderExpanded,
+          materialsFolderExpanded,
+          teachingMaterialsFilter,
+          teachingMaterialsSort,
+          teachingMaterialsNewCategory,
         },
       };
       window.localStorage.setItem(SCUOLA_STORAGE_KEY, JSON.stringify(payload));
@@ -233,7 +298,21 @@ export default function Corso() {
     } catch (storageError) {
       console.error('[Scuola] Impossibile salvare i dati della scuola:', storageError);
     }
-  }, [hydrated, yearFolders, registry, teachingMaterials, activeYearId, activeCourseId, registrySelectedYearId]);
+  }, [
+    hydrated,
+    yearFolders,
+    registry,
+    teachingMaterials,
+    activeYearId,
+    activeCourseId,
+    registrySelectedYearId,
+    coursesFolderExpanded,
+    registryFolderExpanded,
+    materialsFolderExpanded,
+    teachingMaterialsFilter,
+    teachingMaterialsSort,
+    teachingMaterialsNewCategory,
+  ]);
 
   useEffect(() => {
     const year = yearFolders.find((item) => item.id === activeYearId) ?? yearFolders[0] ?? null;
@@ -300,6 +379,31 @@ export default function Corso() {
       return a.label.localeCompare(b.label, 'it', { numeric: true });
     });
   }, [yearFolders]);
+
+  const teachingMaterialsList = useMemo(() => {
+    const filtered = teachingMaterials.filter((material) =>
+      teachingMaterialsFilter === 'all' ? true : material.category === teachingMaterialsFilter,
+    );
+    const sorted = [...filtered];
+    if (teachingMaterialsSort === 'name') {
+      sorted.sort((a, b) => a.name.localeCompare(b.name, 'it', { sensitivity: 'base' }));
+      return sorted;
+    }
+    sorted.sort((a, b) => {
+      const dateA = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+      const dateB = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+      if (dateA === dateB) return a.name.localeCompare(b.name, 'it', { sensitivity: 'base' });
+      return dateB - dateA;
+    });
+    return sorted;
+  }, [teachingMaterials, teachingMaterialsFilter, teachingMaterialsSort]);
+
+  const teachingMaterialsNewCategoryLabel = useMemo(() => {
+    return (
+      TEACHING_MATERIAL_CATEGORIES.find((option) => option.value === teachingMaterialsNewCategory)?.label ??
+      TEACHING_MATERIAL_CATEGORIES[0].label
+    );
+  }, [teachingMaterialsNewCategory]);
 
   function updateYearFolder(yearId, updater) {
     setYearFolders((prev) =>
@@ -1063,6 +1167,7 @@ function updateCourse(yearId, courseId, updater) {
           type: file.type,
           dataUrl: await readFileAsDataUrl(file),
           uploadedAt: new Date().toISOString(),
+          category: teachingMaterialsNewCategory,
         })),
       );
       setTeachingMaterials((prev) => [...prev, ...documents]);
@@ -1076,6 +1181,12 @@ function updateCourse(yearId, courseId, updater) {
 
   function handleTeachingMaterialRemove(id) {
     setTeachingMaterials((prev) => prev.filter((doc) => doc.id !== id));
+  }
+
+  function handleTeachingMaterialUpdate(id, field, value) {
+    setTeachingMaterials((prev) =>
+      prev.map((doc) => (doc.id === id ? { ...doc, [field]: value } : doc)),
+    );
   }
 
   return (
@@ -1604,6 +1715,7 @@ function updateCourse(yearId, courseId, updater) {
             <h2 style={{ margin: 0 }}>Cartella materiale didattico</h2>
             <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
               File caricati: {teachingMaterials.length}
+              {teachingMaterialsFilter !== 'all' ? ` · Visibili: ${teachingMaterialsList.length}` : ''}
             </p>
           </div>
           <button
@@ -1619,6 +1731,45 @@ function updateCourse(yearId, courseId, updater) {
             <p style={{ color: 'var(--color-muted)', margin: 0 }}>
               Usa l&apos;area seguente per caricare dispense, modulistica e altri documenti utili agli istruttori e ai corsisti.
             </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
+              <label style={{ flex: '1 0 220px' }}>
+                Categoria nuovo upload
+                <select
+                  value={teachingMaterialsNewCategory}
+                  onChange={(event) => setTeachingMaterialsNewCategory(event.target.value)}
+                >
+                  {TEACHING_MATERIAL_CATEGORIES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ flex: '1 0 220px' }}>
+                Filtro categoria
+                <select value={teachingMaterialsFilter} onChange={(event) => setTeachingMaterialsFilter(event.target.value)}>
+                  <option value="all">Tutte le categorie</option>
+                  {TEACHING_MATERIAL_CATEGORIES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ flex: '1 0 200px' }}>
+                Ordina per
+                <select
+                  value={teachingMaterialsSort}
+                  onChange={(event) => setTeachingMaterialsSort(event.target.value)}
+                >
+                  {TEACHING_MATERIAL_SORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <div
               onDragOver={(event) => event.preventDefault()}
               onDrop={(event) => {
@@ -1640,7 +1791,9 @@ function updateCourse(yearId, courseId, updater) {
                   Carica file
                 </label>
                 <p style={{ margin: '0.15rem 0', color: 'var(--color-muted)' }}>
-                  Trascina i file qui oppure utilizza il pulsante Sfoglia.
+                  Trascina i file qui oppure utilizza il pulsante Sfoglia. Verranno aggiunti alla categoria
+                  {' '}
+                  <strong>{teachingMaterialsNewCategoryLabel}</strong> (puoi modificarla anche dopo l&apos;upload).
                 </p>
               </div>
               <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1658,9 +1811,9 @@ function updateCourse(yearId, courseId, updater) {
               </div>
               {teachingMaterialsError && <p style={{ color: 'var(--color-accent)' }}>{teachingMaterialsError}</p>}
             </div>
-            {teachingMaterials.length ? (
+            {teachingMaterialsList.length ? (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.5rem' }}>
-                {teachingMaterials.map((doc) => (
+                {teachingMaterialsList.map((doc) => (
                   <li
                     key={doc.id}
                     style={{
@@ -1674,12 +1827,25 @@ function updateCourse(yearId, courseId, updater) {
                       background: '#f8f9fa',
                     }}
                   >
-                    <div>
+                    <div style={{ flex: '1 0 220px' }}>
                       <strong>{doc.name}</strong>
                       <p style={{ margin: 0, color: 'var(--color-muted)', fontSize: '0.85rem' }}>
                         {formatFileSize(doc.size)} ·{' '}
                         {doc.uploadedAt ? new Date(doc.uploadedAt).toLocaleDateString('it-IT') : 'Data non disponibile'}
                       </p>
+                      <label style={{ display: 'block', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                        Categoria
+                        <select
+                          value={doc.category}
+                          onChange={(event) => handleTeachingMaterialUpdate(doc.id, 'category', event.target.value)}
+                        >
+                          {TEACHING_MATERIAL_CATEGORIES.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
                     </div>
                     <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
                       <a href={doc.dataUrl} download={doc.name}>
@@ -1693,7 +1859,11 @@ function updateCourse(yearId, courseId, updater) {
                 ))}
               </ul>
             ) : (
-              <p style={{ margin: 0, color: 'var(--color-muted)' }}>Nessun materiale caricato.</p>
+              <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                {teachingMaterials.length
+                  ? 'Nessun file corrisponde ai filtri selezionati.'
+                  : 'Nessun materiale caricato.'}
+              </p>
             )}
           </div>
         )}

@@ -15,6 +15,7 @@ export default function StoricoPrestiti() {
   const { role } = useAuth();
   const { canEditSection } = usePermissions();
   const canManageLoans = canEditSection('prestiti');
+  const canDeleteLoans = role === 'admin' || role === 'presidente';
   const navigate = useNavigate();
   const [loans, setLoans] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
@@ -111,6 +112,21 @@ export default function StoricoPrestiti() {
     loadLoans();
   }
 
+  async function handleDeleteLoan(loan) {
+    if (!canDeleteLoans) return;
+    if (!window.confirm('Eliminare questa voce dal registro prestiti?')) {
+      return;
+    }
+    setProcessingId(loan.id);
+    setError('');
+    const { error: deleteError } = await supabase.from('loans').delete().eq('id', loan.id);
+    if (deleteError) {
+      setError('Impossibile eliminare il prestito selezionato.');
+    }
+    setProcessingId(null);
+    await loadLoans();
+  }
+
   function formatDate(value) {
     if (!value) return '—';
     return new Intl.DateTimeFormat('it-IT', {
@@ -205,6 +221,16 @@ export default function StoricoPrestiti() {
                   {canManageLoans && loan.status === 'in_corso' && (
                     <button type="button" disabled={processingId === loan.id} onClick={() => handleRestitution(loan)}>
                       {processingId === loan.id ? 'Aggiornamento...' : 'Restituisci'}
+                    </button>
+                  )}
+                  {canDeleteLoans && (
+                    <button
+                      type="button"
+                      style={{ background: '#e03131' }}
+                      disabled={processingId === loan.id}
+                      onClick={() => handleDeleteLoan(loan)}
+                    >
+                      Elimina
                     </button>
                   )}
                 </div>

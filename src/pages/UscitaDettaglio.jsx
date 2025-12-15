@@ -51,6 +51,7 @@ export default function UscitaDettaglio() {
   const [statusError, setStatusError] = useState('');
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [photoDownloadError, setPhotoDownloadError] = useState('');
 
   const loadDettaglio = useCallback(async () => {
     if (!id) return;
@@ -233,6 +234,30 @@ export default function UscitaDettaglio() {
     }
   }
 
+  async function handlePhotoDownload(url) {
+    if (!url) return;
+    setPhotoDownloadError('');
+    try {
+      const response = await fetch(url);
+      if (!response.ok) {
+        throw new Error('Impossibile scaricare la foto.');
+      }
+      const blob = await response.blob();
+      const objectUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const pathname = url.split('?')[0];
+      const fallbackName = pathname.split('/').pop() || 'foto-uscita';
+      link.href = objectUrl;
+      link.download = decodeURIComponent(fallbackName);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(objectUrl);
+    } catch (downloadError) {
+      setPhotoDownloadError(downloadError.message ?? 'Impossibile scaricare la foto.');
+    }
+  }
+
   const supportsClosedAt = uscita ? Object.prototype.hasOwnProperty.call(uscita, 'closed_at') : false;
   const isClosed = uscita?.status === 'chiusa';
   const mapsLink = useMemo(() => {
@@ -260,6 +285,8 @@ export default function UscitaDettaglio() {
     if (!uscitaDateObject || Number.isNaN(uscitaDateObject.getTime())) return false;
     return uscitaDateObject < new Date() && !hasOpenLoans;
   }, [uscitaDateObject, hasOpenLoans, isClosed]);
+
+  const canReopenUscita = role === 'admin' || role === 'presidente';
 
   if (loading) {
     return <p>Caricamento uscita...</p>;
@@ -341,7 +368,6 @@ export default function UscitaDettaglio() {
             placeholder="Commenti conclusivi sull'uscita..."
             value={feedbackText}
             onChange={(event) => setFeedbackText(event.target.value)}
-            disabled={isClosed}
           />
           <label htmlFor="photoUrls" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
             Link foto (uno per riga)
@@ -352,21 +378,41 @@ export default function UscitaDettaglio() {
             placeholder="https://..."
             value={photosText}
             onChange={(event) => setPhotosText(event.target.value)}
-            disabled={isClosed}
           />
           {PHOTO_BUCKET ? (
             <>
               <label htmlFor="photoUpload" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
                 Carica nuove foto
               </label>
-              <input
-                id="photoUpload"
-                type="file"
-                accept="image/*"
-                multiple
-                onChange={handlePhotoUpload}
-                disabled={uploadingPhotos || isClosed}
-              />
+              <div
+                onDragOver={(event) => {
+                  event.preventDefault();
+                }}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  if (uploadingPhotos) return;
+                  handlePhotoUpload({ target: { files: event.dataTransfer.files } });
+                }}
+                style={{
+                  border: '1px dashed rgba(0,0,0,0.2)',
+                  borderRadius: '0.75rem',
+                  padding: '0.75rem',
+                  marginBottom: '0.5rem',
+                  background: '#fff',
+                }}
+              >
+                <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                  Trascina le foto qui oppure utilizza il pulsante Sfoglia.
+                </p>
+                <input
+                  id="photoUpload"
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  onChange={handlePhotoUpload}
+                  disabled={uploadingPhotos}
+                />
+              </div>
             </>
           ) : (
             <p style={{ color: 'var(--color-muted)' }}>
@@ -374,7 +420,7 @@ export default function UscitaDettaglio() {
             </p>
           )}
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving || isClosed}>
+            <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving}>
               {feedbackSaving ? 'Salvataggio...' : 'Salva feedback'}
             </button>
             <button
@@ -384,14 +430,24 @@ export default function UscitaDettaglio() {
                 setFeedbackText(uscita.feedback ?? '');
                 setPhotosText((uscita.photo_urls ?? []).join('\n'));
               }}
-              disabled={isClosed}
             >
               Ripristina
             </button>
+            {!isClosed && (
+              <button
+                type="button"
+                style={{ background: '#2b8a3e' }}
+                onClick={() => handleStatusToggle('chiusa')}
+                disabled={statusChanging}
+              >
+                {statusChanging ? 'Aggiornamento...' : 'Chiudi uscita'}
+              </button>
+            )}
           </div>
           {feedbackError && <p style={{ color: 'var(--color-accent)' }}>{feedbackError}</p>}
           {feedbackStatus && <p style={{ color: 'var(--color-primary)' }}>{feedbackStatus}</p>}
           {uploadError && <p style={{ color: 'var(--color-accent)' }}>{uploadError}</p>}
+          {photoDownloadError && <p style={{ color: 'var(--color-accent)' }}>{photoDownloadError}</p>}
           {(uscita.photo_urls ?? []).length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
               <strong>Foto caricate:</strong>
@@ -435,9 +491,13 @@ export default function UscitaDettaglio() {
                       <a href={url} target="_blank" rel="noopener noreferrer">
                         Apri originale
                       </a>
-                      <a href={url} download>
+                      <button
+                        type="button"
+                        style={{ background: '#2b8a3e', color: '#fff' }}
+                        onClick={() => handlePhotoDownload(url)}
+                      >
                         Scarica
-                      </a>
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -497,9 +557,18 @@ export default function UscitaDettaglio() {
                   type="button"
                   style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
                   onClick={() => handleStatusToggle(isClosed ? 'aperta' : 'chiusa')}
-                  disabled={statusChanging}
+                  disabled={statusChanging || (isClosed && !canReopenUscita)}
+                  title={
+                    isClosed && !canReopenUscita
+                      ? 'Solo admin e presidente possono riaprire un\'uscita chiusa.'
+                      : undefined
+                  }
                 >
-                  {statusChanging ? 'Aggiornamento...' : isClosed ? 'Riapri uscita' : 'Chiudi uscita'}
+                  {statusChanging
+                    ? 'Aggiornamento...'
+                    : isClosed
+                    ? 'Riapri uscita'
+                    : 'Chiudi uscita'}
                 </button>
               </div>
               {disableLoanButton && (

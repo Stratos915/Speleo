@@ -60,6 +60,7 @@ export default function Uscite() {
   const [statusFilter, setStatusFilter] = useState('open');
   const [statusChangingId, setStatusChangingId] = useState(null);
   const [supportsClosedAt, setSupportsClosedAt] = useState(false);
+  const canReopenUscita = role === 'admin' || role === 'presidente';
 
   const loadUscite = useCallback(async () => {
     setLoading(true);
@@ -385,12 +386,17 @@ export default function Uscite() {
                     Modifica
                   </button>
                 )}
-                {canEditUscite && (
+                {canEditUscite && (!isClosed || canReopenUscita) && (
                   <button
                     type="button"
                     style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
                     onClick={() => handleStatusChange(uscita, isClosed ? 'aperta' : 'chiusa')}
                     disabled={statusChangingId === uscita.id}
+                    title={
+                      isClosed && !canReopenUscita
+                        ? 'Solo admin e presidente possono riaprire un\'uscita chiusa.'
+                        : undefined
+                    }
                   >
                     {statusChangingId === uscita.id
                       ? 'Aggiornamento...'
