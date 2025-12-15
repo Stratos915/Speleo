@@ -1,0 +1,29 @@
+name: notification-cron
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Motivo dell\'esecuzione manuale'
+        required: false
+
+jobs:
+  run-cron:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v1.x
+      - name: Run notification cron
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          NOTIFICATION_CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
+          NOTIFICATION_EMAIL_WEBHOOK: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK }}
+          NOTIFICATION_ADMIN_EMAIL: ${{ secrets.NOTIFICATION_ADMIN_EMAIL }}
+          NOTIFICATION_MAGAZZINIERE_EMAIL: ${{ secrets.NOTIFICATION_MAGAZZINIERE_EMAIL }}
+          NOTIFICATION_PRESIDENTE_EMAIL: ${{ secrets.NOTIFICATION_PRESIDENTE_EMAIL }}
+        run: deno run -A supabase/functions/notification-cron/index.ts
