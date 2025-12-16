@@ -1,5 +1,4 @@
 // deno-lint-ignore-file no-explicit-any
-import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.1';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL');
@@ -172,17 +171,34 @@ async function deliverPendingEmails() {
   }
 }
 
-serve(async (req: Request) => {
+const cronSecret = Deno.env.get('NOTIFICATION_CRON_SECRET');
+
+async function runCron() {
+  await generateLoanNotifications();
+  await generateLibraryNotifications();
+  await deliverPendingEmails();
+  return { success: true };
+}
+
+if (import.meta.main) {
+  runCron()
+    .then((result) => {
+      console.log(JSON.stringify(result));
+    })
+    .catch((error) => {
+      console.error('[notification-cron]', error.message ?? error);
+      Deno.exit(1);
+    });
+}
+
+export async function handleRequest(req: Request): Promise<Response> {
   const authHeader = req.headers.get('authorization');
-  const cronSecret = Deno.env.get('NOTIFICATION_CRON_SECRET');
   if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
     return new Response('Unauthorized', { status: 401 });
   }
   try {
-    await generateLoanNotifications();
-    await generateLibraryNotifications();
-    await deliverPendingEmails();
-    return new Response(JSON.stringify({ success: true }), {
+    const result = await runCron();
+    return new Response(JSON.stringify(result), {
       headers: { 'Content-Type': 'application/json' },
     });
   } catch (error) {
@@ -192,4 +208,4 @@ serve(async (req: Request) => {
       headers: { 'Content-Type': 'application/json' },
     });
   }
-});
+}
