@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: 'Motivo dell\'esecuzione manuale'
+        description: "Motivo dell'esecuzione manuale"
         required: false
 
 jobs:
