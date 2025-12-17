@@ -61,9 +61,6 @@ async function runCron(req: Request) {
     }
 
     // --- SECURITY (cron secret) ---
-    // Accetta:
-    // 1) Authorization: Bearer <secret>
-    // 2) x-cron-secret: <secret>
     if (NOTIFICATION_CRON_SECRET) {
       const bearer = getBearer(req);
       const headerSecret = (req.headers.get("x-cron-secret") || "").trim();
@@ -80,11 +77,10 @@ async function runCron(req: Request) {
       auth: { persistSession: false },
     });
 
-    // --- LOGIC: prendi prestiti con reserved_until valorizzato e scaduti/oggi ---
-    // reserved_until è DATE -> confrontiamo con YYYY-MM-DD
     const todayStr = todayUTCString();
+    const KIND = "OVERDUE";
 
-    // ✅ TABELLA CORRETTA: public.loans
+    // --- QUERY loans scaduti/oggi ---
     const { data: loans, error } = await supabase
       .from("loans")
       .select("id, uscita_id, reserved_until, borrower_contact, updated_at, created_at")
@@ -96,22 +92,82 @@ async function runCron(req: Request) {
       return json({ ok: false, where: "select loans", error }, 500);
     }
 
-    const count = loans?.length || 0;
+    const allLoans = loans ?? [];
+    const totalCount = allLoans.length;
 
-    // --- OPTIONAL: webhook (Make/Zapier/altro) ---
-    // Se EMAIL_WEBHOOK è vuoto, non fa nulla (ma il cron risulta OK)
-    if (EMAIL_WEBHOOK) {
+    // --- STEP 2: idempotenza + filtro "solo nuovi" ---
+    const newLoans: any[] = [];
+    const newLoanIds: string[] = [];
+
+    // Se la tabella notification_log non esiste ancora, non blocchiamo il cron:
+    // eseguiamo come prima (senza idempotenza) e logghiamo l’errore.
+    let idempotencyAvailable = true;
+
+    for (const loan of allLoans) {
+      const { error: insErr } = await supabase
+        .from("notification_log")
+        .insert({
+          loan_id: loan.id,
+          kind: KIND,
+          status: "PENDING",
+          message: "Detected by cron (pending send)",
+          meta: { runId, date: todayStr, reserved_until: loan.reserved_until },
+        });
+
+      if (!insErr) {
+        newLoans.push(loan);
+        newLoanIds.push(loan.id);
+        continue;
+      }
+
+      // 23505 = unique_violation → già notificato
+      if ((insErr as any)?.code === "23505") {
+        continue;
+      }
+
+      // 42P01 = undefined_table (Postgres) → tabella non esiste
+      if ((insErr as any)?.code === "42P01") {
+        idempotencyAvailable = false;
+        log("warn", "notification_log table missing: proceeding without idempotency", {
+          runId,
+          code: (insErr as any)?.code,
+          message: (insErr as any)?.message,
+        });
+        // fallback: includi tutti i prestiti (comportamento precedente)
+        newLoans.splice(0, newLoans.length, ...allLoans);
+        newLoanIds.splice(0, newLoanIds.length);
+        break;
+      }
+
+      log("error", "notification_log insert failed", {
+        runId,
+        loanId: loan.id,
+        ...errObj(insErr),
+      });
+      // non blocchiamo tutto: continuiamo sugli altri
+    }
+
+    const newCount = newLoans.length;
+
+    // --- OPTIONAL: webhook ---
+    let webhookNote = "Webhook not configured (skipped)";
+    let webhookOk = true;
+    let webhookStatus: number | null = null;
+    let webhookBodyPreview = "";
+
+    if (EMAIL_WEBHOOK && newCount > 0) {
       const payload = {
         type: "loans_due",
         date: todayStr,
-        count,
+        count: newCount,
+        total_due_count: totalCount,
         recipients: {
           admin: EMAIL_ADMIN,
           magazziniere: EMAIL_MAGAZZINIERE,
           presidente: EMAIL_PRESIDENTE,
         },
-        loans,
-        meta: { runId },
+        loans: newLoans,
+        meta: { runId, kind: KIND },
       };
 
       const r = await fetch(EMAIL_WEBHOOK, {
@@ -120,30 +176,82 @@ async function runCron(req: Request) {
         body: JSON.stringify(payload),
       });
 
+      webhookStatus = r.status;
+
       if (!r.ok) {
+        webhookOk = false;
         const t = await r.text().catch(() => "");
-        log("error", "Webhook failed", {
-          runId,
-          status: r.status,
-          bodyPreview: t.slice(0, 500),
-        });
-        return json(
-          { ok: false, where: "webhook", status: r.status, body: t.slice(0, 500) },
-          502,
-        );
+        webhookBodyPreview = t.slice(0, 500);
+        log("error", "Webhook failed", { runId, status: r.status, bodyPreview: webhookBodyPreview });
+        webhookNote = "Webhook failed";
+      } else {
+        webhookNote = "Webhook triggered";
+      }
+    }
+
+    // --- Aggiorna status nel log (solo se idempotenza attiva e abbiamo nuovi) ---
+    if (idempotencyAvailable && newLoanIds.length > 0) {
+      if (!EMAIL_WEBHOOK) {
+        // webhook non configurato → SKIPPED
+        await supabase
+          .from("notification_log")
+          .update({
+            status: "SKIPPED",
+            message: "Webhook not configured (skipped)",
+          })
+          .in("loan_id", newLoanIds)
+          .eq("kind", KIND)
+          .eq("status", "PENDING");
+      } else if (EMAIL_WEBHOOK && newCount === 0) {
+        // niente di nuovo: nulla da fare
+      } else if (webhookOk) {
+        await supabase
+          .from("notification_log")
+          .update({
+            status: "SENT",
+            message: "Webhook delivered successfully",
+          })
+          .in("loan_id", newLoanIds)
+          .eq("kind", KIND)
+          .eq("status", "PENDING");
+      } else {
+        await supabase
+          .from("notification_log")
+          .update({
+            status: "ERROR",
+            message: `Webhook failed (status ${webhookStatus})`,
+            meta: { runId, date: todayStr, kind: KIND, webhookStatus, webhookBodyPreview },
+          })
+          .in("loan_id", newLoanIds)
+          .eq("kind", KIND)
+          .eq("status", "PENDING");
       }
     }
 
     const ms = Date.now() - started;
-    log("info", "notification-cron OK", { runId, date: todayStr, count, ms });
+    log("info", "notification-cron OK", {
+      runId,
+      date: todayStr,
+      totalCount,
+      newCount,
+      ms,
+      webhookOk,
+      webhookStatus,
+    });
 
     return json({
       ok: true,
       runId,
       date: todayStr,
-      count,
+      total_due_count: totalCount,
+      new_due_count: newCount,
       ms,
-      note: EMAIL_WEBHOOK ? "Webhook triggered" : "Webhook not configured (skipped)",
+      webhook: {
+        configured: Boolean(EMAIL_WEBHOOK),
+        ok: webhookOk,
+        status: webhookStatus,
+        note: webhookNote,
+      },
     });
   } catch (e) {
     log("error", "Unhandled error", { ...errObj(e) });
@@ -152,7 +260,6 @@ async function runCron(req: Request) {
 }
 
 // --- RUN MODE ---
-// In GitHub Actions il server non deve restare in ascolto.
 // Attiva RUN_ONCE con:
 // - argomento: --run-once
 // - env: RUN_ONCE=true
@@ -161,8 +268,6 @@ const RUN_ONCE =
   (Deno.env.get("RUN_ONCE") || "").toLowerCase() === "true";
 
 if (RUN_ONCE) {
-  // Creiamo una Request fittizia: in RUN_ONCE puoi anche passare il secret via env,
-  // ma qui manteniamo comportamento compatibile senza richiedere header.
   const req = new Request("http://localhost/notification-cron", {
     method: "POST",
     headers: {
@@ -179,7 +284,6 @@ if (RUN_ONCE) {
   console.log("[RUN_ONCE] status:", res.status);
   console.log("[RUN_ONCE] body:", body);
 
-  // Termina il processo: GitHub Actions non rimane appeso.
   Deno.exit(res.ok ? 0 : 1);
 }
 
