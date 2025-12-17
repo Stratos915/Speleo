@@ -32,6 +32,26 @@ function todayUTCString() {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+function toBase64Url(buffer: ArrayBuffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+async function signWebhookPayload(secret: string, body: string) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(body));
+  return toBase64Url(sig);
+}
+
 async function runCron(req: Request) {
   const runId = crypto.randomUUID();
   const started = Date.now();
@@ -50,6 +70,11 @@ async function runCron(req: Request) {
       Deno.env.get("NOTIFICATION_MAGAZZINIERE_EMAIL")?.trim() || "";
     const EMAIL_PRESIDENTE =
       Deno.env.get("NOTIFICATION_PRESIDENTE_EMAIL")?.trim() || "";
+    const EMAIL_WEBHOOK_SHARED_SECRET =
+      Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET")?.trim() || "";
+    const EMAIL_WEBHOOK_TEST_MODE =
+      (Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE") || "")
+        .toLowerCase() === "true";
 
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       log("error", "Missing required env", {
@@ -156,6 +181,7 @@ async function runCron(req: Request) {
     let webhookBodyPreview = "";
 
     if (EMAIL_WEBHOOK && newCount > 0) {
+      const payloadLoans = EMAIL_WEBHOOK_TEST_MODE ? newLoans.slice(0, 1) : newLoans;
       const payload = {
         type: "loans_due",
         date: todayStr,
@@ -166,14 +192,25 @@ async function runCron(req: Request) {
           magazziniere: EMAIL_MAGAZZINIERE,
           presidente: EMAIL_PRESIDENTE,
         },
-        loans: newLoans,
+        loans: payloadLoans,
         meta: { runId, kind: KIND },
+        test_run: EMAIL_WEBHOOK_TEST_MODE,
       };
+
+      const body = JSON.stringify(payload);
+      const headers: Record<string, string> = { "content-type": "application/json" };
+      if (EMAIL_WEBHOOK_TEST_MODE) headers["x-speleo-test-run"] = "true";
+      if (EMAIL_WEBHOOK_SHARED_SECRET) {
+        headers["x-speleo-signature"] = await signWebhookPayload(
+          EMAIL_WEBHOOK_SHARED_SECRET,
+          body,
+        );
+      }
 
       const r = await fetch(EMAIL_WEBHOOK, {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(payload),
+        headers,
+        body,
       });
 
       webhookStatus = r.status;
@@ -202,6 +239,17 @@ async function runCron(req: Request) {
           .in("loan_id", newLoanIds)
           .eq("kind", KIND)
           .eq("status", "PENDING");
+      } else if (EMAIL_WEBHOOK_TEST_MODE) {
+        await supabase
+          .from("notification_log")
+          .update({
+            status: "SKIPPED",
+            message: "Webhook test mode (dry run)",
+            meta: { runId, date: todayStr, kind: KIND, webhookStatus, testMode: true },
+          })
+          .in("loan_id", newLoanIds)
+          .eq("kind", KIND)
+          .eq("status", "PENDING");
       } else if (EMAIL_WEBHOOK && newCount === 0) {
         // niente di nuovo: nulla da fare
       } else if (webhookOk) {
@@ -220,7 +268,14 @@ async function runCron(req: Request) {
           .update({
             status: "ERROR",
             message: `Webhook failed (status ${webhookStatus})`,
-            meta: { runId, date: todayStr, kind: KIND, webhookStatus, webhookBodyPreview },
+            meta: {
+              runId,
+              date: todayStr,
+              kind: KIND,
+              webhookStatus,
+              webhookBodyPreview,
+              testMode: EMAIL_WEBHOOK_TEST_MODE,
+            },
           })
           .in("loan_id", newLoanIds)
           .eq("kind", KIND)
