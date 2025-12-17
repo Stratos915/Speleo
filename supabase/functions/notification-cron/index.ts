@@ -15,7 +15,27 @@ function getBearer(req: Request) {
   return m?.[1]?.trim() || "";
 }
 
-serve(async (req) => {
+function log(level: "info" | "warn" | "error", msg: string, data: Record<string, unknown> = {}) {
+  console.log(JSON.stringify({ level, msg, ...data, ts: new Date().toISOString() }));
+}
+
+function errObj(e: unknown) {
+  if (e instanceof Error) return { name: e.name, message: e.message, stack: e.stack };
+  return { error: String(e) };
+}
+
+function todayUTCString() {
+  const today = new Date();
+  const yyyy = today.getUTCFullYear();
+  const mm = String(today.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(today.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+async function runCron(req: Request) {
+  const runId = crypto.randomUUID();
+  const started = Date.now();
+
   try {
     // --- ENV ---
     const SUPABASE_URL = Deno.env.get("SUPABASE_URL")?.trim();
@@ -26,11 +46,17 @@ serve(async (req) => {
 
     const EMAIL_WEBHOOK = Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK")?.trim() || "";
     const EMAIL_ADMIN = Deno.env.get("NOTIFICATION_ADMIN_EMAIL")?.trim() || "";
-    const EMAIL_MAGAZZINIERE = Deno.env.get("NOTIFICATION_MAGAZZINIERE_EMAIL")?.trim() ||
-      "";
-    const EMAIL_PRESIDENTE = Deno.env.get("NOTIFICATION_PRESIDENTE_EMAIL")?.trim() || "";
+    const EMAIL_MAGAZZINIERE =
+      Deno.env.get("NOTIFICATION_MAGAZZINIERE_EMAIL")?.trim() || "";
+    const EMAIL_PRESIDENTE =
+      Deno.env.get("NOTIFICATION_PRESIDENTE_EMAIL")?.trim() || "";
 
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      log("error", "Missing required env", {
+        runId,
+        hasUrl: Boolean(SUPABASE_URL),
+        hasServiceRole: Boolean(SUPABASE_SERVICE_ROLE_KEY),
+      });
       return json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500);
     }
 
@@ -41,8 +67,12 @@ serve(async (req) => {
     if (NOTIFICATION_CRON_SECRET) {
       const bearer = getBearer(req);
       const headerSecret = (req.headers.get("x-cron-secret") || "").trim();
-      const ok = bearer === NOTIFICATION_CRON_SECRET || headerSecret === NOTIFICATION_CRON_SECRET;
-      if (!ok) return json({ error: "Unauthorized (bad cron secret)" }, 401);
+      const ok =
+        bearer === NOTIFICATION_CRON_SECRET || headerSecret === NOTIFICATION_CRON_SECRET;
+      if (!ok) {
+        log("warn", "Unauthorized (bad cron secret)", { runId });
+        return json({ error: "Unauthorized (bad cron secret)" }, 401);
+      }
     }
 
     // --- SUPABASE CLIENT ---
@@ -52,11 +82,7 @@ serve(async (req) => {
 
     // --- LOGIC: prendi prestiti con reserved_until valorizzato e scaduti/oggi ---
     // reserved_until è DATE -> confrontiamo con YYYY-MM-DD
-    const today = new Date();
-    const yyyy = today.getUTCFullYear();
-    const mm = String(today.getUTCMonth() + 1).padStart(2, "0");
-    const dd = String(today.getUTCDate()).padStart(2, "0");
-    const todayStr = `${yyyy}-${mm}-${dd}`;
+    const todayStr = todayUTCString();
 
     // ✅ TABELLA CORRETTA: public.loans
     const { data: loans, error } = await supabase
@@ -66,7 +92,7 @@ serve(async (req) => {
       .lte("reserved_until", todayStr);
 
     if (error) {
-      console.error("[notification-cron] Supabase error:", error);
+      log("error", "Supabase error: select loans", { runId, ...errObj(error) });
       return json({ ok: false, where: "select loans", error }, 500);
     }
 
@@ -85,6 +111,7 @@ serve(async (req) => {
           presidente: EMAIL_PRESIDENTE,
         },
         loans,
+        meta: { runId },
       };
 
       const r = await fetch(EMAIL_WEBHOOK, {
@@ -95,7 +122,11 @@ serve(async (req) => {
 
       if (!r.ok) {
         const t = await r.text().catch(() => "");
-        console.error("[notification-cron] Webhook failed:", r.status, t);
+        log("error", "Webhook failed", {
+          runId,
+          status: r.status,
+          bodyPreview: t.slice(0, 500),
+        });
         return json(
           { ok: false, where: "webhook", status: r.status, body: t.slice(0, 500) },
           502,
@@ -103,16 +134,54 @@ serve(async (req) => {
       }
     }
 
-    console.log("[notification-cron] OK", { date: todayStr, count });
+    const ms = Date.now() - started;
+    log("info", "notification-cron OK", { runId, date: todayStr, count, ms });
 
     return json({
       ok: true,
+      runId,
       date: todayStr,
       count,
+      ms,
       note: EMAIL_WEBHOOK ? "Webhook triggered" : "Webhook not configured (skipped)",
     });
   } catch (e) {
-    console.error("[notification-cron] Unhandled error:", e);
+    log("error", "Unhandled error", { ...errObj(e) });
     return json({ ok: false, error: String(e) }, 500);
   }
-});
+}
+
+// --- RUN MODE ---
+// In GitHub Actions il server non deve restare in ascolto.
+// Attiva RUN_ONCE con:
+// - argomento: --run-once
+// - env: RUN_ONCE=true
+const RUN_ONCE =
+  Deno.args.includes("--run-once") ||
+  (Deno.env.get("RUN_ONCE") || "").toLowerCase() === "true";
+
+if (RUN_ONCE) {
+  // Creiamo una Request fittizia: in RUN_ONCE puoi anche passare il secret via env,
+  // ma qui manteniamo comportamento compatibile senza richiedere header.
+  const req = new Request("http://localhost/notification-cron", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(Deno.env.get("NOTIFICATION_CRON_SECRET")
+        ? { "x-cron-secret": Deno.env.get("NOTIFICATION_CRON_SECRET")! }
+        : {}),
+    },
+  });
+
+  const res = await runCron(req);
+  const body = await res.text().catch(() => "");
+
+  console.log("[RUN_ONCE] status:", res.status);
+  console.log("[RUN_ONCE] body:", body);
+
+  // Termina il processo: GitHub Actions non rimane appeso.
+  Deno.exit(res.ok ? 0 : 1);
+}
+
+// Modalità Edge Function normale: HTTP server
+serve((req) => runCron(req));
