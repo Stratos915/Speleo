@@ -33,7 +33,7 @@ function extractRecoveryTokens() {
 // Pagina raggiunta dai link email di Supabase (recovery/reset) per impostare una nuova password.
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { isAuthenticated, needsPasswordReset, user } = useAuth();
+  const { isAuthenticated, needsPasswordReset, user, markPasswordInitialized } = useAuth();
   const [ready, setReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [password, setPassword] = useState('');
@@ -106,7 +106,12 @@ export default function ResetPassword() {
       setError(updateError.message ?? 'Errore durante il salvataggio della nuova password.');
     } else {
       if (user) {
-        await supabase.from('profiles').update({ password_initialized: true }).eq('id', user.id);
+        const { error: profileErr } = await supabase.from('profiles').update({ password_initialized: true }).eq('id', user.id);
+        if (profileErr) {
+          console.warn('[ResetPassword] impossibile aggiornare password_initialized:', profileErr.message);
+        } else {
+          markPasswordInitialized();
+        }
       }
       setSuccess(
         forcedFlow

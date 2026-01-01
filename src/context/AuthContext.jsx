@@ -110,6 +110,8 @@ export default function AuthProvider({ children }) {
     };
   }, [user]);
 
+  const markPasswordInitialized = useCallback(() => setProfileNeedsPasswordReset(false), []);
+
   const value = useMemo(
     () => ({
       session,
@@ -117,11 +119,21 @@ export default function AuthProvider({ children }) {
       role,
       loading,
       isAuthenticated: Boolean(user),
-      needsPasswordReset: profileNeedsPasswordReset,
+      needsPasswordReset: profileNeedsPasswordReset || Boolean(user && !user.password_updated_at),
       login,
       logout,
+      markPasswordInitialized,
     }),
-    [session, user, role, loading, login, logout, profileNeedsPasswordReset],
+    [
+      session,
+      user,
+      role,
+      loading,
+      login,
+      logout,
+      profileNeedsPasswordReset,
+      markPasswordInitialized,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
