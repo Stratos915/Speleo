@@ -5,6 +5,7 @@ import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
+import { fetchActiveUsers, fetchDailyVisits } from '../services/analytics.js';
 
 const csvColumns = {
   uscita: [
@@ -117,6 +118,20 @@ function formatDate(value) {
   const dateValue = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(dateValue.getTime())) return '';
   return dateValue.toLocaleDateString('it-IT');
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const dateValue = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateValue.getTime())) return '';
+  return dateValue.toLocaleString('it-IT');
+}
+
+function summarizeClientInfo(info) {
+  if (!info || typeof info !== 'object') return '-';
+  const candidate = info.user_agent || info.device || '';
+  if (!candidate) return '-';
+  return candidate.length > 80 ? `${candidate.slice(0, 77)}...` : candidate;
 }
 
 function formatCellValue(column, value) {
@@ -422,7 +437,7 @@ function downloadXlsx(rows, key) {
 }
 
 export default function Report() {
-  const { role } = useAuth();
+  const { role, isAuthenticated } = useAuth();
   const canViewActivityLog = role === 'admin' || role === 'presidente';
   const [members, setMembers] = useState([]);
   const [uscite, setUscite] = useState([]);
@@ -430,6 +445,22 @@ export default function Report() {
   const [activityLogs, setActivityLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [visitsRange, setVisitsRange] = useState(30);
+  const [visitsData, setVisitsData] = useState([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState('');
+  const [activeUsers, setActiveUsers] = useState([]);
+  const [activeLoading, setActiveLoading] = useState(false);
+  const [activeError, setActiveError] = useState('');
+  const ACTIVE_REFRESH_MS = 30_000;
+  const visitsSummary = useMemo(() => {
+    if (!visitsData.length) {
+      return { total: 0, lastDay: null };
+    }
+    const total = visitsData.reduce((sum, row) => sum + Number(row?.visits ?? 0), 0);
+    const lastDay = visitsData[visitsData.length - 1] ?? null;
+    return { total, lastDay };
+  }, [visitsData]);
   const [scuolaData, setScuolaData] = useState(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -514,6 +545,68 @@ export default function Report() {
       ignore = true;
     };
   }, [canViewActivityLog]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setVisitsData([]);
+      return undefined;
+    }
+    let ignore = false;
+    async function loadVisits() {
+      setAnalyticsError('');
+      setVisitsLoading(true);
+      try {
+        const rows = await fetchDailyVisits({ days: visitsRange });
+        if (!ignore) setVisitsData(rows);
+      } catch (analyticsErr) {
+        console.error('[Report] Impossibile caricare le statistiche visite:', analyticsErr);
+        if (!ignore) {
+          setAnalyticsError('Impossibile caricare le statistiche di accesso.');
+          setVisitsData([]);
+        }
+      } finally {
+        if (!ignore) setVisitsLoading(false);
+      }
+    }
+
+    loadVisits();
+    return () => {
+      ignore = true;
+    };
+  }, [isAuthenticated, visitsRange]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      setActiveUsers([]);
+      return undefined;
+    }
+    let ignore = false;
+    let firstLoad = true;
+
+    async function loadActiveUsers() {
+      setActiveError('');
+      if (firstLoad) setActiveLoading(true);
+      try {
+        const rows = await fetchActiveUsers({ minutes: 2 });
+        if (!ignore) setActiveUsers(rows);
+      } catch (activeErr) {
+        console.error('[Report] Impossibile caricare gli utenti online:', activeErr);
+        if (!ignore) setActiveError('Impossibile caricare gli utenti attivi.');
+      } finally {
+        if (firstLoad && !ignore) {
+          setActiveLoading(false);
+          firstLoad = false;
+        }
+      }
+    }
+
+    loadActiveUsers();
+    const interval = setInterval(loadActiveUsers, ACTIVE_REFRESH_MS);
+    return () => {
+      ignore = true;
+      clearInterval(interval);
+    };
+  }, [isAuthenticated, ACTIVE_REFRESH_MS]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -945,6 +1038,100 @@ export default function Report() {
         <h1>Report amministratore</h1>
         <p>Scarica gli elenchi aggiornati o sincronizza i dati con strumenti esterni.</p>
       </header>
+      <article className="card">
+        <h2>Statistiche accessi</h2>
+        <p style={{ color: 'var(--color-muted)', margin: '0 0 0.5rem' }}>
+          Cronologia delle visite registrate dal portale amministrativo.
+        </p>
+        <div
+          style={{
+            display: 'flex',
+            gap: '1rem',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            marginBottom: '0.75rem',
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            Periodo
+            <select value={visitsRange} onChange={(event) => setVisitsRange(Number(event.target.value))}>
+              <option value={7}>Ultimi 7 giorni</option>
+              <option value={30}>Ultimi 30 giorni</option>
+              <option value={90}>Ultimi 90 giorni</option>
+            </select>
+          </label>
+          <div style={{ color: 'var(--color-muted)', fontSize: '0.9rem' }}>
+            Visite totali nel periodo:{' '}
+            <strong style={{ color: 'var(--color-foreground)' }}>{visitsSummary.total}</strong>.{' '}
+            {visitsSummary.lastDay ? (
+              <>
+                Ultimo giorno (<strong>{formatDate(visitsSummary.lastDay.day)}</strong>):
+                visite {visitsSummary.lastDay.visits}, utenti unici {visitsSummary.lastDay.unique_users}.
+              </>
+            ) : (
+              'Nessun dato registrato.'
+            )}
+          </div>
+        </div>
+        {analyticsError && <p style={{ color: '#c92a2a' }}>{analyticsError}</p>}
+        {visitsLoading ? (
+          <p>Caricamento statistiche...</p>
+        ) : visitsData.length ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Giorno</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Visite</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Utenti unici</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visitsData.map((row, index) => (
+                  <tr key={`${row.day ?? index}`}>
+                    <td style={{ padding: '0.35rem 0' }}>{formatDate(row.day)}</td>
+                    <td style={{ padding: '0.35rem 0' }}>{row.visits}</td>
+                    <td style={{ padding: '0.35rem 0' }}>{row.unique_users}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>Nessuna visita registrata nel periodo selezionato.</p>
+        )}
+      </article>
+
+      <article className="card">
+        <h3>Utenti collegati (ultimi 2 minuti)</h3>
+        {activeError && <p style={{ color: '#c92a2a' }}>{activeError}</p>}
+        {activeLoading ? (
+          <p>Verifica utenti online...</p>
+        ) : activeUsers.length ? (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Email</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Ultimo ping</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Client</th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeUsers.map((session) => (
+                  <tr key={`${session.user_email}-${session.last_seen_at}`}>
+                    <td style={{ padding: '0.35rem 0' }}>{session.user_email}</td>
+                    <td style={{ padding: '0.35rem 0' }}>{formatDateTime(session.last_seen_at)}</td>
+                    <td style={{ padding: '0.35rem 0' }}>{summarizeClientInfo(session.client_info)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p>Nessun utente risulta collegato negli ultimi 120 secondi.</p>
+        )}
+      </article>
 
       {loading && <p>Raccolta dati in corso...</p>}
       {error && <p style={{ color: '#c92a2a' }}>{error}</p>}

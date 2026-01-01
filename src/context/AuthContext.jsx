@@ -7,6 +7,7 @@ export default function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState('socio');
   const [loading, setLoading] = useState(true);
+  const [profileNeedsPasswordReset, setProfileNeedsPasswordReset] = useState(false);
 
   const resolveRole = useCallback((targetUser) => {
     if (!targetUser) return 'socio';
@@ -45,6 +46,7 @@ export default function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     setLoading(true);
+    await supabase.auth.setSession({ access_token: null, refresh_token: null });
     const { error } = await supabase.auth.signOut();
     if (error) {
       setLoading(false);
@@ -82,6 +84,32 @@ export default function AuthProvider({ children }) {
     };
   }, [applySession]);
 
+  useEffect(() => {
+    let ignore = false;
+    async function syncProfileFlags() {
+      if (!user) {
+        setProfileNeedsPasswordReset(false);
+        return;
+      }
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('password_initialized')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (!ignore) {
+        if (error) {
+          setProfileNeedsPasswordReset(Boolean(!user.password_updated_at));
+        } else {
+          setProfileNeedsPasswordReset(data?.password_initialized === false);
+        }
+      }
+    }
+    syncProfileFlags();
+    return () => {
+      ignore = true;
+    };
+  }, [user]);
+
   const value = useMemo(
     () => ({
       session,
@@ -89,10 +117,11 @@ export default function AuthProvider({ children }) {
       role,
       loading,
       isAuthenticated: Boolean(user),
+      needsPasswordReset: profileNeedsPasswordReset,
       login,
       logout,
     }),
-    [session, user, role, loading, login, logout],
+    [session, user, role, loading, login, logout, profileNeedsPasswordReset],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
