@@ -98,9 +98,10 @@ export default function AuthProvider({ children }) {
         .maybeSingle();
       if (!ignore) {
         if (error) {
-          setProfileNeedsPasswordReset(Boolean(!user.password_updated_at));
+          console.warn('[AuthContext] impossibile leggere password_initialized:', error.message);
+          setProfileNeedsPasswordReset(false);
         } else {
-          setProfileNeedsPasswordReset(data?.password_initialized === false);
+          setProfileNeedsPasswordReset(data ? !data.password_initialized : true);
         }
       }
     }
@@ -119,7 +120,7 @@ export default function AuthProvider({ children }) {
       role,
       loading,
       isAuthenticated: Boolean(user),
-      needsPasswordReset: profileNeedsPasswordReset || Boolean(user && !user.password_updated_at),
+      needsPasswordReset: profileNeedsPasswordReset,
       login,
       logout,
       markPasswordInitialized,
