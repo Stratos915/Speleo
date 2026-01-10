@@ -44,6 +44,7 @@ export default function ResetPassword() {
   const [submitting, setSubmitting] = useState(false);
 
   const [forcedFlow, setForcedFlow] = useState(false);
+  const [profileUserId, setProfileUserId] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -57,10 +58,13 @@ export default function ResetPassword() {
           } else {
             setReady(true);
             setForcedFlow(false);
+            const { data } = await supabase.auth.getUser();
+            setProfileUserId(data?.user?.id ?? null);
           }
         } else if (isAuthenticated && needsPasswordReset) {
           setReady(true);
           setForcedFlow(true);
+          setProfileUserId(user?.id ?? null);
         } else if (!isAuthenticated) {
           setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
         } else {
@@ -105,8 +109,9 @@ export default function ResetPassword() {
     if (updateError) {
       setError(updateError.message ?? 'Errore durante il salvataggio della nuova password.');
     } else {
-      if (user) {
-        const { error: profileErr } = await supabase.from('profiles').update({ password_initialized: true }).eq('id', user.id);
+      const targetUserId = profileUserId || user?.id || null;
+      if (targetUserId) {
+        const { error: profileErr } = await supabase.from('profiles').update({ password_initialized: true }).eq('id', targetUserId);
         if (profileErr) {
           console.warn('[ResetPassword] impossibile aggiornare password_initialized:', profileErr.message);
         } else {
