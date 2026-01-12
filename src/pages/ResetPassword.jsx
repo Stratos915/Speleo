@@ -5,6 +5,7 @@ import useAuth from '../context/useAuth.js';
 import logo from '../assets/logo-gsu.png';
 
 const RECOVERY_TYPES = new Set(['recovery', 'invite', 'signup']);
+const RECOVERY_BOOTSTRAP_TIMEOUT_MS = 10000;
 
 function extractRecoveryTokens() {
   const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
@@ -30,6 +31,18 @@ function extractRecoveryTokens() {
   return null;
 }
 
+function extractRecoveryCode() {
+  const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+  if (RECOVERY_TYPES.has(hashParams.get('type')) && hashParams.get('code')) {
+    return hashParams.get('code');
+  }
+  const searchParams = new URLSearchParams(window.location.search);
+  if (RECOVERY_TYPES.has(searchParams.get('type')) && searchParams.get('code')) {
+    return searchParams.get('code');
+  }
+  return null;
+}
+
 // Pagina raggiunta dai link email di Supabase (recovery/reset) per impostare una nuova password.
 export default function ResetPassword() {
   const navigate = useNavigate();
@@ -45,13 +58,43 @@ export default function ResetPassword() {
 
   const [forcedFlow, setForcedFlow] = useState(false);
   const [profileUserId, setProfileUserId] = useState(null);
+  const [completed, setCompleted] = useState(false);
+
+  const clearRecoveryParams = () => {
+    if (typeof window === 'undefined') return;
+    const cleanUrl = window.location.pathname.replace(/\/+$/, '') || '/';
+    window.history.replaceState({}, '', cleanUrl);
+  };
 
   useEffect(() => {
+    if (completed) return;
     let active = true;
+    const timeoutId = setTimeout(() => {
+      if (active) {
+        setInitializing(false);
+        setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
+      }
+    }, RECOVERY_BOOTSTRAP_TIMEOUT_MS);
     async function bootstrapRecoverySession() {
       try {
         const tokens = extractRecoveryTokens();
         if (tokens) {
+          const { data: upsertData, error: upsertError } = await supabase
+            .from('profiles')
+            .upsert(
+              {
+                id: tokens?.user_id || null,
+                password_initialized: false,
+              },
+              { onConflict: 'id' },
+            )
+            .select()
+            .maybeSingle();
+
+          if (upsertError) {
+            console.warn('[ResetPassword] impossibile preparare il profilo:', upsertError.message);
+          }
+
           const { error: sessionError } = await supabase.auth.setSession(tokens);
           if (sessionError) {
             setError('Impossibile aprire la sessione di recupero. Richiedi un nuovo link.');
@@ -61,15 +104,28 @@ export default function ResetPassword() {
             const { data } = await supabase.auth.getUser();
             setProfileUserId(data?.user?.id ?? null);
           }
-        } else if (isAuthenticated && needsPasswordReset) {
-          setReady(true);
-          setForcedFlow(true);
-          setProfileUserId(user?.id ?? null);
-        } else if (!isAuthenticated) {
-          setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
         } else {
-          setError('La password è già stata impostata. Torna alla dashboard.');
-          setTimeout(() => navigate('/'), 2000);
+          const code = extractRecoveryCode();
+          if (code) {
+            const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+            if (exchangeError) {
+              setError('Impossibile aprire la sessione di recupero. Richiedi un nuovo link.');
+            } else {
+              setReady(true);
+              setForcedFlow(false);
+              const { data } = await supabase.auth.getUser();
+              setProfileUserId(data?.user?.id ?? null);
+            }
+          } else if (isAuthenticated && needsPasswordReset) {
+            setReady(true);
+            setForcedFlow(true);
+            setProfileUserId(user?.id ?? null);
+          } else if (!isAuthenticated) {
+            setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
+          } else {
+            setError('La password è già stata impostata. Torna alla dashboard.');
+            setTimeout(() => navigate('/'), 2000);
+          }
         }
       } catch (bootstrapError) {
         console.error('[ResetPassword] bootstrap error:', bootstrapError);
@@ -77,14 +133,16 @@ export default function ResetPassword() {
       } finally {
         if (active) {
           setInitializing(false);
+          clearTimeout(timeoutId);
         }
       }
     }
     bootstrapRecoverySession();
     return () => {
       active = false;
+      clearTimeout(timeoutId);
     };
-  }, [isAuthenticated, needsPasswordReset]);
+  }, [isAuthenticated, needsPasswordReset, completed, navigate]);
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -109,20 +167,19 @@ export default function ResetPassword() {
     if (updateError) {
       setError(updateError.message ?? 'Errore durante il salvataggio della nuova password.');
     } else {
-      const targetUserId = profileUserId || user?.id || null;
-      if (targetUserId) {
-        const { error: profileErr } = await supabase.from('profiles').update({ password_initialized: true }).eq('id', targetUserId);
-        if (profileErr) {
-          console.warn('[ResetPassword] impossibile aggiornare password_initialized:', profileErr.message);
-        } else {
-          markPasswordInitialized();
-        }
+      const { error: rpcError } = await supabase.rpc('mark_password_initialized');
+      if (rpcError) {
+        console.warn('[ResetPassword] rpc mark_password_initialized fallita:', rpcError.message);
+      } else {
+        markPasswordInitialized();
       }
       setSuccess(
         forcedFlow
           ? 'Password impostata correttamente. Torna alla schermata di accesso per continuare.'
           : 'Password aggiornata correttamente. Puoi accedere con le nuove credenziali.',
       );
+      setCompleted(true);
+      clearRecoveryParams();
       await supabase.auth.setSession({ access_token: null, refresh_token: null });
       await supabase.auth.signOut();
       setTimeout(() => {
@@ -185,9 +242,23 @@ export default function ResetPassword() {
         )}
 
         <div style={{ marginTop: '1rem' }}>
-          <Link to="/" style={{ color: 'var(--color-primary)' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setCompleted(true);
+              clearRecoveryParams();
+              navigate('/', { replace: true });
+            }}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--color-primary)',
+              textDecoration: 'underline',
+              cursor: 'pointer',
+            }}
+          >
             Torna al login
-          </Link>
+          </button>
         </div>
       </div>
     </div>
