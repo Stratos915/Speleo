@@ -61,6 +61,7 @@ export default function Uscite() {
   const [statusChangingId, setStatusChangingId] = useState(null);
   const [supportsClosedAt, setSupportsClosedAt] = useState(false);
   const canReopenUscita = role === 'admin' || role === 'presidente';
+  const canDeleteUscita = role === 'admin' || role === 'presidente';
 
   const loadUscite = useCallback(async () => {
     setLoading(true);
@@ -405,7 +406,7 @@ export default function Uscite() {
                       : 'Chiudi'}
                   </button>
                 )}
-                {canEditUscite && (
+                {canDeleteUscita && (
                   <button type="button" style={{ background: '#f27367' }} onClick={() => handleDelete(uscita.id)}>
                     Elimina
                   </button>
