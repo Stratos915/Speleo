@@ -7,6 +7,7 @@ returns text
 language sql
 security definer
 set search_path = public
+set row_security = off
 as $$
   select role from public.profiles where id = auth.uid();
 $$;
