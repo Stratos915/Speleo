@@ -1,25 +1,6 @@
 import { supabase } from '../lib/supabaseClient';
 
-const MOCK_NOTIFICATIONS = [
-  {
-    id: 'notif-1',
-    audience: 'admin',
-    roles: ['admin', 'presidente'],
-    type: 'warning',
-    title: 'Uscite senza responsabile',
-    message: '2 uscite prossime entro la settimana non hanno responsabile.',
-    link: '/uscite',
-  },
-  {
-    id: 'notif-2',
-    audience: 'user',
-    user_id: 'demo-user',
-    type: 'info',
-    title: 'Libro in restituzione',
-    message: 'Ricordati di riportare “Manuale CAI” entro il 15/03.',
-    link: '/biblioteca',
-  },
-];
+const MOCK_NOTIFICATIONS = [];
 
 function normalizeRow(row) {
   return {
@@ -48,8 +29,8 @@ export async function fetchNotifications({ role, userId } = {}) {
     if (error) throw error;
     return (data ?? []).map(normalizeRow);
   } catch (error) {
-    console.warn('[notifications] fallback to mock:', error.message ?? error);
-    return MOCK_NOTIFICATIONS.map(normalizeRow);
+    console.warn('[notifications] impossibile leggere le notifiche:', error.message ?? error);
+    return [];
   }
 }
 
