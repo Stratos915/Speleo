@@ -5,6 +5,7 @@ import usePermissions from '../hooks/usePermissions.js';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
+import { getEquipmentById, setEquipmentAvailability } from '../services/equipment.js';
 import { supabase } from '../lib/supabaseClient';
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
@@ -28,9 +29,10 @@ function formatTime(value) {
 export default function UscitaDettaglio() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { canEditSection } = usePermissions();
   const canEditUscite = canEditSection('uscita');
+  const canManageLoans = canEditSection('prestiti');
   const [uscita, setUscita] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -47,6 +49,10 @@ export default function UscitaDettaglio() {
   const [feedbackError, setFeedbackError] = useState('');
   const [hasOpenLoans, setHasOpenLoans] = useState(false);
   const [checkingLoans, setCheckingLoans] = useState(true);
+  const [uscitaLoans, setUscitaLoans] = useState([]);
+  const [uscitaLoansLoading, setUscitaLoansLoading] = useState(true);
+  const [uscitaLoansError, setUscitaLoansError] = useState('');
+  const [loanProcessingId, setLoanProcessingId] = useState(null);
   const [statusChanging, setStatusChanging] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
@@ -110,6 +116,71 @@ export default function UscitaDettaglio() {
       ignore = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadUscitaLoans() {
+      if (!id) return;
+      setUscitaLoansLoading(true);
+      setUscitaLoansError('');
+      try {
+        const { data, error: loansError } = await supabase
+          .from('loans')
+          .select('id,equipment_id,borrower_name,quantity,status,delivered_at,returned_at,notes,equipment:equipment_id(name)')
+          .eq('uscita_id', id)
+          .order('delivered_at', { ascending: false });
+        if (loansError) throw loansError;
+        if (!ignore) {
+          setUscitaLoans(data ?? []);
+        }
+      } catch (loadError) {
+        if (!ignore) {
+          console.error('[UscitaDettaglio] Errore caricamento prestiti collegati:', loadError.message);
+          setUscitaLoans([]);
+          setUscitaLoansError('Impossibile caricare i prestiti collegati.');
+        }
+      } finally {
+        if (!ignore) {
+          setUscitaLoansLoading(false);
+        }
+      }
+    }
+    loadUscitaLoans();
+    return () => {
+      ignore = true;
+    };
+  }, [id]);
+
+  async function handleLoanReturn(loan) {
+    const isOwner = loan.borrower_name && user?.email && loan.borrower_name === user.email;
+    if (!canManageLoans && !isOwner) return;
+    setLoanProcessingId(loan.id);
+    setUscitaLoansError('');
+    const now = new Date().toISOString();
+    const { error: loanError } = await supabase
+      .from('loans')
+      .update({ status: 'chiuso', returned_at: now })
+      .eq('id', loan.id);
+    if (loanError) {
+      setUscitaLoansError('Impossibile chiudere il prestito.');
+      setLoanProcessingId(null);
+      return;
+    }
+    try {
+      const equipmentRow = await getEquipmentById(loan.equipment_id);
+      const currentAvailable = Number(equipmentRow.quantity_available ?? equipmentRow.quantity ?? 0);
+      const newAvailability = currentAvailable + loan.quantity;
+      await setEquipmentAvailability({ column: 'equipment_id', value: loan.equipment_id }, newAvailability);
+    } catch (availabilityError) {
+      console.error('[UscitaDettaglio] Errore aggiornamento magazzino:', availabilityError);
+      setUscitaLoansError('Prestito chiuso ma quantita non aggiornata. Controlla il magazzino.');
+    }
+    setLoanProcessingId(null);
+    setUscitaLoans((prev) =>
+      prev.map((item) => (item.id === loan.id ? { ...item, status: 'chiuso', returned_at: now } : item)),
+    );
+    setHasOpenLoans((prev) => (prev ? prev : false));
+  }
 
   useEffect(() => {
     async function loadMembers() {
@@ -581,6 +652,45 @@ export default function UscitaDettaglio() {
               )}
             </>
           )}
+          <article className="card">
+            <h3>Prestiti collegati</h3>
+            {uscitaLoansError && <p style={{ color: 'var(--color-accent)' }}>{uscitaLoansError}</p>}
+            {uscitaLoansLoading ? (
+              <p>Caricamento prestiti...</p>
+            ) : uscitaLoans.length ? (
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: '0.5rem' }}>
+                {uscitaLoans.map((loan) => (
+                  <li key={loan.id} style={{ border: '1px solid var(--color-border)', borderRadius: '0.75rem', padding: '0.75rem' }}>
+                    <strong>
+                      {(loan.equipment?.name ?? loan.equipment_id)} · x{loan.quantity}
+                    </strong>
+                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>a: {loan.borrower_name}</p>
+                    <small style={{ color: 'var(--color-muted)' }}>
+                      consegnato il {loan.delivered_at ? new Date(loan.delivered_at).toLocaleString('it-IT') : '—'}
+                    </small>
+                    {loan.status === 'chiuso' && (
+                      <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                        restituito il {loan.returned_at ? new Date(loan.returned_at).toLocaleString('it-IT') : '—'}
+                      </p>
+                    )}
+                    {loan.status === 'in_corso' &&
+                      (canManageLoans || (user?.email && loan.borrower_name === user.email)) && (
+                        <button
+                          type="button"
+                          style={{ marginTop: '0.35rem' }}
+                          disabled={loanProcessingId === loan.id}
+                          onClick={() => handleLoanReturn(loan)}
+                        >
+                          {loanProcessingId === loan.id ? 'Aggiornamento...' : 'Restituisci materiale'}
+                        </button>
+                      )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>Nessun prestito collegato a questa uscita.</p>
+            )}
+          </article>
         </article>
       )}
     </section>
