@@ -3,6 +3,8 @@ import useAuth from '../context/useAuth.js';
 import { bulkCreateMembers, createMember, deleteMember, getMembers, updateMember } from '../services/members';
 import usePermissions from '../hooks/usePermissions.js';
 import { safeLogActivity } from '../services/activityLogs.js';
+import { supabase } from '../lib/supabaseClient';
+import { getAllRoles } from '../utils/permissions.js';
 
 const YEAR_START = 2025;
 const YEAR_END = 2050;
@@ -38,9 +40,15 @@ export default function Members() {
   const formRef = useRef(null);
   const duplicatedYearsRef = useRef(new Set());
   const [cloningYear, setCloningYear] = useState(null);
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { canEditSection } = usePermissions();
   const canEditMembers = canEditSection('soci');
+  const canManageRoles = role === 'admin' || role === 'presidente';
+  const [profilesByEmail, setProfilesByEmail] = useState(new Map());
+  const [rolesLoading, setRolesLoading] = useState(false);
+  const [rolesError, setRolesError] = useState('');
+  const [roleUpdating, setRoleUpdating] = useState({});
+  const rolesList = useMemo(() => getAllRoles(), []);
 
   const yearOptions = useMemo(() => {
     const maxYear = Math.max(YEAR_END, currentYear + 5);
@@ -80,6 +88,42 @@ export default function Members() {
   useEffect(() => {
     loadMembers();
   }, [loadMembers]);
+
+  useEffect(() => {
+    if (!canManageRoles || !supportsEmail) return;
+    let ignore = false;
+    async function loadProfiles() {
+      setRolesLoading(true);
+      setRolesError('');
+      try {
+        const { data, error: profilesError } = await supabase
+          .from('profiles')
+          .select('id,email,role');
+        if (profilesError) throw profilesError;
+        if (!ignore) {
+          const map = new Map();
+          (data ?? []).forEach((row) => {
+            if (row?.email) {
+              map.set(row.email.toLowerCase(), row);
+            }
+          });
+          setProfilesByEmail(map);
+        }
+      } catch (profilesLoadError) {
+        if (!ignore) {
+          setRolesError(profilesLoadError.message ?? 'Impossibile caricare i ruoli.');
+        }
+      } finally {
+        if (!ignore) {
+          setRolesLoading(false);
+        }
+      }
+    }
+    loadProfiles();
+    return () => {
+      ignore = true;
+    };
+  }, [canManageRoles, supportsEmail]);
 
   useEffect(() => {
     if (showForm && formRef.current) {
@@ -357,6 +401,30 @@ export default function Members() {
     }
   }
 
+  async function handleRoleChange(memberEmail, nextRole) {
+    if (!memberEmail) return;
+    setRolesError('');
+    setRoleUpdating((prev) => ({ ...prev, [memberEmail]: true }));
+    try {
+      const { error: updateError } = await supabase
+        .from('profiles')
+        .update({ role: nextRole })
+        .eq('email', memberEmail);
+      if (updateError) throw updateError;
+      setProfilesByEmail((prev) => {
+        const next = new Map(prev);
+        const key = memberEmail.toLowerCase();
+        const existing = next.get(key) ?? { email: memberEmail };
+        next.set(key, { ...existing, role: nextRole });
+        return next;
+      });
+    } catch (roleError) {
+      setRolesError(roleError.message ?? 'Impossibile aggiornare il ruolo.');
+    } finally {
+      setRoleUpdating((prev) => ({ ...prev, [memberEmail]: false }));
+    }
+  }
+
   useEffect(() => {
     if (!supportsYear || !canEditMembers) return;
     if (yearFilter === 'all' || yearFilter === 'unknown') return;
@@ -370,9 +438,21 @@ export default function Members() {
 
   return (
     <section className="page-grid">
-      <div>
-        <h1>Gestione soci</h1>
-        <p>Anagrafica aggiornata importata dalla versione precedente.</p>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+        <div>
+          <h1>Gestione soci</h1>
+          <p>Anagrafica aggiornata importata dalla versione precedente.</p>
+        </div>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '220px' }}>
+          Cerca socio
+          <input
+            type="search"
+            placeholder="Nome, tessera o email"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            style={{ maxWidth: '320px' }}
+          />
+        </label>
       </div>
 
       {error && (
@@ -386,6 +466,19 @@ export default function Members() {
           }}
         >
           {error}
+        </article>
+      )}
+      {rolesError && (
+        <article
+          className="card"
+          style={{
+            background: '#fff5f5',
+            borderColor: '#ff8787',
+            color: '#c92a2a',
+            marginBottom: '1rem',
+          }}
+        >
+          {rolesError}
         </article>
       )}
 
@@ -461,12 +554,6 @@ export default function Members() {
           )}
       </div>
 
-      <input
-        type="search"
-        placeholder="Cerca per nome, numero tessera o email"
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-      />
       <div className="pill-group">
         {[
           { value: 'all', label: 'Tutti' },
@@ -572,6 +659,29 @@ export default function Members() {
               )}
               {supportsPhone && (
                 <p style={{ color: 'var(--color-muted)' }}>{member.phone ?? 'Telefono non disponibile'}</p>
+              )}
+              {canManageRoles && supportsEmail && member.email && (
+                <div style={{ marginTop: '0.5rem' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    Ruolo app
+                    <select
+                      value={profilesByEmail.get(member.email.toLowerCase())?.role ?? 'socio'}
+                      onChange={(event) => handleRoleChange(member.email, event.target.value)}
+                      disabled={rolesLoading || roleUpdating[member.email]}
+                    >
+                      {rolesList.map((roleOption) => (
+                        <option key={roleOption} value={roleOption}>
+                          {roleOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {!profilesByEmail.get(member.email.toLowerCase()) && (
+                    <small style={{ color: 'var(--color-muted)' }}>
+                      Nessun profilo auth per questa email.
+                    </small>
+                  )}
+                </div>
               )}
               <div style={{ marginTop: '0.75rem' }}>
                 <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: 'var(--color-muted)' }}>Quota annuale</p>
