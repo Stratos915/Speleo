@@ -87,17 +87,28 @@ export default function PrestitoAvanzato() {
   const uscitaDateParam = searchParams.get('uscitaDate');
   const reservedUntilDate = useMemo(() => computeReservationDate(uscitaDateParam), [uscitaDateParam]);
 
+  const preselectedEquipmentId = searchParams.get('equipmentId');
+
+  useEffect(() => {
+    setError('');
+    setSuccess('');
+    setForm({
+      ...initialForm,
+      borrowerName: borrowerName || '',
+      borrowerMemberNumber: borrowerMemberNumber ? String(borrowerMemberNumber) : '',
+      equipmentId: preselectedEquipmentId ?? '',
+      notes: '',
+    });
+  }, [uscitaIdParam, uscitaTitle, uscitaDateParam, preselectedEquipmentId, borrowerName, borrowerMemberNumber]);
+
   useEffect(() => {
     if (uscitaTitle || reservedUntilDate) {
-      setForm((prev) => {
-        if (prev.notes) return prev;
-        const dueText = reservedUntilDate ? ` · rientro entro ${formatDate(reservedUntilDate)}` : '';
-        const label = uscitaTitle ? `Materiale per uscita: ${uscitaTitle}` : 'Materiale prenotato per uscita';
-        return {
-          ...prev,
-          notes: `${label}${dueText}`,
-        };
-      });
+      const dueText = reservedUntilDate ? ` · rientro entro ${formatDate(reservedUntilDate)}` : '';
+      const label = uscitaTitle ? `Materiale per uscita: ${uscitaTitle}` : 'Materiale prenotato per uscita';
+      setForm((prev) => ({
+        ...prev,
+        notes: `${label}${dueText}`,
+      }));
     }
   }, [uscitaTitle, reservedUntilDate]);
 
@@ -115,8 +126,6 @@ export default function PrestitoAvanzato() {
       setLoading(false);
     }
   }
-
-  const preselectedEquipmentId = searchParams.get('equipmentId');
 
   useEffect(() => {
     if (preselectedEquipmentId && equipment.length) {
@@ -146,11 +155,15 @@ export default function PrestitoAvanzato() {
   async function loadActiveLoans() {
     setLoansLoading(true);
     setLoansError('');
-    const { data, error: loansFetchError } = await supabase
+    let query = supabase
       .from('loans')
       .select('id,equipment_id,borrower_name,quantity,status,delivered_at,notes,reserved_until,uscita_id')
       .eq('status', 'in_corso')
       .order('delivered_at', { ascending: false });
+    if (uscitaIdParam) {
+      query = query.eq('uscita_id', uscitaIdParam);
+    }
+    const { data, error: loansFetchError } = await query;
 
     if (loansFetchError) {
       const friendly =
@@ -165,6 +178,10 @@ export default function PrestitoAvanzato() {
     }
     setLoansLoading(false);
   }
+
+  useEffect(() => {
+    loadActiveLoans();
+  }, [uscitaIdParam]);
 
   async function handleSubmit(event) {
     event.preventDefault();

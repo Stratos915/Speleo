@@ -12,7 +12,7 @@ const FILTERS = [
 ];
 
 export default function StoricoPrestiti() {
-  const { role } = useAuth();
+  const { role, user } = useAuth();
   const { canEditSection } = usePermissions();
   const canManageLoans = canEditSection('prestiti');
   const canDeleteLoans = role === 'admin' || role === 'presidente';
@@ -81,7 +81,8 @@ export default function StoricoPrestiti() {
   }, [loans, filter, query, equipmentMap]);
 
   async function handleRestitution(loan) {
-    if (!canManageLoans) return;
+    const isOwner = loan.borrower_name && user?.email && loan.borrower_name === user.email;
+    if (!canManageLoans && !isOwner) return;
     setProcessingId(loan.id);
     setError('');
     const now = new Date().toISOString();
@@ -218,7 +219,7 @@ export default function StoricoPrestiti() {
                       Apri uscita
                     </button>
                   )}
-                  {canManageLoans && loan.status === 'in_corso' && (
+                  {(canManageLoans || (user?.email && loan.borrower_name === user.email)) && loan.status === 'in_corso' && (
                     <button type="button" disabled={processingId === loan.id} onClick={() => handleRestitution(loan)}>
                       {processingId === loan.id ? 'Aggiornamento...' : 'Restituisci'}
                     </button>
