@@ -17,6 +17,21 @@ export default function Login() {
   const { isAuthenticated, role, loading, login } = useAuth();
 
   useEffect(() => {
+    const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+    const searchParams = new URLSearchParams(window.location.search);
+    const type = hashParams.get('type') || searchParams.get('type');
+    const hasRecovery =
+      ['recovery', 'invite', 'signup'].includes(type ?? '') ||
+      Boolean(hashParams.get('access_token') && hashParams.get('refresh_token')) ||
+      Boolean(searchParams.get('access_token') && searchParams.get('refresh_token')) ||
+      Boolean(hashParams.get('code') || searchParams.get('code'));
+    if (hasRecovery) {
+      const suffix = `${window.location.search}${window.location.hash}`;
+      window.location.replace(`/reset-password${suffix}`);
+    }
+  }, []);
+
+  useEffect(() => {
     if (loading) return;
     if (isAuthenticated) {
       navigate('/dashboard', { replace: true });
@@ -60,9 +75,7 @@ export default function Login() {
     }
     setResetInfo('Invio email di recupero...');
     setResetting(true);
-    const redirectTo = import.meta.env.DEV
-      ? `${window.location.origin}/reset-password`
-      : 'https://creative-gelato-81d26e.netlify.app/reset-password';
+    const redirectTo = `${window.location.origin}/reset-password`;
     const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo,
     });

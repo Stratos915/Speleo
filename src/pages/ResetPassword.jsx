@@ -7,6 +7,20 @@ import logo from '../assets/logo-gsu.png';
 const RECOVERY_TYPES = new Set(['recovery', 'invite', 'signup']);
 const RECOVERY_BOOTSTRAP_TIMEOUT_MS = 10000;
 
+function hasRecoveryIntent() {
+  const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashType = hashParams.get('type');
+  const searchType = searchParams.get('type');
+  return (
+    RECOVERY_TYPES.has(hashType) ||
+    RECOVERY_TYPES.has(searchType) ||
+    Boolean(hashParams.get('access_token') && hashParams.get('refresh_token')) ||
+    Boolean(searchParams.get('access_token') && searchParams.get('refresh_token')) ||
+    Boolean(hashParams.get('code') || searchParams.get('code'))
+  );
+}
+
 function extractRecoveryTokens() {
   const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
   const hashType = hashParams.get('type');
@@ -59,6 +73,7 @@ export default function ResetPassword() {
   const [forcedFlow, setForcedFlow] = useState(false);
   const [profileUserId, setProfileUserId] = useState(null);
   const [completed, setCompleted] = useState(false);
+  const [recoveryIntent] = useState(() => hasRecoveryIntent());
 
   const clearRecoveryParams = () => {
     if (typeof window === 'undefined') return;
@@ -116,9 +131,9 @@ export default function ResetPassword() {
               const { data } = await supabase.auth.getUser();
               setProfileUserId(data?.user?.id ?? null);
             }
-          } else if (isAuthenticated && needsPasswordReset) {
+          } else if (isAuthenticated && (needsPasswordReset || recoveryIntent)) {
             setReady(true);
-            setForcedFlow(true);
+            setForcedFlow(needsPasswordReset);
             setProfileUserId(user?.id ?? null);
           } else if (!isAuthenticated) {
             setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');

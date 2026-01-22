@@ -35,7 +35,7 @@ export default function AuthProvider({ children }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         setLoading(false);
-        throw new Error('Credenziali non valide');
+        throw new Error(error.message ?? 'Credenziali non valide');
       }
       applySession(data.session ?? null);
       setLoading(false);
