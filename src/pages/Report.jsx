@@ -79,6 +79,11 @@ const csvColumns = {
     { key: 'entity_id', label: 'ID' },
     { key: 'message', label: 'Messaggio' },
   ],
+  analytics_visits: [
+    { key: 'day', label: 'Giorno' },
+    { key: 'visits', label: 'Visite' },
+    { key: 'unique_users', label: 'Utenti unici' },
+  ],
 };
 
 const SCUOLA_STORAGE_KEY = 'speleo-scuola-data-v2';
@@ -679,6 +684,15 @@ export default function Report() {
     const lastDay = visitsData[visitsData.length - 1] ?? null;
     return { total, lastDay };
   }, [visitsData]);
+  const visitsRows = useMemo(
+    () =>
+      visitsData.map((row) => ({
+        day: row.day ? formatDate(row.day) : '',
+        visits: row.visits ?? 0,
+        unique_users: row.unique_users ?? 0,
+      })),
+    [visitsData],
+  );
   const [scuolaData, setScuolaData] = useState(() => {
     if (typeof window === 'undefined') return null;
     try {
@@ -1259,6 +1273,41 @@ export default function Report() {
     }
   }
 
+  async function handleVisitsExport(format = 'csv') {
+    setError('');
+    if (!visitsRows.length) {
+      setError('Nessun dato accessi disponibile.');
+      return;
+    }
+    const suffix = visitsRange ? `-${visitsRange}g` : '';
+    if (format === 'pdf') {
+      await downloadPdfTable(
+        'Statistiche accessi',
+        csvColumns.analytics_visits,
+        visitsRows,
+        `statistiche-accessi${suffix}-${new Date().toISOString()}.pdf`,
+      );
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(csvColumns.analytics_visits, visitsRows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `statistiche-accessi${suffix}-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(visitsRows, csvColumns.analytics_visits);
+      triggerDownload(
+        csv,
+        `statistiche-accessi${suffix}-${new Date().toISOString()}.csv`,
+        'text/csv;charset=utf-8;',
+      );
+    }
+  }
+
   return (
     <section className="page-grid">
       <header>
@@ -1282,11 +1331,23 @@ export default function Report() {
           <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
             Periodo
             <select value={visitsRange} onChange={(event) => setVisitsRange(Number(event.target.value))}>
-              <option value={7}>Ultimi 7 giorni</option>
-              <option value={30}>Ultimi 30 giorni</option>
-              <option value={90}>Ultimi 90 giorni</option>
+              <option value={1}>Giorno</option>
+              <option value={7}>Settimana</option>
+              <option value={30}>Mese</option>
+              <option value={365}>Anno</option>
             </select>
           </label>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => handleVisitsExport()}>
+              CSV
+            </button>
+            <button type="button" style={{ background: '#228be6' }} onClick={() => handleVisitsExport('pdf')}>
+              PDF
+            </button>
+            <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleVisitsExport('xlsx')}>
+              XLSX
+            </button>
+          </div>
           <div style={{ color: 'var(--color-muted)', fontSize: '0.9rem' }}>
             Visite totali nel periodo:{' '}
             <strong style={{ color: 'var(--color-foreground)' }}>{visitsSummary.total}</strong>.{' '}

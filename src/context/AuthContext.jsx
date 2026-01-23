@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import AuthContext from './authContext';
+import { safeLogActivity } from '../services/activityLogs.js';
 
 export default function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
@@ -38,6 +39,17 @@ export default function AuthProvider({ children }) {
         throw new Error(error.message ?? 'Credenziali non valide');
       }
       applySession(data.session ?? null);
+      if (data.user) {
+        safeLogActivity(
+          {
+            action: 'login',
+            entity: 'auth',
+            entityId: data.user.id,
+            message: `Login utente ${data.user.email ?? ''}`.trim(),
+          },
+          data.user,
+        );
+      }
       setLoading(false);
       return { user: data.user ?? null, role: resolveRole(data.user ?? null) };
     },
