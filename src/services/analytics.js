@@ -51,13 +51,16 @@ export async function fetchDailyVisits({ days = 30 } = {}) {
   return data ?? [];
 }
 
-export async function fetchActiveUsers({ minutes = 2 } = {}) {
-  const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
-  const { data, error } = await supabase
-    .from('user_sessions')
-    .select('user_email, last_seen_at, client_info')
-    .gte('last_seen_at', since)
-    .order('last_seen_at', { ascending: false });
+export async function fetchActiveUsers({ minutes = 2, days = null } = {}) {
+  let query = supabase.from('user_sessions').select('user_email, last_seen_at, client_info');
+  if (typeof days === 'number') {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte('last_seen_at', since);
+  } else if (typeof minutes === 'number') {
+    const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+    query = query.gte('last_seen_at', since);
+  }
+  const { data, error } = await query.order('last_seen_at', { ascending: false });
   if (error) throw error;
   return data ?? [];
 }

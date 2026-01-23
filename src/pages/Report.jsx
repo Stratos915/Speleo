@@ -84,6 +84,11 @@ const csvColumns = {
     { key: 'visits', label: 'Visite' },
     { key: 'unique_users', label: 'Utenti unici' },
   ],
+  user_sessions: [
+    { key: 'user_email', label: 'Email' },
+    { key: 'last_seen_at', label: 'Ultimo ping' },
+    { key: 'client_info', label: 'Client' },
+  ],
 };
 
 const SCUOLA_STORAGE_KEY = 'speleo-scuola-data-v2';
@@ -675,6 +680,7 @@ export default function Report() {
   const [activeUsers, setActiveUsers] = useState([]);
   const [activeLoading, setActiveLoading] = useState(false);
   const [activeError, setActiveError] = useState('');
+  const [activeRange, setActiveRange] = useState('2m');
   const ACTIVE_REFRESH_MS = 30_000;
   const visitsSummary = useMemo(() => {
     if (!visitsData.length) {
@@ -692,6 +698,15 @@ export default function Report() {
         unique_users: row.unique_users ?? 0,
       })),
     [visitsData],
+  );
+  const activeRows = useMemo(
+    () =>
+      activeUsers.map((session) => ({
+        user_email: session.user_email ?? '',
+        last_seen_at: formatDateTime(session.last_seen_at),
+        client_info: summarizeClientInfo(session.client_info),
+      })),
+    [activeUsers],
   );
   const [scuolaData, setScuolaData] = useState(() => {
     if (typeof window === 'undefined') return null;
@@ -819,7 +834,19 @@ export default function Report() {
       setActiveError('');
       if (firstLoad) setActiveLoading(true);
       try {
-        const rows = await fetchActiveUsers({ minutes: 2 });
+        let rows = [];
+        if (activeRange === 'all') {
+          rows = await fetchActiveUsers({ minutes: null, days: null });
+        } else if (activeRange.endsWith('d')) {
+          const days = Number(activeRange.replace('d', ''));
+          rows = await fetchActiveUsers({ days });
+        } else if (activeRange.endsWith('h')) {
+          const minutes = Number(activeRange.replace('h', '')) * 60;
+          rows = await fetchActiveUsers({ minutes });
+        } else {
+          const minutes = Number(activeRange.replace('m', '')) || 2;
+          rows = await fetchActiveUsers({ minutes });
+        }
         if (!ignore) setActiveUsers(rows);
       } catch (activeErr) {
         console.error('[Report] Impossibile caricare gli utenti online:', activeErr);
@@ -838,7 +865,7 @@ export default function Report() {
       ignore = true;
       clearInterval(interval);
     };
-  }, [isAuthenticated, ACTIVE_REFRESH_MS]);
+  }, [isAuthenticated, ACTIVE_REFRESH_MS, activeRange]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -1308,6 +1335,41 @@ export default function Report() {
     }
   }
 
+  async function handleActiveUsersExport(format = 'csv') {
+    setError('');
+    if (!activeRows.length) {
+      setError('Nessun accesso disponibile.');
+      return;
+    }
+    const suffix = activeRange ? `-${activeRange}` : '';
+    if (format === 'pdf') {
+      await downloadPdfTable(
+        'Utenti collegati',
+        csvColumns.user_sessions,
+        activeRows,
+        `utenti-collegati${suffix}-${new Date().toISOString()}.pdf`,
+      );
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(csvColumns.user_sessions, activeRows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `utenti-collegati${suffix}-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(activeRows, csvColumns.user_sessions);
+      triggerDownload(
+        csv,
+        `utenti-collegati${suffix}-${new Date().toISOString()}.csv`,
+        'text/csv;charset=utf-8;',
+      );
+    }
+  }
+
   return (
     <section className="page-grid">
       <header>
@@ -1391,7 +1453,39 @@ export default function Report() {
       </article>
 
       <article className="card">
-        <h3>Utenti collegati (ultimi 2 minuti)</h3>
+        <h3>Utenti collegati</h3>
+        <div
+          style={{
+            display: 'flex',
+            gap: '1rem',
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            marginBottom: '0.75rem',
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+            Periodo
+            <select value={activeRange} onChange={(event) => setActiveRange(event.target.value)}>
+              <option value="2m">Ultimi 2 minuti</option>
+              <option value="1h">Ultima ora</option>
+              <option value="1d">Ultimo giorno</option>
+              <option value="7d">Ultima settimana</option>
+              <option value="30d">Ultimo mese</option>
+              <option value="all">Tutti</option>
+            </select>
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button type="button" onClick={() => handleActiveUsersExport()}>
+              CSV
+            </button>
+            <button type="button" style={{ background: '#228be6' }} onClick={() => handleActiveUsersExport('pdf')}>
+              PDF
+            </button>
+            <button type="button" style={{ background: '#adb5bd' }} onClick={() => handleActiveUsersExport('xlsx')}>
+              XLSX
+            </button>
+          </div>
+        </div>
         {activeError && <p style={{ color: '#c92a2a' }}>{activeError}</p>}
         {activeLoading ? (
           <p>Verifica utenti online...</p>
@@ -1417,7 +1511,7 @@ export default function Report() {
             </table>
           </div>
         ) : (
-          <p>Nessun utente risulta collegato negli ultimi 120 secondi.</p>
+          <p>Nessun utente risulta collegato nel periodo selezionato.</p>
         )}
       </article>
 
