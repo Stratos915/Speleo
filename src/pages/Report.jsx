@@ -5,7 +5,7 @@ import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
-import { fetchActiveUsers, fetchDailyVisits } from '../services/analytics.js';
+import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 
 const csvColumns = {
   uscita: [
@@ -84,9 +84,9 @@ const csvColumns = {
     { key: 'visits', label: 'Visite' },
     { key: 'unique_users', label: 'Utenti unici' },
   ],
-  user_sessions: [
+  access_events: [
     { key: 'user_email', label: 'Email' },
-    { key: 'last_seen_at', label: 'Ultimo ping' },
+    { key: 'access_at', label: 'Accesso' },
     { key: 'client_info', label: 'Client' },
   ],
 };
@@ -703,8 +703,8 @@ export default function Report() {
     () =>
       activeUsers.map((session) => ({
         user_email: session.user_email ?? '',
-        last_seen_at: formatDateTime(session.last_seen_at),
-        client_info: summarizeClientInfo(session.client_info),
+        access_at: formatDateTime(session.created_at ?? session.last_seen_at),
+        client_info: summarizeClientInfo(session.meta ?? session.client_info),
       })),
     [activeUsers],
   );
@@ -836,21 +836,21 @@ export default function Report() {
       try {
         let rows = [];
         if (activeRange === 'all') {
-          rows = await fetchActiveUsers({ minutes: null, days: null });
+          rows = await fetchAccessEvents({ minutes: null, hours: null, days: null, limit: 2000 });
         } else if (activeRange.endsWith('d')) {
           const days = Number(activeRange.replace('d', ''));
-          rows = await fetchActiveUsers({ days });
+          rows = await fetchAccessEvents({ days, limit: 2000 });
         } else if (activeRange.endsWith('h')) {
-          const minutes = Number(activeRange.replace('h', '')) * 60;
-          rows = await fetchActiveUsers({ minutes });
+          const hours = Number(activeRange.replace('h', '')) || 1;
+          rows = await fetchAccessEvents({ hours, limit: 2000 });
         } else {
           const minutes = Number(activeRange.replace('m', '')) || 2;
-          rows = await fetchActiveUsers({ minutes });
+          rows = await fetchAccessEvents({ minutes, limit: 2000 });
         }
         if (!ignore) setActiveUsers(rows);
       } catch (activeErr) {
-        console.error('[Report] Impossibile caricare gli utenti online:', activeErr);
-        if (!ignore) setActiveError('Impossibile caricare gli utenti attivi.');
+        console.error('[Report] Impossibile caricare gli accessi utenti:', activeErr);
+        if (!ignore) setActiveError('Impossibile caricare gli accessi utenti.');
       } finally {
         if (firstLoad && !ignore) {
           setActiveLoading(false);
@@ -1344,13 +1344,13 @@ export default function Report() {
     const suffix = activeRange ? `-${activeRange}` : '';
     if (format === 'pdf') {
       await downloadPdfTable(
-        'Utenti collegati',
-        csvColumns.user_sessions,
+        'Accessi utenti',
+        csvColumns.access_events,
         activeRows,
         `utenti-collegati${suffix}-${new Date().toISOString()}.pdf`,
       );
     } else if (format === 'xlsx') {
-      const sheet = buildWorksheetXml(csvColumns.user_sessions, activeRows);
+      const sheet = buildWorksheetXml(csvColumns.access_events, activeRows);
       const files = [
         { name: '[Content_Types].xml', content: buildContentTypesXml() },
         { name: '_rels/.rels', content: buildRootRelsXml() },
@@ -1361,7 +1361,7 @@ export default function Report() {
       const blob = buildZipFile(files);
       triggerDownload(blob, `utenti-collegati${suffix}-${new Date().toISOString()}.xlsx`);
     } else {
-      const csv = buildCsv(activeRows, csvColumns.user_sessions);
+      const csv = buildCsv(activeRows, csvColumns.access_events);
       triggerDownload(
         csv,
         `utenti-collegati${suffix}-${new Date().toISOString()}.csv`,
@@ -1453,7 +1453,7 @@ export default function Report() {
       </article>
 
       <article className="card">
-        <h3>Utenti collegati</h3>
+        <h3>Accessi utenti</h3>
         <div
           style={{
             display: 'flex',
@@ -1495,23 +1495,27 @@ export default function Report() {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Email</th>
-                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Ultimo ping</th>
+                  <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Accesso</th>
                   <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Client</th>
                 </tr>
               </thead>
               <tbody>
                 {activeUsers.map((session) => (
-                  <tr key={`${session.user_email}-${session.last_seen_at}`}>
+                  <tr key={`${session.user_email}-${session.created_at ?? session.last_seen_at}`}>
                     <td style={{ padding: '0.35rem 0' }}>{session.user_email}</td>
-                    <td style={{ padding: '0.35rem 0' }}>{formatDateTime(session.last_seen_at)}</td>
-                    <td style={{ padding: '0.35rem 0' }}>{summarizeClientInfo(session.client_info)}</td>
+                    <td style={{ padding: '0.35rem 0' }}>
+                      {formatDateTime(session.created_at ?? session.last_seen_at)}
+                    </td>
+                    <td style={{ padding: '0.35rem 0' }}>
+                      {summarizeClientInfo(session.meta ?? session.client_info)}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         ) : (
-          <p>Nessun utente risulta collegato nel periodo selezionato.</p>
+          <p>Nessun accesso registrato nel periodo selezionato.</p>
         )}
       </article>
 

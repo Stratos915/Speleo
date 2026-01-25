@@ -64,3 +64,23 @@ export async function fetchActiveUsers({ minutes = 2, days = null } = {}) {
   if (error) throw error;
   return data ?? [];
 }
+
+export async function fetchAccessEvents({ minutes = null, hours = null, days = null, limit = 1000 } = {}) {
+  let query = supabase
+    .from('analytics_events')
+    .select('user_email, created_at, meta')
+    .eq('event', 'page_view');
+  if (typeof days === 'number') {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    query = query.gte('created_at', since);
+  } else if (typeof hours === 'number') {
+    const since = new Date(Date.now() - hours * 60 * 60 * 1000).toISOString();
+    query = query.gte('created_at', since);
+  } else if (typeof minutes === 'number') {
+    const since = new Date(Date.now() - minutes * 60 * 1000).toISOString();
+    query = query.gte('created_at', since);
+  }
+  const { data, error } = await query.order('created_at', { ascending: false }).limit(limit);
+  if (error) throw error;
+  return data ?? [];
+}
