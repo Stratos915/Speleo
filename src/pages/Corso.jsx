@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getMembers } from '../services/members';
+import { dedupeMembers } from '../utils/members.js';
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
@@ -326,6 +327,14 @@ export default function Corso() {
   }, [yearFolders, activeYearId, activeCourseId]);
 
   const membersMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+  const uniqueMembers = useMemo(() => {
+    const sorted = [...members].sort((a, b) => {
+      const yearA = Number(a.membership_year ?? a.year ?? a.anno ?? 0);
+      const yearB = Number(b.membership_year ?? b.year ?? b.anno ?? 0);
+      return yearB - yearA;
+    });
+    return dedupeMembers(sorted);
+  }, [members]);
   const activeYear = yearFolders.find((item) => item.id === activeYearId) ?? null;
   const activeCourse = activeYear?.courses.find((course) => course.id === activeCourseId) ?? null;
   const isActiveCourseClosed = Boolean(activeCourse?.isClosed);
@@ -446,7 +455,7 @@ export default function Corso() {
               disabled={membersLoading || isActiveCourseClosed}
             >
               <option value="">--</option>
-              {members.map((member) => (
+              {uniqueMembers.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
                 </option>
@@ -1640,7 +1649,7 @@ function updateCourse(yearId, courseId, updater) {
               disabled={membersLoading}
             >
               <option value="">--</option>
-              {members.map((member) => (
+              {uniqueMembers.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
                 </option>

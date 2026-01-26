@@ -10,6 +10,7 @@ import {
   updateMemberPurchase,
 } from '../services/memberPurchases';
 import { supabase } from '../lib/supabaseClient';
+import { dedupeMembers } from '../utils/members.js';
 import { getAllRoles } from '../utils/permissions.js';
 
 const YEAR_START = 2025;
@@ -42,6 +43,399 @@ const ORDER_STATUS = [
   { value: 'cancelled', label: 'Annullato' },
 ];
 
+const PURCHASE_EXPORT_COLUMNS = [
+  { key: 'created_at', label: 'Data' },
+  { key: 'member_name', label: 'Socio' },
+  { key: 'membership_number', label: 'Numero tessera' },
+  { key: 'item_type', label: 'Tipo' },
+  { key: 'size', label: 'Taglia' },
+  { key: 'quantity', label: 'Quantita' },
+  { key: 'price', label: 'Prezzo' },
+  { key: 'payment_status', label: 'Pagamento' },
+  { key: 'status', label: 'Stato ordine' },
+  { key: 'purchase_year', label: 'Anno' },
+  { key: 'notes', label: 'Note' },
+];
+
+const PDF_PAGE_WIDTH = 612;
+const PDF_PAGE_HEIGHT = 792;
+const PDF_MARGIN = 40;
+const PDF_FONT_SIZE = 8;
+const PDF_TITLE_FONT_SIZE = 12;
+const PDF_LINE_HEIGHT = 11;
+const PDF_CHAR_WIDTH = 6;
+const PDF_CELL_PADDING = 3;
+const PDF_MIN_COL_CHARS = 6;
+const PDF_MAX_COL_CHARS = 32;
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const dateValue = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(dateValue.getTime())) return '';
+  return dateValue.toLocaleString('it-IT');
+}
+
+function formatCellValue(column, value) {
+  if (value === null || value === undefined || value === '') return '';
+  if (column.key === 'created_at') return formatDateTime(value);
+  return String(value);
+}
+
+function buildCsv(rows, columns) {
+  const safe = (value) => {
+    if (value === null || value === undefined) return '';
+    const normalized = value instanceof Date ? value.toISOString() : String(value);
+    const escaped = normalized.replace(/"/g, '""');
+    return /[;"\n]/.test(escaped) ? `"${escaped}"` : escaped;
+  };
+
+  const header = columns.map((column) => column.label).join(';');
+  const lines = rows.map((row) =>
+    columns.map((column) => safe(formatCellValue(column, row[column.key]))).join(';'),
+  );
+  return [header, ...lines].join('\n');
+}
+
+function triggerDownload(content, filename, mimeType) {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function buildContentTypesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+  <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>`;
+}
+
+function buildRootRelsXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>`;
+}
+
+function buildWorkbookXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Acquisti" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`;
+}
+
+function buildWorkbookRelsXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`;
+}
+
+function escapeXml(value) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
+function buildWorksheetXml(columns, rows) {
+  const header = `<row>${columns.map((col) => `<c t="inlineStr"><is><t>${escapeXml(col.label)}</t></is></c>`).join('')}</row>`;
+  const body = rows
+    .map((row) => {
+      const cells = columns.map((col) => {
+        const value = formatCellValue(col, row[col.key]);
+        return `<c t="inlineStr"><is><t>${escapeXml(value)}</t></is></c>`;
+      });
+      return `<row>${cells.join('')}</row>`;
+    })
+    .join('');
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    ${header}
+    ${body}
+  </sheetData>
+</worksheet>`;
+}
+
+function buildZipFile(files) {
+  const encoder = new TextEncoder();
+  const localChunks = [];
+  const centralChunks = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const data = encoder.encode(file.content);
+    const nameBytes = encoder.encode(file.name);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    localView.setUint32(0, 0x04034b50, true);
+    localView.setUint16(4, 20, true);
+    localView.setUint16(6, 0, true);
+    localView.setUint16(8, 0, true);
+    localView.setUint32(14, data.length, true);
+    localView.setUint32(18, data.length, true);
+    localView.setUint16(26, nameBytes.length, true);
+    localHeader.set(nameBytes, 30);
+    localChunks.push(localHeader, data);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    centralView.setUint32(0, 0x02014b50, true);
+    centralView.setUint16(4, 20, true);
+    centralView.setUint16(6, 20, true);
+    centralView.setUint16(8, 0, true);
+    centralView.setUint16(10, 0, true);
+    centralView.setUint32(20, data.length, true);
+    centralView.setUint32(24, data.length, true);
+    centralView.setUint16(28, nameBytes.length, true);
+    centralView.setUint32(42, offset, true);
+    centralHeader.set(nameBytes, 46);
+    centralChunks.push(centralHeader);
+
+    offset += localHeader.length + data.length;
+  });
+
+  const centralDirectorySize = centralChunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const centralDirectoryOffset = offset;
+
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  endView.setUint32(0, 0x06054b50, true);
+  endView.setUint16(8, files.length, true);
+  endView.setUint16(10, files.length, true);
+  endView.setUint32(12, centralDirectorySize, true);
+  endView.setUint32(16, centralDirectoryOffset, true);
+
+  const totalSize =
+    localChunks.reduce((sum, chunk) => sum + chunk.length, 0) +
+    centralDirectorySize +
+    endRecord.length;
+  const output = new Uint8Array(totalSize);
+  let pointer = 0;
+  [...localChunks, ...centralChunks, endRecord].forEach((chunk) => {
+    output.set(chunk, pointer);
+    pointer += chunk.length;
+  });
+  return new Blob([output], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  });
+}
+
+function escapePdfText(value) {
+  return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+}
+
+function splitIntoLines(text, maxChars) {
+  const safe = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!safe) return [''];
+  if (safe.length <= maxChars) return [safe];
+  const words = safe.split(/\s+/);
+  const lines = [];
+  let current = '';
+  words.forEach((word) => {
+    if (!current && word.length > maxChars) {
+      for (let i = 0; i < word.length; i += maxChars) {
+        lines.push(word.slice(i, i + maxChars));
+      }
+      return;
+    }
+    const next = current ? `${current} ${word}` : word;
+    if (next.length > maxChars) {
+      lines.push(current || word);
+      current = current ? word : '';
+    } else {
+      current = next;
+    }
+  });
+  if (current) lines.push(current);
+  return lines;
+}
+
+function computeColumnWidths(columns, rows) {
+  const values = rows.map((row) => columns.map((column) => formatCellValue(column, row[column.key]) || ''));
+  const rawChars = columns.map((column, index) => {
+    const headerLength = String(column.label ?? '').length;
+    const maxValueLength = values.reduce((max, row) => Math.max(max, String(row[index] ?? '').length), 0);
+    const candidate = Math.max(headerLength, maxValueLength, PDF_MIN_COL_CHARS);
+    return Math.min(candidate, PDF_MAX_COL_CHARS);
+  });
+  const minWidth = PDF_MIN_COL_CHARS * PDF_CHAR_WIDTH + PDF_CELL_PADDING * 2;
+  let widths = rawChars.map((count) => count * PDF_CHAR_WIDTH + PDF_CELL_PADDING * 2);
+  const available = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
+  let total = widths.reduce((sum, width) => sum + width, 0);
+  if (total > available) {
+    const scale = available / total;
+    widths = widths.map((width) => Math.max(width * scale, minWidth));
+    total = widths.reduce((sum, width) => sum + width, 0);
+    if (total > available) {
+      const excess = total - available;
+      const adjustable = widths
+        .map((width, index) => ({ index, slack: width - minWidth }))
+        .filter((entry) => entry.slack > 0);
+      const slackTotal = adjustable.reduce((sum, entry) => sum + entry.slack, 0) || 1;
+      widths = widths.map((width, index) => {
+        const entry = adjustable.find((item) => item.index === index);
+        if (!entry) return width;
+        const reduction = (entry.slack / slackTotal) * excess;
+        return Math.max(width - reduction, minWidth);
+      });
+    }
+  }
+  const charLimits = widths.map((width) =>
+    Math.max(PDF_MIN_COL_CHARS, Math.floor((width - PDF_CELL_PADDING * 2) / PDF_CHAR_WIDTH)),
+  );
+  return { widths, charLimits };
+}
+
+function generateTablePdf(title, columns, rows) {
+  const startY = PDF_PAGE_HEIGHT - PDF_MARGIN;
+  const bottomY = PDF_MARGIN;
+  const { widths, charLimits } = computeColumnWidths(columns, rows);
+  const headerLines = columns.map((column, index) => splitIntoLines(column.label, charLimits[index]));
+  const headerHeight =
+    Math.max(...headerLines.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
+  const rowLines = rows.map((row) =>
+    columns.map((column, index) => splitIntoLines(formatCellValue(column, row[column.key]), charLimits[index])),
+  );
+
+  const pages = [];
+  let current = [];
+  let cursorY = startY;
+  let firstPage = true;
+  rowLines.forEach((row) => {
+    const rowHeight =
+      Math.max(...row.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
+    const headerSpace = firstPage ? headerHeight + PDF_LINE_HEIGHT * 2 : headerHeight;
+    if (cursorY - headerSpace - rowHeight < bottomY) {
+      pages.push({ rows: current, firstPage });
+      current = [];
+      cursorY = startY;
+      firstPage = false;
+    }
+    current.push(row);
+    cursorY -= rowHeight;
+  });
+  pages.push({ rows: current, firstPage });
+
+  const pageObjectNumbers = pages.map((_page, index) => 3 + index * 2);
+  const contentObjectNumbers = pageObjectNumbers.map((number) => number + 1);
+  const fontObjectNumber = 3 + pages.length * 2;
+
+  const encoder = new TextEncoder();
+  const parts = [];
+  const offsets = [0];
+  let length = 0;
+
+  const pushString = (value) => {
+    const bytes = encoder.encode(value);
+    parts.push(bytes);
+    length += bytes.length;
+  };
+  const pushBytes = (bytes) => {
+    parts.push(bytes);
+    length += bytes.length;
+  };
+  const startObject = () => {
+    offsets.push(length);
+  };
+
+  pushString('%PDF-1.3\n');
+
+  startObject();
+  pushString('1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n');
+
+  const kids = pageObjectNumbers.map((number) => `${number} 0 R`).join(' ');
+  startObject();
+  pushString(`2 0 obj\n<< /Type /Pages /Count ${pages.length} /Kids [${kids}] >>\nendobj\n`);
+
+  pages.forEach((pageData, index) => {
+    const pageNumber = pageObjectNumbers[index];
+    const contentNumber = contentObjectNumbers[index];
+    const resources = `<< /Font << /F1 ${fontObjectNumber} 0 R >> >>`;
+    startObject();
+    pushString(
+      `${pageNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Contents ${contentNumber} 0 R /Resources ${resources} >>\nendobj\n`,
+    );
+
+    const contentLines = [];
+    contentLines.push('0.6 w');
+    let y = startY;
+    if (pageData.firstPage) {
+      contentLines.push(`BT /F1 ${PDF_TITLE_FONT_SIZE} Tf ${PDF_MARGIN} ${y} Td (${escapePdfText(title)}) Tj ET`);
+      y -= PDF_LINE_HEIGHT * 2;
+    }
+
+    const drawRow = (row, yTop) => {
+      const rowHeight =
+        Math.max(...row.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
+      let x = PDF_MARGIN;
+      row.forEach((lines, colIndex) => {
+        const width = widths[colIndex];
+        contentLines.push(`${x} ${yTop - rowHeight} ${width} ${rowHeight} re S`);
+        lines.forEach((line, lineIndex) => {
+          const textY = yTop - PDF_CELL_PADDING - PDF_FONT_SIZE - lineIndex * PDF_LINE_HEIGHT;
+          contentLines.push(
+            `BT /F1 ${PDF_FONT_SIZE} Tf ${x + PDF_CELL_PADDING} ${textY} Td (${escapePdfText(line)}) Tj ET`,
+          );
+        });
+        x += width;
+      });
+      return yTop - rowHeight;
+    };
+
+    y = drawRow(headerLines, y);
+    pageData.rows.forEach((row) => {
+      y = drawRow(row, y);
+    });
+    const content = contentLines.join('\n');
+    startObject();
+    const contentBytes = encoder.encode(content);
+    pushString(`${contentNumber} 0 obj\n<< /Length ${contentBytes.length} >>\nstream\n`);
+    pushBytes(contentBytes);
+    pushString('\nendstream\nendobj\n');
+  });
+
+  startObject();
+  pushString(`${fontObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n`);
+
+  const xrefOffset = length;
+  pushString(`xref\n0 ${offsets.length}\n`);
+  pushString('0000000000 65535 f \n');
+  offsets.slice(1).forEach((offset) => {
+    pushString(`${String(offset).padStart(10, '0')} 00000 n \n`);
+  });
+  pushString(`trailer << /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+
+  const totalLength = parts.reduce((sum, part) => sum + part.length, 0);
+  const output = new Uint8Array(totalLength);
+  let position = 0;
+  parts.forEach((part) => {
+    output.set(part, position);
+    position += part.length;
+  });
+  return output;
+}
+
+async function downloadPdfTable(title, columns, rows, filename) {
+  if (!rows.length) return;
+  const pdfContent = generateTablePdf(title, columns, rows);
+  triggerDownload(pdfContent, filename, 'application/pdf');
+}
+
 export default function Members() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -54,6 +448,11 @@ export default function Members() {
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState('all');
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState('all');
   const [purchaseYearFilter, setPurchaseYearFilter] = useState(DEFAULT_YEAR_STRING);
+  const [purchaseMemberSearch, setPurchaseMemberSearch] = useState('');
+  const [purchasePriceMin, setPurchasePriceMin] = useState('');
+  const [purchasePriceMax, setPurchasePriceMax] = useState('');
+  const [purchaseDateFrom, setPurchaseDateFrom] = useState('');
+  const [purchaseDateTo, setPurchaseDateTo] = useState('');
   const [purchases, setPurchases] = useState([]);
   const [purchaseLoading, setPurchaseLoading] = useState(false);
   const [purchaseError, setPurchaseError] = useState('');
@@ -299,8 +698,21 @@ export default function Members() {
     () => new Map(members.map((member) => [String(member.id), member])),
     [members],
   );
+  const uniqueMembers = useMemo(() => {
+    const sorted = [...members].sort((a, b) => {
+      const yearA = Number(a.membership_year ?? a.year ?? a.anno ?? 0);
+      const yearB = Number(b.membership_year ?? b.year ?? b.anno ?? 0);
+      return yearB - yearA;
+    });
+    return dedupeMembers(sorted);
+  }, [members]);
 
   const filteredPurchases = useMemo(() => {
+    const searchTerm = purchaseMemberSearch.trim().toLowerCase();
+    const minPrice = purchasePriceMin === '' ? null : Number(purchasePriceMin);
+    const maxPrice = purchasePriceMax === '' ? null : Number(purchasePriceMax);
+    const fromDate = purchaseDateFrom ? new Date(purchaseDateFrom) : null;
+    const toDate = purchaseDateTo ? new Date(purchaseDateTo) : null;
     return purchases.filter((purchase) => {
       const matchesType = purchaseTypeFilter === 'all' || purchase.item_type === purchaseTypeFilter;
       const matchesSize =
@@ -310,7 +722,27 @@ export default function Members() {
       const matchesOrder = purchaseOrderFilter === 'all' || purchase.status === purchaseOrderFilter;
       const matchesYear =
         purchaseYearFilter === 'all' || String(purchase.purchase_year ?? '') === String(purchaseYearFilter);
-      return matchesType && matchesSize && matchesPayment && matchesOrder && matchesYear;
+      const member = membersById.get(String(purchase.member_id));
+      const memberLabel = `${member?.full_name ?? ''} ${member?.old_id ?? ''} ${member?.email ?? ''}`.toLowerCase();
+      const matchesMember = !searchTerm || memberLabel.includes(searchTerm);
+      const priceValue = Number(purchase.price);
+      const matchesPriceMin = minPrice === null || (!Number.isNaN(priceValue) && priceValue >= minPrice);
+      const matchesPriceMax = maxPrice === null || (!Number.isNaN(priceValue) && priceValue <= maxPrice);
+      const createdAt = purchase.created_at ? new Date(purchase.created_at) : null;
+      const matchesDateFrom = !fromDate || (createdAt && createdAt >= fromDate);
+      const matchesDateTo = !toDate || (createdAt && createdAt <= toDate);
+      return (
+        matchesType &&
+        matchesSize &&
+        matchesPayment &&
+        matchesOrder &&
+        matchesYear &&
+        matchesMember &&
+        matchesPriceMin &&
+        matchesPriceMax &&
+        matchesDateFrom &&
+        matchesDateTo
+      );
     });
   }, [
     purchases,
@@ -319,7 +751,61 @@ export default function Members() {
     purchaseStatusFilter,
     purchaseOrderFilter,
     purchaseYearFilter,
+    purchaseMemberSearch,
+    purchasePriceMin,
+    purchasePriceMax,
+    purchaseDateFrom,
+    purchaseDateTo,
+    membersById,
   ]);
+
+  const purchaseSummary = useMemo(() => {
+    const base = {
+      totalOrders: 0,
+      totalItems: 0,
+      totalRevenue: 0,
+      paid: 0,
+      unpaid: 0,
+      bySize: new Map(),
+      byStatus: new Map(),
+    };
+    filteredPurchases.forEach((purchase) => {
+      base.totalOrders += 1;
+      base.totalItems += Number(purchase.quantity ?? 1);
+      const priceValue = Number(purchase.price ?? 0);
+      if (!Number.isNaN(priceValue)) {
+        base.totalRevenue += priceValue * Number(purchase.quantity ?? 1);
+      }
+      if (purchase.payment_status === 'paid') base.paid += 1;
+      else base.unpaid += 1;
+      const sizeKey = purchase.size ?? 'N/D';
+      base.bySize.set(sizeKey, (base.bySize.get(sizeKey) ?? 0) + 1);
+      const statusKey = purchase.status ?? 'N/D';
+      base.byStatus.set(statusKey, (base.byStatus.get(statusKey) ?? 0) + 1);
+    });
+    return base;
+  }, [filteredPurchases]);
+
+  const purchaseRows = useMemo(
+    () =>
+      filteredPurchases.map((purchase) => {
+        const member = membersById.get(String(purchase.member_id));
+        return {
+          created_at: purchase.created_at ? new Date(purchase.created_at).toLocaleString('it-IT') : '',
+          member_name: member?.full_name ?? 'Socio non trovato',
+          membership_number: member?.old_id ?? member?.membership_number ?? '',
+          item_type: purchase.item_type ?? '',
+          size: purchase.size ?? '',
+          quantity: purchase.quantity ?? 1,
+          price: purchase.price ?? '',
+          payment_status: PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? '',
+          status: ORDER_STATUS.find((status) => status.value === purchase.status)?.label ?? '',
+          purchase_year: purchase.purchase_year ?? '',
+          notes: purchase.notes ?? '',
+        };
+      }),
+    [filteredPurchases, membersById],
+  );
 
   const selectedYearNumber = Number(yearFilter);
   const hasSelectedYearData = useMemo(
@@ -486,6 +972,42 @@ export default function Members() {
     } finally {
       setPurchaseSubmitting(false);
     }
+  }
+
+  async function handlePurchaseExport(format = 'csv') {
+    if (!purchaseRows.length) {
+      setPurchaseError('Nessun acquisto disponibile per l&apos;export.');
+      return;
+    }
+    const suffix = purchaseYearFilter && purchaseYearFilter !== 'all' ? `-${purchaseYearFilter}` : '';
+    if (format === 'pdf') {
+      await downloadPdfTable(
+        'Acquisti soci',
+        PURCHASE_EXPORT_COLUMNS,
+        purchaseRows,
+        `acquisti-soci${suffix}-${new Date().toISOString()}.pdf`,
+      );
+      return;
+    }
+    if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(PURCHASE_EXPORT_COLUMNS, purchaseRows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `acquisti-soci${suffix}-${new Date().toISOString()}.xlsx`);
+      return;
+    }
+    const csv = buildCsv(purchaseRows, PURCHASE_EXPORT_COLUMNS);
+    triggerDownload(
+      csv,
+      `acquisti-soci${suffix}-${new Date().toISOString()}.csv`,
+      'text/csv;charset=utf-8;',
+    );
   }
 
   async function handleSubmit(event) {
@@ -827,6 +1349,57 @@ export default function Members() {
               </p>
             )}
           </article>
+          <div
+            className="card"
+            style={{
+              display: 'grid',
+              gap: '0.75rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+              marginBottom: '1rem',
+            }}
+          >
+            <div>
+              <strong>Ordini</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.totalOrders}</p>
+            </div>
+            <div>
+              <strong>Articoli</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.totalItems}</p>
+            </div>
+            <div>
+              <strong>Incasso stimato</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                {purchaseSummary.totalRevenue.toFixed(2)} €
+              </p>
+            </div>
+            <div>
+              <strong>Pagati</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.paid}</p>
+            </div>
+            <div>
+              <strong>Da saldare</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.unpaid}</p>
+            </div>
+            <div>
+              <strong>Taglie</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                {Array.from(purchaseSummary.bySize.entries())
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join(' · ') || 'N/D'}
+              </p>
+            </div>
+            <div>
+              <strong>Stato ordine</strong>
+              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                {Array.from(purchaseSummary.byStatus.entries())
+                  .map(([key, value]) => {
+                    const label = ORDER_STATUS.find((status) => status.value === key)?.label ?? key;
+                    return `${label}: ${value}`;
+                  })
+                  .join(' · ') || 'N/D'}
+              </p>
+            </div>
+          </div>
           {purchaseError && (
             <article
               className="card"
@@ -840,6 +1413,17 @@ export default function Members() {
               {purchaseError}
             </article>
           )}
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+            <button type="button" onClick={() => handlePurchaseExport('csv')}>
+              CSV
+            </button>
+            <button type="button" style={{ background: '#228be6' }} onClick={() => handlePurchaseExport('pdf')}>
+              PDF
+            </button>
+            <button type="button" style={{ background: '#adb5bd' }} onClick={() => handlePurchaseExport('xlsx')}>
+              XLSX
+            </button>
+          </div>
           <div
             className="card"
             style={{
@@ -904,6 +1488,51 @@ export default function Members() {
                 ))}
               </select>
             </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Cerca socio
+              <input
+                type="search"
+                placeholder="Nome, tessera o email"
+                value={purchaseMemberSearch}
+                onChange={(event) => setPurchaseMemberSearch(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Prezzo min
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={purchasePriceMin}
+                onChange={(event) => setPurchasePriceMin(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Prezzo max
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={purchasePriceMax}
+                onChange={(event) => setPurchasePriceMax(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Dal
+              <input
+                type="date"
+                value={purchaseDateFrom}
+                onChange={(event) => setPurchaseDateFrom(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Al
+              <input
+                type="date"
+                value={purchaseDateTo}
+                onChange={(event) => setPurchaseDateTo(event.target.value)}
+              />
+            </label>
           </div>
           {canEditMembers && (
             <div className="card">
@@ -917,7 +1546,7 @@ export default function Members() {
                     required
                   >
                     <option value="">Seleziona socio</option>
-                    {members.map((member) => (
+                    {uniqueMembers.map((member) => (
                       <option key={member.id} value={member.id}>
                         {member.full_name} (#{member.old_id ?? 'N/D'})
                       </option>
