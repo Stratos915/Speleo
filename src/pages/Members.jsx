@@ -56,6 +56,11 @@ const PURCHASE_EXPORT_COLUMNS = [
   { key: 'purchase_year', label: 'Anno' },
   { key: 'notes', label: 'Note' },
 ];
+const PURCHASE_SUMMARY_COLUMNS = [
+  { key: 'label', label: 'Voce' },
+  { key: 'orders', label: 'Ordini' },
+  { key: 'items', label: 'Quantita' },
+];
 
 const PDF_PAGE_WIDTH = 612;
 const PDF_PAGE_HEIGHT = 792;
@@ -770,18 +775,25 @@ export default function Members() {
       byStatus: new Map(),
     };
     filteredPurchases.forEach((purchase) => {
+      const quantity = Number(purchase.quantity ?? 1);
       base.totalOrders += 1;
-      base.totalItems += Number(purchase.quantity ?? 1);
+      base.totalItems += quantity;
       const priceValue = Number(purchase.price ?? 0);
       if (!Number.isNaN(priceValue)) {
-        base.totalRevenue += priceValue * Number(purchase.quantity ?? 1);
+        base.totalRevenue += priceValue * quantity;
       }
       if (purchase.payment_status === 'paid') base.paid += 1;
       else base.unpaid += 1;
       const sizeKey = purchase.size ?? 'N/D';
-      base.bySize.set(sizeKey, (base.bySize.get(sizeKey) ?? 0) + 1);
+      const sizeEntry = base.bySize.get(sizeKey) ?? { orders: 0, items: 0 };
+      sizeEntry.orders += 1;
+      sizeEntry.items += quantity;
+      base.bySize.set(sizeKey, sizeEntry);
       const statusKey = purchase.status ?? 'N/D';
-      base.byStatus.set(statusKey, (base.byStatus.get(statusKey) ?? 0) + 1);
+      const statusEntry = base.byStatus.get(statusKey) ?? { orders: 0, items: 0 };
+      statusEntry.orders += 1;
+      statusEntry.items += quantity;
+      base.byStatus.set(statusKey, statusEntry);
     });
     return base;
   }, [filteredPurchases]);
@@ -805,6 +817,29 @@ export default function Members() {
         };
       }),
     [filteredPurchases, membersById],
+  );
+
+  const purchaseSizeSummaryRows = useMemo(
+    () =>
+      Array.from(purchaseSummary.bySize.entries()).map(([key, value]) => ({
+        label: key,
+        orders: value.orders,
+        items: value.items,
+      })),
+    [purchaseSummary.bySize],
+  );
+
+  const purchaseStatusSummaryRows = useMemo(
+    () =>
+      Array.from(purchaseSummary.byStatus.entries()).map(([key, value]) => {
+        const label = ORDER_STATUS.find((status) => status.value === key)?.label ?? key;
+        return {
+          label,
+          orders: value.orders,
+          items: value.items,
+        };
+      }),
+    [purchaseSummary.byStatus],
   );
 
   const selectedYearNumber = Number(yearFilter);
@@ -1006,6 +1041,44 @@ export default function Members() {
     triggerDownload(
       csv,
       `acquisti-soci${suffix}-${new Date().toISOString()}.csv`,
+      'text/csv;charset=utf-8;',
+    );
+  }
+
+  async function handlePurchaseSummaryExport(kind, format = 'csv') {
+    const rows = kind === 'sizes' ? purchaseSizeSummaryRows : purchaseStatusSummaryRows;
+    if (!rows.length) {
+      setPurchaseError('Nessun dato disponibile per il riepilogo.');
+      return;
+    }
+    const suffix = purchaseYearFilter && purchaseYearFilter !== 'all' ? `-${purchaseYearFilter}` : '';
+    const label = kind === 'sizes' ? 'taglie' : 'stato-ordine';
+    if (format === 'pdf') {
+      await downloadPdfTable(
+        `Riepilogo acquisti (${label})`,
+        PURCHASE_SUMMARY_COLUMNS,
+        rows,
+        `acquisti-${label}${suffix}-${new Date().toISOString()}.pdf`,
+      );
+      return;
+    }
+    if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(PURCHASE_SUMMARY_COLUMNS, rows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `acquisti-${label}${suffix}-${new Date().toISOString()}.xlsx`);
+      return;
+    }
+    const csv = buildCsv(rows, PURCHASE_SUMMARY_COLUMNS);
+    triggerDownload(
+      csv,
+      `acquisti-${label}${suffix}-${new Date().toISOString()}.csv`,
       'text/csv;charset=utf-8;',
     );
   }
@@ -1384,7 +1457,7 @@ export default function Members() {
               <strong>Taglie</strong>
               <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
                 {Array.from(purchaseSummary.bySize.entries())
-                  .map(([key, value]) => `${key}: ${value}`)
+                  .map(([key, value]) => `${key}: ${value.items}`)
                   .join(' · ') || 'N/D'}
               </p>
             </div>
@@ -1394,7 +1467,7 @@ export default function Members() {
                 {Array.from(purchaseSummary.byStatus.entries())
                   .map(([key, value]) => {
                     const label = ORDER_STATUS.find((status) => status.value === key)?.label ?? key;
-                    return `${label}: ${value}`;
+                    return `${label}: ${value.items}`;
                   })
                   .join(' · ') || 'N/D'}
               </p>
@@ -1422,6 +1495,40 @@ export default function Members() {
             </button>
             <button type="button" style={{ background: '#adb5bd' }} onClick={() => handlePurchaseExport('xlsx')}>
               XLSX
+            </button>
+            <button type="button" onClick={() => handlePurchaseSummaryExport('sizes', 'csv')}>
+              Riepilogo taglie (CSV)
+            </button>
+            <button
+              type="button"
+              style={{ background: '#228be6' }}
+              onClick={() => handlePurchaseSummaryExport('sizes', 'pdf')}
+            >
+              Riepilogo taglie (PDF)
+            </button>
+            <button
+              type="button"
+              style={{ background: '#adb5bd' }}
+              onClick={() => handlePurchaseSummaryExport('sizes', 'xlsx')}
+            >
+              Riepilogo taglie (XLSX)
+            </button>
+            <button type="button" onClick={() => handlePurchaseSummaryExport('status', 'csv')}>
+              Riepilogo ordini (CSV)
+            </button>
+            <button
+              type="button"
+              style={{ background: '#228be6' }}
+              onClick={() => handlePurchaseSummaryExport('status', 'pdf')}
+            >
+              Riepilogo ordini (PDF)
+            </button>
+            <button
+              type="button"
+              style={{ background: '#adb5bd' }}
+              onClick={() => handlePurchaseSummaryExport('status', 'xlsx')}
+            >
+              Riepilogo ordini (XLSX)
             </button>
           </div>
           <div
