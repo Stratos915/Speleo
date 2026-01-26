@@ -29,8 +29,13 @@ const emptyMember = {
 const DEFAULT_YEAR_STRING = String(DEFAULT_YEAR);
 const PURCHASE_TYPES = [
   { value: 'maglietta', label: 'Maglietta' },
+  { value: 'maglietta_tecnica', label: 'Maglietta tecnica' },
   { value: 'felpa', label: 'Felpa' },
   { value: 'gadget', label: 'Gadget' },
+  { value: 'scaldacollo', label: 'Scaldacollo' },
+  { value: 'tazza', label: 'Tazza' },
+  { value: 'cappello', label: 'Cappello' },
+  { value: 'cordino_porta_badge', label: 'Cordino porta badge' },
 ];
 const PURCHASE_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
 const PAYMENT_STATUS = [
@@ -453,6 +458,7 @@ export default function Members() {
   const [purchaseStatusFilter, setPurchaseStatusFilter] = useState('all');
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState('all');
   const [purchaseYearFilter, setPurchaseYearFilter] = useState(DEFAULT_YEAR_STRING);
+  const [showPurchaseFilters, setShowPurchaseFilters] = useState(false);
   const [purchaseMemberSearch, setPurchaseMemberSearch] = useState('');
   const [purchasePriceMin, setPurchasePriceMin] = useState('');
   const [purchasePriceMax, setPurchasePriceMax] = useState('');
@@ -463,6 +469,7 @@ export default function Members() {
   const [purchaseError, setPurchaseError] = useState('');
   const [purchaseSubmitting, setPurchaseSubmitting] = useState(false);
   const [purchaseEditingId, setPurchaseEditingId] = useState(null);
+  const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [purchaseForm, setPurchaseForm] = useState({
     member_id: '',
     item_type: PURCHASE_TYPES[0].value,
@@ -818,6 +825,9 @@ export default function Members() {
       }),
     [filteredPurchases, membersById],
   );
+  const purchaseTypeLabel = useMemo(() => {
+    return PURCHASE_TYPES.find((type) => type.value === purchaseForm.item_type)?.label ?? 'Acquisto';
+  }, [purchaseForm.item_type]);
 
   const purchaseSizeSummaryRows = useMemo(
     () =>
@@ -941,6 +951,7 @@ export default function Members() {
       purchase_year: String(purchase.purchase_year ?? DEFAULT_YEAR_STRING),
       notes: purchase.notes ?? '',
     });
+    setShowPurchaseForm(true);
   }
 
   function resetForm(yearValue = yearFilter) {
@@ -1001,6 +1012,7 @@ export default function Members() {
         );
       }
       resetPurchaseForm();
+      setShowPurchaseForm(false);
       loadPurchases();
     } catch (submitError) {
       setPurchaseError(submitError.message ?? 'Impossibile salvare l&apos;acquisto.');
@@ -1496,6 +1508,9 @@ export default function Members() {
             <button type="button" style={{ background: '#adb5bd' }} onClick={() => handlePurchaseExport('xlsx')}>
               XLSX
             </button>
+            <button type="button" onClick={() => setShowPurchaseFilters((prev) => !prev)}>
+              {showPurchaseFilters ? 'Nascondi filtri' : 'Mostra filtri'}
+            </button>
             <button type="button" onClick={() => handlePurchaseSummaryExport('sizes', 'csv')}>
               Riepilogo taglie (CSV)
             </button>
@@ -1531,245 +1546,256 @@ export default function Members() {
               Riepilogo ordini (XLSX)
             </button>
           </div>
-          <div
-            className="card"
-            style={{
-              marginBottom: '1rem',
-              display: 'grid',
-              gap: '0.75rem',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            }}
-          >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Tipo acquisto
-              <select value={purchaseTypeFilter} onChange={(event) => setPurchaseTypeFilter(event.target.value)}>
-                <option value="all">Tutti</option>
-                {PURCHASE_TYPES.map((type) => (
-                  <option key={type.value} value={type.value}>
-                    {type.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Taglia
-              <select value={purchaseSizeFilter} onChange={(event) => setPurchaseSizeFilter(event.target.value)}>
-                <option value="all">Tutte</option>
-                {PURCHASE_SIZES.map((size) => (
-                  <option key={size} value={size}>
-                    {size}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Stato pagamento
-              <select value={purchaseStatusFilter} onChange={(event) => setPurchaseStatusFilter(event.target.value)}>
-                <option value="all">Tutti</option>
-                {PAYMENT_STATUS.map((status) => (
-                  <option key={status.value} value={status.value}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Stato ordine
-              <select value={purchaseOrderFilter} onChange={(event) => setPurchaseOrderFilter(event.target.value)}>
-                <option value="all">Tutti</option>
-                {ORDER_STATUS.map((status) => (
-                  <option key={status.value} value={status.value}>
-                    {status.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Anno
-              <select value={purchaseYearFilter} onChange={(event) => setPurchaseYearFilter(event.target.value)}>
-                <option value="all">Tutti</option>
-                {yearOptions.map((yearOption) => (
-                  <option key={yearOption} value={String(yearOption)}>
-                    {yearOption}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Cerca socio
-              <input
-                type="search"
-                placeholder="Nome, tessera o email"
-                value={purchaseMemberSearch}
-                onChange={(event) => setPurchaseMemberSearch(event.target.value)}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Prezzo min
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={purchasePriceMin}
-                onChange={(event) => setPurchasePriceMin(event.target.value)}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Prezzo max
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={purchasePriceMax}
-                onChange={(event) => setPurchasePriceMax(event.target.value)}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Dal
-              <input
-                type="date"
-                value={purchaseDateFrom}
-                onChange={(event) => setPurchaseDateFrom(event.target.value)}
-              />
-            </label>
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Al
-              <input
-                type="date"
-                value={purchaseDateTo}
-                onChange={(event) => setPurchaseDateTo(event.target.value)}
-              />
-            </label>
-          </div>
-          {canEditMembers && (
-            <div className="card">
-              <form onSubmit={handlePurchaseSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-                <h3 style={{ margin: 0 }}>{purchaseEditingId ? 'Modifica acquisto' : 'Nuovo acquisto'}</h3>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  Socio
-                  <select
-                    value={purchaseForm.member_id}
-                    onChange={(event) => handlePurchaseChange('member_id', event.target.value)}
-                    required
-                  >
-                    <option value="">Seleziona socio</option>
-                    {uniqueMembers.map((member) => (
-                      <option key={member.id} value={member.id}>
-                        {member.full_name} (#{member.old_id ?? 'N/D'})
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Tipo
-                    <select
-                      value={purchaseForm.item_type}
-                      onChange={(event) => handlePurchaseChange('item_type', event.target.value)}
-                    >
-                      {PURCHASE_TYPES.map((type) => (
-                        <option key={type.value} value={type.value}>
-                          {type.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Taglia
-                    <select value={purchaseForm.size} onChange={(event) => handlePurchaseChange('size', event.target.value)}>
-                      {PURCHASE_SIZES.map((size) => (
-                        <option key={size} value={size}>
-                          {size}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Quantita
-                    <input
-                      type="number"
-                      min={1}
-                      value={purchaseForm.quantity}
-                      onChange={(event) => handlePurchaseChange('quantity', Number(event.target.value))}
-                    />
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Prezzo
-                    <input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      placeholder="0.00"
-                      value={purchaseForm.price}
-                      onChange={(event) => handlePurchaseChange('price', event.target.value)}
-                    />
-                  </label>
-                </div>
-                <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Pagamento
-                    <select
-                      value={purchaseForm.payment_status}
-                      onChange={(event) => handlePurchaseChange('payment_status', event.target.value)}
-                    >
-                      {PAYMENT_STATUS.map((status) => (
-                        <option key={status.value} value={status.value}>
-                          {status.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Stato ordine
-                    <select
-                      value={purchaseForm.status}
-                      onChange={(event) => handlePurchaseChange('status', event.target.value)}
-                    >
-                      {ORDER_STATUS.map((status) => (
-                        <option key={status.value} value={status.value}>
-                          {status.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    Anno
-                    <select
-                      value={purchaseForm.purchase_year}
-                      onChange={(event) => handlePurchaseChange('purchase_year', event.target.value)}
-                    >
-                      {yearOptions.map((yearOption) => (
-                        <option key={yearOption} value={String(yearOption)}>
-                          {yearOption}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  Note
-                  <textarea
-                    rows={2}
-                    value={purchaseForm.notes}
-                    onChange={(event) => handlePurchaseChange('notes', event.target.value)}
-                  />
-                </label>
-                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  <button type="submit" disabled={purchaseSubmitting}>
-                    {purchaseSubmitting ? 'Salvataggio...' : purchaseEditingId ? 'Aggiorna' : 'Aggiungi'}
-                  </button>
-                  <button
-                    type="button"
-                    style={{ background: '#adb5bd' }}
-                    onClick={() => {
-                      resetPurchaseForm();
-                    }}
-                  >
-                    Annulla
-                  </button>
-                </div>
-              </form>
+          {showPurchaseFilters && (
+            <div
+              className="card"
+              style={{
+                marginBottom: '1rem',
+                display: 'grid',
+                gap: '0.75rem',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              }}
+            >
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Tipo acquisto
+                <select value={purchaseTypeFilter} onChange={(event) => setPurchaseTypeFilter(event.target.value)}>
+                  <option value="all">Tutti</option>
+                  {PURCHASE_TYPES.map((type) => (
+                    <option key={type.value} value={type.value}>
+                      {type.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Taglia
+                <select value={purchaseSizeFilter} onChange={(event) => setPurchaseSizeFilter(event.target.value)}>
+                  <option value="all">Tutte</option>
+                  {PURCHASE_SIZES.map((size) => (
+                    <option key={size} value={size}>
+                      {size}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Stato pagamento
+                <select value={purchaseStatusFilter} onChange={(event) => setPurchaseStatusFilter(event.target.value)}>
+                  <option value="all">Tutti</option>
+                  {PAYMENT_STATUS.map((status) => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Stato ordine
+                <select value={purchaseOrderFilter} onChange={(event) => setPurchaseOrderFilter(event.target.value)}>
+                  <option value="all">Tutti</option>
+                  {ORDER_STATUS.map((status) => (
+                    <option key={status.value} value={status.value}>
+                      {status.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Anno
+                <select value={purchaseYearFilter} onChange={(event) => setPurchaseYearFilter(event.target.value)}>
+                  <option value="all">Tutti</option>
+                  {yearOptions.map((yearOption) => (
+                    <option key={yearOption} value={String(yearOption)}>
+                      {yearOption}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Cerca socio
+                <input
+                  type="search"
+                  placeholder="Nome, tessera o email"
+                  value={purchaseMemberSearch}
+                  onChange={(event) => setPurchaseMemberSearch(event.target.value)}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Prezzo min
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={purchasePriceMin}
+                  onChange={(event) => setPurchasePriceMin(event.target.value)}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Prezzo max
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={purchasePriceMax}
+                  onChange={(event) => setPurchasePriceMax(event.target.value)}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Dal
+                <input
+                  type="date"
+                  value={purchaseDateFrom}
+                  onChange={(event) => setPurchaseDateFrom(event.target.value)}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                Al
+                <input
+                  type="date"
+                  value={purchaseDateTo}
+                  onChange={(event) => setPurchaseDateTo(event.target.value)}
+                />
+              </label>
             </div>
+          )}
+          {canEditMembers && (
+            <details
+              className="card"
+              open={showPurchaseForm}
+              onToggle={(event) => setShowPurchaseForm(event.currentTarget.open)}
+            >
+              <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
+                {purchaseEditingId ? `Modifica acquisto: ${purchaseTypeLabel}` : `Nuovo acquisto: ${purchaseTypeLabel}`}
+              </summary>
+              <div style={{ marginTop: '0.75rem' }}>
+                <form onSubmit={handlePurchaseSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Socio
+                    <select
+                      value={purchaseForm.member_id}
+                      onChange={(event) => handlePurchaseChange('member_id', event.target.value)}
+                      required
+                    >
+                      <option value="">Seleziona socio</option>
+                      {uniqueMembers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.full_name} (#{member.old_id ?? 'N/D'})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Tipo
+                      <select
+                        value={purchaseForm.item_type}
+                        onChange={(event) => handlePurchaseChange('item_type', event.target.value)}
+                      >
+                        {PURCHASE_TYPES.map((type) => (
+                          <option key={type.value} value={type.value}>
+                            {type.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Taglia
+                      <select value={purchaseForm.size} onChange={(event) => handlePurchaseChange('size', event.target.value)}>
+                        {PURCHASE_SIZES.map((size) => (
+                          <option key={size} value={size}>
+                            {size}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Quantita
+                      <input
+                        type="number"
+                        min={1}
+                        value={purchaseForm.quantity}
+                        onChange={(event) => handlePurchaseChange('quantity', Number(event.target.value))}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Prezzo
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        placeholder="0.00"
+                        value={purchaseForm.price}
+                        onChange={(event) => handlePurchaseChange('price', event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Pagamento
+                      <select
+                        value={purchaseForm.payment_status}
+                        onChange={(event) => handlePurchaseChange('payment_status', event.target.value)}
+                      >
+                        {PAYMENT_STATUS.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Stato ordine
+                      <select
+                        value={purchaseForm.status}
+                        onChange={(event) => handlePurchaseChange('status', event.target.value)}
+                      >
+                        {ORDER_STATUS.map((status) => (
+                          <option key={status.value} value={status.value}>
+                            {status.label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Anno
+                      <select
+                        value={purchaseForm.purchase_year}
+                        onChange={(event) => handlePurchaseChange('purchase_year', event.target.value)}
+                      >
+                        {yearOptions.map((yearOption) => (
+                          <option key={yearOption} value={String(yearOption)}>
+                            {yearOption}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Note
+                    <textarea
+                      rows={2}
+                      value={purchaseForm.notes}
+                      onChange={(event) => handlePurchaseChange('notes', event.target.value)}
+                    />
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <button type="submit" disabled={purchaseSubmitting}>
+                      {purchaseSubmitting ? 'Salvataggio...' : purchaseEditingId ? 'Aggiorna' : 'Aggiungi'}
+                    </button>
+                    <button
+                      type="button"
+                      style={{ background: '#adb5bd' }}
+                      onClick={() => {
+                        resetPurchaseForm();
+                        setShowPurchaseForm(false);
+                      }}
+                    >
+                      Annulla
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </details>
           )}
           {purchaseLoading ? (
             <p>Caricamento acquisti...</p>
