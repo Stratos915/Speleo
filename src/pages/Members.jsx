@@ -3,6 +3,12 @@ import useAuth from '../context/useAuth.js';
 import { bulkCreateMembers, createMember, deleteMember, getMembers, updateMember } from '../services/members';
 import usePermissions from '../hooks/usePermissions.js';
 import { safeLogActivity } from '../services/activityLogs.js';
+import {
+  createMemberPurchase,
+  deleteMemberPurchase,
+  getMemberPurchases,
+  updateMemberPurchase,
+} from '../services/memberPurchases';
 import { supabase } from '../lib/supabaseClient';
 import { getAllRoles } from '../utils/permissions.js';
 
@@ -20,6 +26,21 @@ const emptyMember = {
   membership_year: DEFAULT_YEAR,
 };
 const DEFAULT_YEAR_STRING = String(DEFAULT_YEAR);
+const PURCHASE_TYPES = [
+  { value: 'maglietta', label: 'Maglietta' },
+  { value: 'felpa', label: 'Felpa' },
+  { value: 'gadget', label: 'Gadget' },
+];
+const PURCHASE_SIZES = ['XS', 'S', 'M', 'L', 'XL', 'XXL'];
+const PAYMENT_STATUS = [
+  { value: 'unpaid', label: 'Da saldare' },
+  { value: 'paid', label: 'Pagato' },
+];
+const ORDER_STATUS = [
+  { value: 'ordered', label: 'Ordinato' },
+  { value: 'delivered', label: 'Consegnato' },
+  { value: 'cancelled', label: 'Annullato' },
+];
 
 export default function Members() {
   const [members, setMembers] = useState([]);
@@ -27,6 +48,28 @@ export default function Members() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [membersTab, setMembersTab] = useState('anagrafica');
+  const [purchaseTypeFilter, setPurchaseTypeFilter] = useState('all');
+  const [purchaseSizeFilter, setPurchaseSizeFilter] = useState('all');
+  const [purchaseStatusFilter, setPurchaseStatusFilter] = useState('all');
+  const [purchaseOrderFilter, setPurchaseOrderFilter] = useState('all');
+  const [purchaseYearFilter, setPurchaseYearFilter] = useState(DEFAULT_YEAR_STRING);
+  const [purchases, setPurchases] = useState([]);
+  const [purchaseLoading, setPurchaseLoading] = useState(false);
+  const [purchaseError, setPurchaseError] = useState('');
+  const [purchaseSubmitting, setPurchaseSubmitting] = useState(false);
+  const [purchaseEditingId, setPurchaseEditingId] = useState(null);
+  const [purchaseForm, setPurchaseForm] = useState({
+    member_id: '',
+    item_type: PURCHASE_TYPES[0].value,
+    size: PURCHASE_SIZES[2],
+    quantity: 1,
+    price: '',
+    payment_status: PAYMENT_STATUS[0].value,
+    status: ORDER_STATUS[0].value,
+    purchase_year: DEFAULT_YEAR_STRING,
+    notes: '',
+  });
   const [form, setForm] = useState(emptyMember);
   const [editingId, setEditingId] = useState(null);
   const [submitting, setSubmitting] = useState(false);
@@ -85,9 +128,27 @@ export default function Members() {
     }
   }, []);
 
+  const loadPurchases = useCallback(async () => {
+    setPurchaseLoading(true);
+    setPurchaseError('');
+    try {
+      const data = await getMemberPurchases();
+      setPurchases(data);
+    } catch (loadError) {
+      setPurchaseError(loadError.message ?? 'Impossibile caricare gli acquisti.');
+    } finally {
+      setPurchaseLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     loadMembers();
   }, [loadMembers]);
+
+  useEffect(() => {
+    if (membersTab !== 'acquisti') return;
+    loadPurchases();
+  }, [membersTab, loadPurchases]);
 
   useEffect(() => {
     if (!canManageRoles || !supportsEmail) return;
@@ -234,6 +295,32 @@ export default function Members() {
     });
   }, [members, search, statusFilter, yearFilter]);
 
+  const membersById = useMemo(
+    () => new Map(members.map((member) => [String(member.id), member])),
+    [members],
+  );
+
+  const filteredPurchases = useMemo(() => {
+    return purchases.filter((purchase) => {
+      const matchesType = purchaseTypeFilter === 'all' || purchase.item_type === purchaseTypeFilter;
+      const matchesSize =
+        purchaseSizeFilter === 'all' ||
+        String(purchase.size ?? '').toLowerCase() === purchaseSizeFilter.toLowerCase();
+      const matchesPayment = purchaseStatusFilter === 'all' || purchase.payment_status === purchaseStatusFilter;
+      const matchesOrder = purchaseOrderFilter === 'all' || purchase.status === purchaseOrderFilter;
+      const matchesYear =
+        purchaseYearFilter === 'all' || String(purchase.purchase_year ?? '') === String(purchaseYearFilter);
+      return matchesType && matchesSize && matchesPayment && matchesOrder && matchesYear;
+    });
+  }, [
+    purchases,
+    purchaseTypeFilter,
+    purchaseSizeFilter,
+    purchaseStatusFilter,
+    purchaseOrderFilter,
+    purchaseYearFilter,
+  ]);
+
   const selectedYearNumber = Number(yearFilter);
   const hasSelectedYearData = useMemo(
     () => Number.isFinite(selectedYearNumber) && members.some((member) => Number(member.membership_year) === selectedYearNumber),
@@ -281,6 +368,32 @@ export default function Members() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  function handlePurchaseChange(field, value) {
+    setPurchaseForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function resetPurchaseForm() {
+    setPurchaseEditingId(null);
+    setPurchaseForm({
+      member_id: '',
+      item_type: PURCHASE_TYPES[0].value,
+      size: PURCHASE_SIZES[2],
+      quantity: 1,
+      price: '',
+      payment_status: PAYMENT_STATUS[0].value,
+      status: ORDER_STATUS[0].value,
+      purchase_year: DEFAULT_YEAR_STRING,
+      notes: '',
+    });
+  }
+
+  function formatPurchasePrice(value) {
+    if (value === null || value === undefined || value === '') return 'N/D';
+    const numeric = Number(value);
+    if (Number.isNaN(numeric)) return String(value);
+    return `${numeric.toFixed(2)} €`;
+  }
+
   function handleEdit(member) {
     setEditingId(member.id);
     setForm({
@@ -294,6 +407,21 @@ export default function Members() {
     setShowForm(true);
   }
 
+  function handlePurchaseEdit(purchase) {
+    setPurchaseEditingId(purchase.id);
+    setPurchaseForm({
+      member_id: purchase.member_id ?? '',
+      item_type: purchase.item_type ?? PURCHASE_TYPES[0].value,
+      size: purchase.size ?? PURCHASE_SIZES[2],
+      quantity: Number(purchase.quantity ?? 1),
+      price: purchase.price ?? '',
+      payment_status: purchase.payment_status ?? PAYMENT_STATUS[0].value,
+      status: purchase.status ?? ORDER_STATUS[0].value,
+      purchase_year: String(purchase.purchase_year ?? DEFAULT_YEAR_STRING),
+      notes: purchase.notes ?? '',
+    });
+  }
+
   function resetForm(yearValue = yearFilter) {
     setEditingId(null);
     setForm({
@@ -304,6 +432,60 @@ export default function Members() {
       membership_paid: false,
       membership_year: Number(yearValue) || DEFAULT_YEAR,
     });
+  }
+
+  async function handlePurchaseSubmit(event) {
+    event.preventDefault();
+    if (!purchaseForm.member_id) {
+      setPurchaseError('Seleziona un socio prima di salvare.');
+      return;
+    }
+    setPurchaseSubmitting(true);
+    setPurchaseError('');
+    const priceValue = Number(purchaseForm.price);
+    const payload = {
+      member_id: purchaseForm.member_id,
+      item_type: purchaseForm.item_type,
+      size: purchaseForm.size || null,
+      quantity: Number(purchaseForm.quantity) || 1,
+      price: Number.isNaN(priceValue) ? null : priceValue,
+      payment_status: purchaseForm.payment_status,
+      status: purchaseForm.status,
+      purchase_year: Number(purchaseForm.purchase_year) || DEFAULT_YEAR,
+      notes: purchaseForm.notes?.trim() || null,
+    };
+    try {
+      let savedPurchase;
+      if (purchaseEditingId) {
+        savedPurchase = await updateMemberPurchase(purchaseEditingId, payload);
+        safeLogActivity(
+          {
+            action: 'update_member_purchase',
+            entity: 'member_purchases',
+            entityId: savedPurchase.id,
+            details: { item_type: savedPurchase.item_type, member_id: savedPurchase.member_id },
+          },
+          user,
+        );
+      } else {
+        savedPurchase = await createMemberPurchase(payload);
+        safeLogActivity(
+          {
+            action: 'create_member_purchase',
+            entity: 'member_purchases',
+            entityId: savedPurchase.id,
+            details: { item_type: savedPurchase.item_type, member_id: savedPurchase.member_id },
+          },
+          user,
+        );
+      }
+      resetPurchaseForm();
+      loadPurchases();
+    } catch (submitError) {
+      setPurchaseError(submitError.message ?? 'Impossibile salvare l&apos;acquisto.');
+    } finally {
+      setPurchaseSubmitting(false);
+    }
   }
 
   async function handleSubmit(event) {
@@ -401,6 +583,45 @@ export default function Members() {
     }
   }
 
+  async function handlePurchaseDelete(id) {
+    if (!window.confirm('Vuoi eliminare questo acquisto?')) return;
+    setPurchaseError('');
+    try {
+      await deleteMemberPurchase(id);
+      safeLogActivity(
+        {
+          action: 'delete_member_purchase',
+          entity: 'member_purchases',
+          entityId: id,
+        },
+        user,
+      );
+      loadPurchases();
+    } catch (deleteError) {
+      setPurchaseError(deleteError.message ?? 'Impossibile eliminare l&apos;acquisto.');
+    }
+  }
+
+  async function togglePurchasePayment(purchase) {
+    setPurchaseError('');
+    const nextStatus = purchase.payment_status === 'paid' ? 'unpaid' : 'paid';
+    try {
+      await updateMemberPurchase(purchase.id, { payment_status: nextStatus });
+      safeLogActivity(
+        {
+          action: 'toggle_member_purchase_payment',
+          entity: 'member_purchases',
+          entityId: purchase.id,
+          details: { payment_status: nextStatus },
+        },
+        user,
+      );
+      loadPurchases();
+    } catch (toggleError) {
+      setPurchaseError(toggleError.message ?? 'Impossibile aggiornare il pagamento.');
+    }
+  }
+
   async function handleRoleChange(memberEmail, nextRole) {
     if (!memberEmail) return;
     setRolesError('');
@@ -443,16 +664,34 @@ export default function Members() {
           <h1>Gestione soci</h1>
           <p>Anagrafica aggiornata importata dalla versione precedente.</p>
         </div>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '220px' }}>
-          Cerca socio
-          <input
-            type="search"
-            placeholder="Nome, tessera o email"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            style={{ maxWidth: '320px' }}
-          />
-        </label>
+        {membersTab === 'anagrafica' && (
+          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: '220px' }}>
+            Cerca socio
+            <input
+              type="search"
+              placeholder="Nome, tessera o email"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              style={{ maxWidth: '320px' }}
+            />
+          </label>
+        )}
+      </div>
+
+      <div className="pill-group">
+        {[
+          { value: 'anagrafica', label: 'Elenco soci' },
+          { value: 'acquisti', label: 'Acquisti & gadget' },
+        ].map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            onClick={() => setMembersTab(item.value)}
+            className={`pill-button ${membersTab === item.value ? 'pill-button--active' : ''}`}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
       {error && (
@@ -482,264 +721,563 @@ export default function Members() {
         </article>
       )}
 
-      <div
-        className="card"
-        style={{
-          padding: '0.75rem 1rem',
-          marginBottom: '1rem',
-          background: '#f8f9fa',
-          borderRadius: '0.75rem',
-          border: '1px solid rgba(0,0,0,0.08)',
-        }}
-      >
-        <strong>Anno {activeSummary.year}</strong>
-        <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-          Totale soci: {activeSummary.total} · Quota pagata: {activeSummary.paid} · Da saldare: {activeSummary.unpaid}
-        </p>
-        <small style={{ color: 'var(--color-muted)' }}>Il riepilogo segue automaticamente l&apos;anno selezionato o quello corrente del dispositivo.</small>
-      </div>
-
-      {!canEditMembers && (
-        <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
-          Non hai i permessi per modificare l&apos;anagrafica. Puoi solo consultare i dati.
-        </p>
-      )}
-
-      <div
-        className="card"
-        style={{
-          marginBottom: '1rem',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '1rem',
-          alignItems: 'center',
-        }}
-      >
-        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px', flex: '1 1 220px' }}>
-          Cartella anno
-          <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
-            <option value="all">Tutti gli anni</option>
-            {yearOptions.map((yearOption) => (
-              <option key={yearOption} value={String(yearOption)}>
-                {yearOption}
-              </option>
-            ))}
-            <option value="unknown">N/D</option>
-          </select>
-        </label>
-        <p style={{ flex: '2 1 320px', margin: 0, color: 'var(--color-muted)' }}>
-          Seleziona l&apos;anno per consultare l&apos;elenco soci dedicato e preparare le cartelle future (2025-2050). I nuovi soci ereditano automaticamente
-          l&apos;anno attivo.
-        </p>
-        {cloningYear && (
-          <p style={{ flexBasis: '100%', margin: 0, color: '#1971c2' }}>
-            Sto popolando l&apos;anno {cloningYear} con l&apos;elenco attuale...
-          </p>
-        )}
-        {!cloningYear &&
-          supportsYear &&
-          yearFilter !== 'all' &&
-          yearFilter !== 'unknown' &&
-          Number.isFinite(selectedYearNumber) &&
-          selectedYearNumber >= YEAR_START &&
-          selectedYearNumber <= YEAR_END &&
-          !hasSelectedYearData && (
-            <button
-              type="button"
-              style={{ marginLeft: 'auto', background: '#228be6' }}
-              onClick={() => duplicateYear(selectedYearNumber)}
-            >
-              Popola anno {selectedYearNumber}
-            </button>
-          )}
-      </div>
-
-      <div className="pill-group">
-        {[
-          { value: 'all', label: 'Tutti' },
-          { value: 'paid', label: 'Pagati' },
-          { value: 'unpaid', label: 'Da saldare' },
-        ].map((item) => (
-          <button
-            key={item.value}
-            type="button"
-            onClick={() => setStatusFilter(item.value)}
-            className={`pill-button ${statusFilter === item.value ? 'pill-button--active' : ''}`}
+      {membersTab === 'anagrafica' ? (
+        <>
+          <div
+            className="card"
+            style={{
+              padding: '0.75rem 1rem',
+              marginBottom: '1rem',
+              background: '#f8f9fa',
+              borderRadius: '0.75rem',
+              border: '1px solid rgba(0,0,0,0.08)',
+            }}
           >
-            {item.label}
-          </button>
-        ))}
-      </div>
+            <strong>Anno {activeSummary.year}</strong>
+            <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+              Totale soci: {activeSummary.total} · Quota pagata: {activeSummary.paid} · Da saldare: {activeSummary.unpaid}
+            </p>
+            <small style={{ color: 'var(--color-muted)' }}>
+              Il riepilogo segue automaticamente l&apos;anno selezionato o quello corrente del dispositivo.
+            </small>
+          </div>
 
-      {showForm && canEditMembers && (
-        <div className="card" ref={formRef}>
-          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-            <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
-            <input
-              type="number"
-              min={0}
-              placeholder="Numero tessera"
-              value={form.membership_number}
-              onChange={(event) => handleChange('membership_number', event.target.value)}
-              required
-            />
-            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-              Anno di riferimento
-              <select
-                value={form.membership_year}
-                onChange={(event) => handleChange('membership_year', Number(event.target.value))}
-              >
+          {!canEditMembers && (
+            <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
+              Non hai i permessi per modificare l&apos;anagrafica. Puoi solo consultare i dati.
+            </p>
+          )}
+
+          <div
+            className="card"
+            style={{
+              marginBottom: '1rem',
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '1rem',
+              alignItems: 'center',
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px', flex: '1 1 220px' }}>
+              Cartella anno
+              <select value={yearFilter} onChange={(event) => setYearFilter(event.target.value)}>
+                <option value="all">Tutti gli anni</option>
                 {yearOptions.map((yearOption) => (
-                  <option key={yearOption} value={yearOption}>
+                  <option key={yearOption} value={String(yearOption)}>
+                    {yearOption}
+                  </option>
+                ))}
+                <option value="unknown">N/D</option>
+              </select>
+            </label>
+            <p style={{ flex: '2 1 320px', margin: 0, color: 'var(--color-muted)' }}>
+              Seleziona l&apos;anno per consultare l&apos;elenco soci dedicato e preparare le cartelle future (2025-2050). I nuovi soci ereditano automaticamente
+              l&apos;anno attivo.
+            </p>
+            {cloningYear && (
+              <p style={{ flexBasis: '100%', margin: 0, color: '#1971c2' }}>
+                Sto popolando l&apos;anno {cloningYear} con l&apos;elenco attuale...
+              </p>
+            )}
+            {!cloningYear &&
+              supportsYear &&
+              yearFilter !== 'all' &&
+              yearFilter !== 'unknown' &&
+              Number.isFinite(selectedYearNumber) &&
+              selectedYearNumber >= YEAR_START &&
+              selectedYearNumber <= YEAR_END &&
+              !hasSelectedYearData && (
+                <button
+                  type="button"
+                  style={{ marginLeft: 'auto', background: '#228be6' }}
+                  onClick={() => duplicateYear(selectedYearNumber)}
+                >
+                  Popola anno {selectedYearNumber}
+                </button>
+              )}
+          </div>
+
+          <div className="pill-group">
+            {[
+              { value: 'all', label: 'Tutti' },
+              { value: 'paid', label: 'Pagati' },
+              { value: 'unpaid', label: 'Da saldare' },
+            ].map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                onClick={() => setStatusFilter(item.value)}
+                className={`pill-button ${statusFilter === item.value ? 'pill-button--active' : ''}`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : (
+        <>
+          <article className="card" style={{ background: '#f8f9fa', border: '1px dashed rgba(0,0,0,0.2)' }}>
+            <h2 style={{ marginTop: 0 }}>Acquisti soci</h2>
+            <p style={{ color: 'var(--color-muted)' }}>
+              Gestione di magliette e gadget con taglie, pagamenti e stato ordine. I dati sono filtrabili e modificabili.
+            </p>
+            {!canEditMembers && (
+              <p style={{ color: '#c92a2a', margin: 0 }}>
+                Non hai i permessi per modificare gli acquisti. Puoi solo consultare.
+              </p>
+            )}
+          </article>
+          {purchaseError && (
+            <article
+              className="card"
+              style={{
+                background: '#fff5f5',
+                borderColor: '#ff8787',
+                color: '#c92a2a',
+                marginBottom: '1rem',
+              }}
+            >
+              {purchaseError}
+            </article>
+          )}
+          <div
+            className="card"
+            style={{
+              marginBottom: '1rem',
+              display: 'grid',
+              gap: '0.75rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Tipo acquisto
+              <select value={purchaseTypeFilter} onChange={(event) => setPurchaseTypeFilter(event.target.value)}>
+                <option value="all">Tutti</option>
+                {PURCHASE_TYPES.map((type) => (
+                  <option key={type.value} value={type.value}>
+                    {type.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Taglia
+              <select value={purchaseSizeFilter} onChange={(event) => setPurchaseSizeFilter(event.target.value)}>
+                <option value="all">Tutte</option>
+                {PURCHASE_SIZES.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Stato pagamento
+              <select value={purchaseStatusFilter} onChange={(event) => setPurchaseStatusFilter(event.target.value)}>
+                <option value="all">Tutti</option>
+                {PAYMENT_STATUS.map((status) => (
+                  <option key={status.value} value={status.value}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Stato ordine
+              <select value={purchaseOrderFilter} onChange={(event) => setPurchaseOrderFilter(event.target.value)}>
+                <option value="all">Tutti</option>
+                {ORDER_STATUS.map((status) => (
+                  <option key={status.value} value={status.value}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+              Anno
+              <select value={purchaseYearFilter} onChange={(event) => setPurchaseYearFilter(event.target.value)}>
+                <option value="all">Tutti</option>
+                {yearOptions.map((yearOption) => (
+                  <option key={yearOption} value={String(yearOption)}>
                     {yearOption}
                   </option>
                 ))}
               </select>
             </label>
-            <input
-              placeholder="Nome e cognome"
-              value={form.full_name}
-              onChange={(event) => handleChange('full_name', event.target.value)}
-              required
-            />
-            {supportsEmail && (
-              <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
-            )}
-            {supportsPhone && (
-              <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
-            )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="checkbox"
-                checked={Boolean(form.membership_paid)}
-                onChange={(event) => handleChange('membership_paid', event.target.checked)}
-              />
-              <span>Quota annuale pagata</span>
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
-              </button>
-              <button type="button" style={{ background: '#adb5bd' }} onClick={() => { resetForm(); setShowForm(false); }}>
-                Annulla
-              </button>
-            </div>
-            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-          </form>
-        </div>
-      )}
-
-      {loading ? (
-        <p>Caricamento soci...</p>
-      ) : (
-        <div className="card-list">
-          {filteredMembers.map((member) => (
-            <article className="card" key={member.id}>
-              <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ margin: 0 }}>{member.full_name}</h3>
-                <span className="chip">Tessera #{member.old_id ?? 'N/D'}</span>
-              </div>
-                {canEditMembers && (
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button type="button" onClick={() => handleEdit(member)}>
-                      Modifica
-                    </button>
-                    <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(member.id)}>
-                      Elimina
-                    </button>
-                  </div>
-                )}
-              </header>
-              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                Anno di riferimento: {Number(member.membership_year) || Number(member.year) || Number(member.anno) || 'N/D'}
-              </p>
-              {supportsEmail && (
-                <p style={{ color: 'var(--color-muted)' }}>{member.email ?? 'Email non disponibile'}</p>
-              )}
-              {supportsPhone && (
-                <p style={{ color: 'var(--color-muted)' }}>{member.phone ?? 'Telefono non disponibile'}</p>
-              )}
-              {canManageRoles && supportsEmail && member.email && (
-                <div style={{ marginTop: '0.5rem' }}>
-                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                    Ruolo app
+          </div>
+          {canEditMembers && (
+            <div className="card">
+              <form onSubmit={handlePurchaseSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+                <h3 style={{ margin: 0 }}>{purchaseEditingId ? 'Modifica acquisto' : 'Nuovo acquisto'}</h3>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  Socio
+                  <select
+                    value={purchaseForm.member_id}
+                    onChange={(event) => handlePurchaseChange('member_id', event.target.value)}
+                    required
+                  >
+                    <option value="">Seleziona socio</option>
+                    {members.map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.full_name} (#{member.old_id ?? 'N/D'})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Tipo
                     <select
-                      value={profilesByEmail.get(member.email.toLowerCase())?.role ?? 'socio'}
-                      onChange={(event) => handleRoleChange(member.email, event.target.value)}
-                      disabled={rolesLoading || roleUpdating[member.email]}
+                      value={purchaseForm.item_type}
+                      onChange={(event) => handlePurchaseChange('item_type', event.target.value)}
                     >
-                      {rolesList.map((roleOption) => (
-                        <option key={roleOption} value={roleOption}>
-                          {roleOption}
+                      {PURCHASE_TYPES.map((type) => (
+                        <option key={type.value} value={type.value}>
+                          {type.label}
                         </option>
                       ))}
                     </select>
                   </label>
-                  {!profilesByEmail.get(member.email.toLowerCase()) && (
-                    <small style={{ color: 'var(--color-muted)' }}>
-                      Nessun profilo auth per questa email.
-                    </small>
-                  )}
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Taglia
+                    <select value={purchaseForm.size} onChange={(event) => handlePurchaseChange('size', event.target.value)}>
+                      {PURCHASE_SIZES.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Quantita
+                    <input
+                      type="number"
+                      min={1}
+                      value={purchaseForm.quantity}
+                      onChange={(event) => handlePurchaseChange('quantity', Number(event.target.value))}
+                    />
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Prezzo
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="0.00"
+                      value={purchaseForm.price}
+                      onChange={(event) => handlePurchaseChange('price', event.target.value)}
+                    />
+                  </label>
                 </div>
-              )}
-              <div style={{ marginTop: '0.75rem' }}>
-                <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: 'var(--color-muted)' }}>Quota annuale</p>
-                {canEditMembers ? (
+                <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Pagamento
+                    <select
+                      value={purchaseForm.payment_status}
+                      onChange={(event) => handlePurchaseChange('payment_status', event.target.value)}
+                    >
+                      {PAYMENT_STATUS.map((status) => (
+                        <option key={status.value} value={status.value}>
+                          {status.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Stato ordine
+                    <select
+                      value={purchaseForm.status}
+                      onChange={(event) => handlePurchaseChange('status', event.target.value)}
+                    >
+                      {ORDER_STATUS.map((status) => (
+                        <option key={status.value} value={status.value}>
+                          {status.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    Anno
+                    <select
+                      value={purchaseForm.purchase_year}
+                      onChange={(event) => handlePurchaseChange('purchase_year', event.target.value)}
+                    >
+                      {yearOptions.map((yearOption) => (
+                        <option key={yearOption} value={String(yearOption)}>
+                          {yearOption}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  Note
+                  <textarea
+                    rows={2}
+                    value={purchaseForm.notes}
+                    onChange={(event) => handlePurchaseChange('notes', event.target.value)}
+                  />
+                </label>
+                <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button type="submit" disabled={purchaseSubmitting}>
+                    {purchaseSubmitting ? 'Salvataggio...' : purchaseEditingId ? 'Aggiorna' : 'Aggiungi'}
+                  </button>
                   <button
                     type="button"
-                    onClick={() => toggleMembershipPayment(member)}
-                    disabled={togglingId === member.id}
-                    style={{
-                      width: '100%',
-                      borderRadius: '999px',
-                      border: 'none',
-                      padding: '0.4rem',
-                      background: member.membership_paid ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
-                      color: member.membership_paid ? '#2b8a3e' : '#d9480f',
-                      fontWeight: 700,
-                      cursor: 'pointer',
+                    style={{ background: '#adb5bd' }}
+                    onClick={() => {
+                      resetPurchaseForm();
                     }}
                   >
-                    {togglingId === member.id
-                      ? 'Aggiornamento...'
-                      : member.membership_paid
-                      ? 'Pagato'
-                      : 'Da saldare'}
+                    Annulla
                   </button>
-                ) : (
-                  <div
-                    style={{
-                      width: '100%',
-                      borderRadius: '999px',
-                      padding: '0.4rem',
-                      background: member.membership_paid ? 'rgba(34,197,94,0.15)' : 'rgba(250,176,5,0.15)',
-                      color: member.membership_paid ? '#2b8a3e' : '#d9480f',
-                      textAlign: 'center',
-                      fontWeight: 600,
-                    }}
-                  >
-                    {member.membership_paid ? 'Pagato' : 'Da saldare'}
-                  </div>
-                )}
-              </div>
-            </article>
-          ))}
-          {!filteredMembers.length && <p>Nessun socio trovato.</p>}
-        </div>
+                </div>
+              </form>
+            </div>
+          )}
+          {purchaseLoading ? (
+            <p>Caricamento acquisti...</p>
+          ) : filteredPurchases.length ? (
+            <div className="card-list">
+              {filteredPurchases.map((purchase) => {
+                const member = membersById.get(String(purchase.member_id));
+                return (
+                  <article className="card" key={purchase.id}>
+                    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div>
+                        <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
+                        <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                          {purchase.item_type} · Taglia {purchase.size ?? 'N/D'} · Quantita {purchase.quantity ?? 1}
+                        </p>
+                      </div>
+                      {canEditMembers && (
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <button type="button" onClick={() => handlePurchaseEdit(purchase)}>
+                            Modifica
+                          </button>
+                          <button type="button" style={{ background: '#e03131' }} onClick={() => handlePurchaseDelete(purchase.id)}>
+                            Elimina
+                          </button>
+                        </div>
+                      )}
+                    </header>
+                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                      Prezzo: {formatPurchasePrice(purchase.price)} · Anno {purchase.purchase_year ?? 'N/D'}
+                    </p>
+                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                      Pagamento: {PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? 'N/D'} ·
+                      Stato ordine: {ORDER_STATUS.find((status) => status.value === purchase.status)?.label ?? 'N/D'}
+                    </p>
+                    {purchase.notes && (
+                      <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>Note: {purchase.notes}</p>
+                    )}
+                    {canEditMembers && (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <button
+                          type="button"
+                          onClick={() => togglePurchasePayment(purchase)}
+                          style={{
+                            width: '100%',
+                            borderRadius: '999px',
+                            border: 'none',
+                            padding: '0.4rem',
+                            background: purchase.payment_status === 'paid' ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
+                            color: purchase.payment_status === 'paid' ? '#2b8a3e' : '#d9480f',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {purchase.payment_status === 'paid' ? 'Pagato' : 'Da saldare'}
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="card">
+              <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                Nessun acquisto registrato per i filtri selezionati.
+              </p>
+            </div>
+          )}
+        </>
       )}
 
-      {canEditMembers && (
-        <button
-          className="floating-button"
-          type="button"
-          onClick={() => {
-            setShowForm((prev) => !prev);
-            resetForm();
-          }}
-        >
-          {showForm ? 'Chiudi modulo' : 'Aggiungi socio'}
-        </button>
+      {membersTab === 'anagrafica' && (
+        <>
+          {showForm && canEditMembers && (
+            <div className="card" ref={formRef}>
+              <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+                <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="Numero tessera"
+                  value={form.membership_number}
+                  onChange={(event) => handleChange('membership_number', event.target.value)}
+                  required
+                />
+                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                  Anno di riferimento
+                  <select
+                    value={form.membership_year}
+                    onChange={(event) => handleChange('membership_year', Number(event.target.value))}
+                  >
+                    {yearOptions.map((yearOption) => (
+                      <option key={yearOption} value={yearOption}>
+                        {yearOption}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <input
+                  placeholder="Nome e cognome"
+                  value={form.full_name}
+                  onChange={(event) => handleChange('full_name', event.target.value)}
+                  required
+                />
+                {supportsEmail && (
+                  <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
+                )}
+                {supportsPhone && (
+                  <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
+                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.membership_paid)}
+                    onChange={(event) => handleChange('membership_paid', event.target.checked)}
+                  />
+                  <span>Quota annuale pagata</span>
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button type="submit" disabled={submitting}>
+                    {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
+                  </button>
+                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => { resetForm(); setShowForm(false); }}>
+                    Annulla
+                  </button>
+                </div>
+                {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+              </form>
+            </div>
+          )}
+
+          {loading ? (
+            <p>Caricamento soci...</p>
+          ) : (
+            <div className="card-list">
+              {filteredMembers.map((member) => (
+                <article className="card" key={member.id}>
+                  <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>{member.full_name}</h3>
+                    <span className="chip">Tessera #{member.old_id ?? 'N/D'}</span>
+                  </div>
+                    {canEditMembers && (
+                      <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <button type="button" onClick={() => handleEdit(member)}>
+                          Modifica
+                        </button>
+                        <button type="button" style={{ background: '#e03131' }} onClick={() => handleDelete(member.id)}>
+                          Elimina
+                        </button>
+                      </div>
+                    )}
+                  </header>
+                  <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                    Anno di riferimento: {Number(member.membership_year) || Number(member.year) || Number(member.anno) || 'N/D'}
+                  </p>
+                  {supportsEmail && (
+                    <p style={{ color: 'var(--color-muted)' }}>{member.email ?? 'Email non disponibile'}</p>
+                  )}
+                  {supportsPhone && (
+                    <p style={{ color: 'var(--color-muted)' }}>{member.phone ?? 'Telefono non disponibile'}</p>
+                  )}
+                  {canManageRoles && supportsEmail && member.email && (
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        Ruolo app
+                        <select
+                          value={profilesByEmail.get(member.email.toLowerCase())?.role ?? 'socio'}
+                          onChange={(event) => handleRoleChange(member.email, event.target.value)}
+                          disabled={rolesLoading || roleUpdating[member.email]}
+                        >
+                          {rolesList.map((roleOption) => (
+                            <option key={roleOption} value={roleOption}>
+                              {roleOption}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {!profilesByEmail.get(member.email.toLowerCase()) && (
+                        <small style={{ color: 'var(--color-muted)' }}>
+                          Nessun profilo auth per questa email.
+                        </small>
+                      )}
+                    </div>
+                  )}
+                  <div style={{ marginTop: '0.75rem' }}>
+                    <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: 'var(--color-muted)' }}>Quota annuale</p>
+                    {canEditMembers ? (
+                      <button
+                        type="button"
+                        onClick={() => toggleMembershipPayment(member)}
+                        disabled={togglingId === member.id}
+                        style={{
+                          width: '100%',
+                          borderRadius: '999px',
+                          border: 'none',
+                          padding: '0.4rem',
+                          background: member.membership_paid ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
+                          color: member.membership_paid ? '#2b8a3e' : '#d9480f',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {togglingId === member.id
+                          ? 'Aggiornamento...'
+                          : member.membership_paid
+                          ? 'Pagato'
+                          : 'Da saldare'}
+                      </button>
+                    ) : (
+                      <div
+                        style={{
+                          width: '100%',
+                          borderRadius: '999px',
+                          padding: '0.4rem',
+                          background: member.membership_paid ? 'rgba(34,197,94,0.15)' : 'rgba(250,176,5,0.15)',
+                          color: member.membership_paid ? '#2b8a3e' : '#d9480f',
+                          textAlign: 'center',
+                          fontWeight: 600,
+                        }}
+                      >
+                        {member.membership_paid ? 'Pagato' : 'Da saldare'}
+                      </div>
+                    )}
+                  </div>
+                </article>
+              ))}
+              {!filteredMembers.length && <p>Nessun socio trovato.</p>}
+            </div>
+          )}
+
+          {canEditMembers && (
+            <button
+              className="floating-button"
+              type="button"
+              onClick={() => {
+                setShowForm((prev) => !prev);
+                resetForm();
+              }}
+            >
+              {showForm ? 'Chiudi modulo' : 'Aggiungi socio'}
+            </button>
+          )}
+        </>
       )}
     </section>
   );
