@@ -1499,51 +1499,8 @@ export default function Members() {
             </article>
           )}
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
-            <button type="button" onClick={() => handlePurchaseExport('csv')}>
-              CSV
-            </button>
-            <button type="button" style={{ background: '#228be6' }} onClick={() => handlePurchaseExport('pdf')}>
-              PDF
-            </button>
-            <button type="button" style={{ background: '#adb5bd' }} onClick={() => handlePurchaseExport('xlsx')}>
-              XLSX
-            </button>
             <button type="button" onClick={() => setShowPurchaseFilters((prev) => !prev)}>
-              {showPurchaseFilters ? 'Nascondi filtri' : 'Mostra filtri'}
-            </button>
-            <button type="button" onClick={() => handlePurchaseSummaryExport('sizes', 'csv')}>
-              Riepilogo taglie (CSV)
-            </button>
-            <button
-              type="button"
-              style={{ background: '#228be6' }}
-              onClick={() => handlePurchaseSummaryExport('sizes', 'pdf')}
-            >
-              Riepilogo taglie (PDF)
-            </button>
-            <button
-              type="button"
-              style={{ background: '#adb5bd' }}
-              onClick={() => handlePurchaseSummaryExport('sizes', 'xlsx')}
-            >
-              Riepilogo taglie (XLSX)
-            </button>
-            <button type="button" onClick={() => handlePurchaseSummaryExport('status', 'csv')}>
-              Riepilogo ordini (CSV)
-            </button>
-            <button
-              type="button"
-              style={{ background: '#228be6' }}
-              onClick={() => handlePurchaseSummaryExport('status', 'pdf')}
-            >
-              Riepilogo ordini (PDF)
-            </button>
-            <button
-              type="button"
-              style={{ background: '#adb5bd' }}
-              onClick={() => handlePurchaseSummaryExport('status', 'xlsx')}
-            >
-              Riepilogo ordini (XLSX)
+              {showPurchaseFilters ? 'Nascondi filtri e export' : 'Mostra filtri e export'}
             </button>
           </div>
           {showPurchaseFilters && (
@@ -1656,6 +1613,51 @@ export default function Members() {
                   onChange={(event) => setPurchaseDateTo(event.target.value)}
                 />
               </label>
+              <div style={{ gridColumn: '1 / -1', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button type="button" onClick={() => handlePurchaseExport('csv')}>
+                  CSV
+                </button>
+                <button type="button" style={{ background: '#228be6' }} onClick={() => handlePurchaseExport('pdf')}>
+                  PDF
+                </button>
+                <button type="button" style={{ background: '#adb5bd' }} onClick={() => handlePurchaseExport('xlsx')}>
+                  XLSX
+                </button>
+                <button type="button" onClick={() => handlePurchaseSummaryExport('sizes', 'csv')}>
+                  Riepilogo taglie (CSV)
+                </button>
+                <button
+                  type="button"
+                  style={{ background: '#228be6' }}
+                  onClick={() => handlePurchaseSummaryExport('sizes', 'pdf')}
+                >
+                  Riepilogo taglie (PDF)
+                </button>
+                <button
+                  type="button"
+                  style={{ background: '#adb5bd' }}
+                  onClick={() => handlePurchaseSummaryExport('sizes', 'xlsx')}
+                >
+                  Riepilogo taglie (XLSX)
+                </button>
+                <button type="button" onClick={() => handlePurchaseSummaryExport('status', 'csv')}>
+                  Riepilogo ordini (CSV)
+                </button>
+                <button
+                  type="button"
+                  style={{ background: '#228be6' }}
+                  onClick={() => handlePurchaseSummaryExport('status', 'pdf')}
+                >
+                  Riepilogo ordini (PDF)
+                </button>
+                <button
+                  type="button"
+                  style={{ background: '#adb5bd' }}
+                  onClick={() => handlePurchaseSummaryExport('status', 'xlsx')}
+                >
+                  Riepilogo ordini (XLSX)
+                </button>
+              </div>
             </div>
           )}
           {canEditMembers && (
