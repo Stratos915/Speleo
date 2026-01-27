@@ -8,6 +8,7 @@ create table if not exists public.member_purchases (
   price numeric(10, 2),
   payment_status text not null default 'unpaid',
   status text not null default 'ordered',
+  purchase_date date,
   purchase_year integer not null default extract(year from now()),
   notes text,
   created_at timestamptz not null default now()
