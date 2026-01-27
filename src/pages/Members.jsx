@@ -805,9 +805,9 @@ export default function Members() {
     return base;
   }, [filteredPurchases]);
 
-  const purchaseRows = useMemo(
-    () =>
-      filteredPurchases.map((purchase) => {
+  const buildPurchaseRows = useCallback(
+    (list) =>
+      list.map((purchase) => {
         const member = membersById.get(String(purchase.member_id));
         return {
           created_at: purchase.created_at ? new Date(purchase.created_at).toLocaleString('it-IT') : '',
@@ -823,11 +823,20 @@ export default function Members() {
           notes: purchase.notes ?? '',
         };
       }),
-    [filteredPurchases, membersById],
+    [membersById],
   );
-  const purchaseTypeLabel = useMemo(() => {
-    return PURCHASE_TYPES.find((type) => type.value === purchaseForm.item_type)?.label ?? 'Acquisto';
-  }, [purchaseForm.item_type]);
+
+  const purchaseRows = useMemo(() => buildPurchaseRows(filteredPurchases), [buildPurchaseRows, filteredPurchases]);
+  const purchaseGroups = useMemo(() => {
+    const map = new Map();
+    filteredPurchases.forEach((purchase) => {
+      const key = purchase.item_type ?? 'altro';
+      const entry = map.get(key) ?? [];
+      entry.push(purchase);
+      map.set(key, entry);
+    });
+    return Array.from(map.entries()).sort((a, b) => a[0].localeCompare(b[0], 'it'));
+  }, [filteredPurchases]);
 
   const purchaseSizeSummaryRows = useMemo(
     () =>
@@ -1021,23 +1030,24 @@ export default function Members() {
     }
   }
 
-  async function handlePurchaseExport(format = 'csv') {
-    if (!purchaseRows.length) {
+  async function handlePurchaseExport(format = 'csv', list = purchaseRows, labelSuffix = '') {
+    if (!list.length) {
       setPurchaseError('Nessun acquisto disponibile per l&apos;export.');
       return;
     }
     const suffix = purchaseYearFilter && purchaseYearFilter !== 'all' ? `-${purchaseYearFilter}` : '';
+    const label = labelSuffix ? `-${labelSuffix}` : '';
     if (format === 'pdf') {
       await downloadPdfTable(
         'Acquisti soci',
         PURCHASE_EXPORT_COLUMNS,
-        purchaseRows,
-        `acquisti-soci${suffix}-${new Date().toISOString()}.pdf`,
+        list,
+        `acquisti-soci${label}${suffix}-${new Date().toISOString()}.pdf`,
       );
       return;
     }
     if (format === 'xlsx') {
-      const sheet = buildWorksheetXml(PURCHASE_EXPORT_COLUMNS, purchaseRows);
+      const sheet = buildWorksheetXml(PURCHASE_EXPORT_COLUMNS, list);
       const files = [
         { name: '[Content_Types].xml', content: buildContentTypesXml() },
         { name: '_rels/.rels', content: buildRootRelsXml() },
@@ -1046,13 +1056,13 @@ export default function Members() {
         { name: 'xl/worksheets/sheet1.xml', content: sheet },
       ];
       const blob = buildZipFile(files);
-      triggerDownload(blob, `acquisti-soci${suffix}-${new Date().toISOString()}.xlsx`);
+      triggerDownload(blob, `acquisti-soci${label}${suffix}-${new Date().toISOString()}.xlsx`);
       return;
     }
-    const csv = buildCsv(purchaseRows, PURCHASE_EXPORT_COLUMNS);
+    const csv = buildCsv(list, PURCHASE_EXPORT_COLUMNS);
     triggerDownload(
       csv,
-      `acquisti-soci${suffix}-${new Date().toISOString()}.csv`,
+      `acquisti-soci${label}${suffix}-${new Date().toISOString()}.csv`,
       'text/csv;charset=utf-8;',
     );
   }
@@ -1667,7 +1677,7 @@ export default function Members() {
               onToggle={(event) => setShowPurchaseForm(event.currentTarget.open)}
             >
               <summary style={{ cursor: 'pointer', fontWeight: 600 }}>
-                {purchaseEditingId ? `Modifica acquisto: ${purchaseTypeLabel}` : `Nuovo acquisto: ${purchaseTypeLabel}`}
+                {purchaseEditingId ? 'Modifica acquisto' : 'Nuovo acquisto'}
               </summary>
               <div style={{ marginTop: '0.75rem' }}>
                 <form onSubmit={handlePurchaseSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
@@ -1801,61 +1811,93 @@ export default function Members() {
           )}
           {purchaseLoading ? (
             <p>Caricamento acquisti...</p>
-          ) : filteredPurchases.length ? (
+          ) : purchaseGroups.length ? (
             <div className="card-list">
-              {filteredPurchases.map((purchase) => {
-                const member = membersById.get(String(purchase.member_id));
+              {purchaseGroups.map(([typeKey, group]) => {
+                const typeLabel = PURCHASE_TYPES.find((type) => type.value === typeKey)?.label ?? typeKey;
+                const rows = buildPurchaseRows(group);
                 return (
-                  <article className="card" key={purchase.id}>
-                    <header style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <div>
-                        <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
-                        <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                          {purchase.item_type} · Taglia {purchase.size ?? 'N/D'} · Quantita {purchase.quantity ?? 1}
-                        </p>
-                      </div>
-                      {canEditMembers && (
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
-                          <button type="button" onClick={() => handlePurchaseEdit(purchase)}>
-                            Modifica
-                          </button>
-                          <button type="button" style={{ background: '#e03131' }} onClick={() => handlePurchaseDelete(purchase.id)}>
-                            Elimina
-                          </button>
-                        </div>
-                      )}
-                    </header>
-                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                      Prezzo: {formatPurchasePrice(purchase.price)} · Anno {purchase.purchase_year ?? 'N/D'}
-                    </p>
-                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                      Pagamento: {PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? 'N/D'} ·
-                      Stato ordine: {ORDER_STATUS.find((status) => status.value === purchase.status)?.label ?? 'N/D'}
-                    </p>
-                    {purchase.notes && (
-                      <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>Note: {purchase.notes}</p>
-                    )}
-                    {canEditMembers && (
-                      <div style={{ marginTop: '0.5rem' }}>
-                        <button
-                          type="button"
-                          onClick={() => togglePurchasePayment(purchase)}
-                          style={{
-                            width: '100%',
-                            borderRadius: '999px',
-                            border: 'none',
-                            padding: '0.4rem',
-                            background: purchase.payment_status === 'paid' ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
-                            color: purchase.payment_status === 'paid' ? '#2b8a3e' : '#d9480f',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {purchase.payment_status === 'paid' ? 'Pagato' : 'Da saldare'}
-                        </button>
-                      </div>
-                    )}
-                  </article>
+                  <details key={typeKey} className="card" open>
+                    <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                      {typeLabel} · {group.length} acquisti
+                    </summary>
+                    <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <button type="button" onClick={() => handlePurchaseExport('csv', rows, typeKey)}>
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#228be6' }}
+                        onClick={() => handlePurchaseExport('pdf', rows, typeKey)}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#adb5bd' }}
+                        onClick={() => handlePurchaseExport('xlsx', rows, typeKey)}
+                      >
+                        XLSX
+                      </button>
+                    </div>
+                    <div className="card-list" style={{ marginTop: '0.75rem' }}>
+                      {group.map((purchase) => {
+                        const member = membersById.get(String(purchase.member_id));
+                        return (
+                          <article className="card" key={purchase.id}>
+                            <header style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                              <div>
+                                <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
+                                <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                                  Taglia {purchase.size ?? 'N/D'} · Quantita {purchase.quantity ?? 1}
+                                </p>
+                              </div>
+                              {canEditMembers && (
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                  <button type="button" onClick={() => handlePurchaseEdit(purchase)}>
+                                    Modifica
+                                  </button>
+                                  <button type="button" style={{ background: '#e03131' }} onClick={() => handlePurchaseDelete(purchase.id)}>
+                                    Elimina
+                                  </button>
+                                </div>
+                              )}
+                            </header>
+                            <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                              Prezzo: {formatPurchasePrice(purchase.price)} · Anno {purchase.purchase_year ?? 'N/D'}
+                            </p>
+                            <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                              Pagamento: {PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? 'N/D'} ·
+                              Stato ordine: {ORDER_STATUS.find((status) => status.value === purchase.status)?.label ?? 'N/D'}
+                            </p>
+                            {purchase.notes && (
+                              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>Note: {purchase.notes}</p>
+                            )}
+                            {canEditMembers && (
+                              <div style={{ marginTop: '0.5rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => togglePurchasePayment(purchase)}
+                                  style={{
+                                    width: '100%',
+                                    borderRadius: '999px',
+                                    border: 'none',
+                                    padding: '0.4rem',
+                                    background: purchase.payment_status === 'paid' ? 'rgba(34,197,94,0.2)' : 'rgba(250,176,5,0.2)',
+                                    color: purchase.payment_status === 'paid' ? '#2b8a3e' : '#d9480f',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {purchase.payment_status === 'paid' ? 'Pagato' : 'Da saldare'}
+                                </button>
+                              </div>
+                            )}
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </details>
                 );
               })}
             </div>
