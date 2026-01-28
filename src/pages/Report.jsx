@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { getMembers } from '../services/members.js';
+import { createMember, getMembers, updateMember } from '../services/members.js';
 import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
@@ -885,7 +885,7 @@ export default function Report() {
     try {
       const { data, error: profilesError } = await supabase
         .from('profiles')
-        .select('id,email,role,approval_status,created_at')
+        .select('id,email,role,approval_status,created_at,first_name,last_name,phone,member_id')
         .eq('approval_status', 'pending')
         .order('created_at', { ascending: false });
       if (profilesError) throw profilesError;
@@ -902,16 +902,6 @@ export default function Report() {
       setApprovalsLoading(false);
     }
   }, [canApproveUsers]);
-
-  useEffect(() => {
-    if (!canApproveUsers) {
-      setPendingProfiles([]);
-      setApprovalHistory([]);
-      return;
-    }
-    loadPendingProfiles();
-    loadApprovalHistory();
-  }, [canApproveUsers, loadPendingProfiles, loadApprovalHistory]);
 
   const loadApprovalHistory = useCallback(async () => {
     if (!canApproveUsers) return;
@@ -931,6 +921,16 @@ export default function Report() {
       setHistoryLoading(false);
     }
   }, [canApproveUsers]);
+
+  useEffect(() => {
+    if (!canApproveUsers) {
+      setPendingProfiles([]);
+      setApprovalHistory([]);
+      return;
+    }
+    loadPendingProfiles();
+    loadApprovalHistory();
+  }, [canApproveUsers, loadPendingProfiles, loadApprovalHistory]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -956,6 +956,70 @@ export default function Report() {
     [members],
   );
 
+  const normalizeName = useCallback((value) => {
+    return String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+  }, []);
+
+  const buildProfileFullName = useCallback(
+    (profile) => `${profile?.first_name ?? ''} ${profile?.last_name ?? ''}`.trim(),
+    [],
+  );
+
+  const findMemberMatch = useCallback(
+    (profile) => {
+      const targetName = normalizeName(buildProfileFullName(profile));
+      if (!targetName) return null;
+      return (
+        members.find((member) => {
+          const fullName = normalizeName(member.full_name);
+          const itaName = normalizeName(`${member.nome ?? ''} ${member.cognome ?? ''}`.trim());
+          const altName = normalizeName(`${member.first_name ?? ''} ${member.last_name ?? ''}`.trim());
+          return [fullName, itaName, altName].some((candidate) => candidate && candidate === targetName);
+        }) ?? null
+      );
+    },
+    [members, buildProfileFullName, normalizeName],
+  );
+
+  const ensureMemberForProfile = useCallback(
+    async (profile) => {
+      if (!profile) return { memberId: null, action: 'none' };
+      const profileName = buildProfileFullName(profile);
+      const profileEmail = profile.email?.trim() ?? '';
+      const profilePhone = profile.phone?.trim() ?? '';
+      let member =
+        profile.member_id && membersMap.has(String(profile.member_id))
+          ? membersMap.get(String(profile.member_id))
+          : null;
+      if (!member && profileName) {
+        member = findMemberMatch(profile);
+      }
+      if (!member && profileName) {
+        const payload = {
+          full_name: profileName,
+          email: profileEmail || null,
+          phone: profilePhone || null,
+          membership_year: new Date().getFullYear(),
+          membership_paid: false,
+        };
+        const created = await createMember(payload);
+        return { memberId: created.id, action: 'created' };
+      }
+      if (member) {
+        const updates = {};
+        if (profileName && !member.full_name) updates.full_name = profileName;
+        if (profileEmail && !member.email) updates.email = profileEmail;
+        if (profilePhone && !member.phone) updates.phone = profilePhone;
+        if (Object.keys(updates).length) {
+          await updateMember(member.id, updates);
+        }
+        return { memberId: member.id, action: 'linked' };
+      }
+      return { memberId: null, action: 'none' };
+    },
+    [buildProfileFullName, findMemberMatch, membersMap],
+  );
+
   const handleApproveProfile = useCallback(
     async (profileId) => {
       setApprovalsUpdating((prev) => ({ ...prev, [profileId]: true }));
@@ -963,12 +1027,14 @@ export default function Report() {
       try {
         const nextRole = roleAssignments[profileId] ?? 'socio';
         const target = pendingProfiles.find((row) => row.id === profileId);
+        const { memberId } = await ensureMemberForProfile(target);
         const { error: updateError } = await supabase
           .from('profiles')
           .update({
             approval_status: 'approved',
             role: nextRole,
             approved_at: new Date().toISOString(),
+            member_id: memberId ?? target?.member_id ?? null,
           })
           .eq('id', profileId);
         if (updateError) throw updateError;
@@ -991,7 +1057,7 @@ export default function Report() {
         setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
       }
     },
-    [roleAssignments, loadPendingProfiles, pendingProfiles, loadApprovalHistory, user],
+    [roleAssignments, loadPendingProfiles, pendingProfiles, loadApprovalHistory, user, ensureMemberForProfile],
   );
 
   const handleRejectProfile = useCallback(
@@ -1722,6 +1788,12 @@ export default function Report() {
                     >
                       <div>
                         <strong>{profile.email ?? 'Email non disponibile'}</strong>
+                        {profile.first_name || profile.last_name ? (
+                          <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                            {`${profile.first_name ?? ''} ${profile.last_name ?? ''}`.trim()}
+                            {profile.phone ? ` · ${profile.phone}` : ''}
+                          </p>
+                        ) : null}
                         <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
                           Stato: in attesa · Creato il {profile.created_at ? formatDateTime(profile.created_at) : 'N/D'}
                         </p>
