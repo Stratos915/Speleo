@@ -73,21 +73,6 @@ export default function AuthProvider({ children }) {
 
     async function bootstrap() {
       setLoading(true);
-      const searchParams = new URLSearchParams(window.location.search);
-      const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
-      const code = searchParams.get('code') ?? hashParams.get('code');
-      if (code) {
-        const { data: codeData, error: codeError } = await supabase.auth.exchangeCodeForSession(code);
-        if (codeError) {
-          console.error('[AuthContext] Errore OAuth:', codeError.message);
-        } else {
-          applySession(codeData?.session ?? null);
-        }
-        if (!ignore) {
-          const nextUrl = window.location.origin + window.location.pathname;
-          window.history.replaceState({}, document.title, nextUrl);
-        }
-      }
       const { data, error } = await supabase.auth.getSession();
       if (error) {
         console.error('[AuthContext] Errore recupero sessione:', error.message);
