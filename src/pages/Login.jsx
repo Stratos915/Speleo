@@ -23,8 +23,7 @@ export default function Login() {
     const hasRecovery =
       ['recovery', 'invite', 'signup'].includes(type ?? '') ||
       Boolean(hashParams.get('access_token') && hashParams.get('refresh_token')) ||
-      Boolean(searchParams.get('access_token') && searchParams.get('refresh_token')) ||
-      Boolean(hashParams.get('code') || searchParams.get('code'));
+      Boolean(searchParams.get('access_token') && searchParams.get('refresh_token'));
     if (hasRecovery) {
       const suffix = `${window.location.search}${window.location.hash}`;
       window.location.replace(`/reset-password${suffix}`);
