@@ -611,18 +611,6 @@ export default function Members() {
     };
   }, [canManageRoles, supportsEmail]);
 
-  const profileSeed = useMemo(() => {
-    if (!supportsEmail) return null;
-    const email = search.trim().toLowerCase();
-    if (!email || !email.includes('@')) return null;
-    const profile = profilesByEmail.get(email);
-    if (!profile) return null;
-    const emailExists = members.some((member) => (member.email ?? '').toLowerCase() === email);
-    const memberIdExists = profile.member_id && membersById.has(String(profile.member_id));
-    if (emailExists || memberIdExists) return null;
-    return profile;
-  }, [members, membersById, profilesByEmail, search, supportsEmail]);
-
   useEffect(() => {
     if (showForm && formRef.current) {
       formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -648,6 +636,18 @@ export default function Members() {
     () => new Map(members.map((member) => [String(member.id), member])),
     [members],
   );
+
+  const profileSeed = useMemo(() => {
+    if (!supportsEmail) return null;
+    const email = search.trim().toLowerCase();
+    if (!email || !email.includes('@')) return null;
+    const profile = profilesByEmail.get(email);
+    if (!profile) return null;
+    const emailExists = members.some((member) => (member.email ?? '').toLowerCase() === email);
+    const memberIdExists = profile.member_id && membersById.has(String(profile.member_id));
+    if (emailExists || memberIdExists) return null;
+    return profile;
+  }, [members, membersById, profilesByEmail, search, supportsEmail]);
 
   const availableYears = useMemo(() => {
     const set = new Set();
