@@ -1049,6 +1049,33 @@ export default function Report() {
           from_role: target?.role ?? null,
           to_role: nextRole,
         });
+        if (target?.email) {
+          try {
+            const { error: notifyError } = await supabase.functions.invoke('send-approval-email', {
+              body: {
+                email: target.email,
+                first_name: target.first_name ?? '',
+                last_name: target.last_name ?? '',
+                app_url: window.location.origin,
+              },
+            });
+            if (!notifyError) {
+              await supabase.from('approval_audit').insert({
+                actor_id: user?.id ?? null,
+                actor_email: user?.email ?? null,
+                target_id: profileId,
+                target_email: target?.email ?? null,
+                action: 'notify_email',
+                from_status: 'approved',
+                to_status: 'approved',
+                from_role: nextRole,
+                to_role: nextRole,
+              });
+            }
+          } catch (notifyErr) {
+            console.warn('[Report] Invio email approvazione fallito:', notifyErr);
+          }
+        }
         await loadPendingProfiles();
         await loadApprovalHistory();
       } catch (updateError) {
