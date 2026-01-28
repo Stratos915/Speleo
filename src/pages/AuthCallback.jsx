@@ -14,6 +14,18 @@ export default function AuthCallback() {
       const searchParams = new URLSearchParams(window.location.search);
       const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
       const code = searchParams.get('code') ?? hashParams.get('code');
+      const accessToken = hashParams.get('access_token') ?? searchParams.get('access_token');
+      const refreshToken = hashParams.get('refresh_token') ?? searchParams.get('refresh_token');
+      if (accessToken && refreshToken) {
+        const { error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        if (!ignore && sessionError) {
+          setError(sessionError.message ?? 'Errore durante il recupero della sessione.');
+        }
+        return;
+      }
       if (!code) {
         if (!ignore) {
           setError('Codice OAuth mancante. Riprova il login.');
