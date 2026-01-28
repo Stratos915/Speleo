@@ -666,7 +666,7 @@ function downloadXlsx(rows, key) {
 }
 
 export default function Report() {
-  const { role, isAuthenticated } = useAuth();
+  const { role, isAuthenticated, user } = useAuth();
   const canViewActivityLog = role === 'admin' || role === 'presidente';
   const canApproveUsers = role === 'admin' || role === 'presidente';
   const rolesList = useMemo(() => getAllRoles(), []);
@@ -679,6 +679,9 @@ export default function Report() {
   const [approvalsError, setApprovalsError] = useState('');
   const [approvalsUpdating, setApprovalsUpdating] = useState({});
   const [roleAssignments, setRoleAssignments] = useState({});
+  const [approvalHistory, setApprovalHistory] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [visitsRange, setVisitsRange] = useState(30);
@@ -903,10 +906,31 @@ export default function Report() {
   useEffect(() => {
     if (!canApproveUsers) {
       setPendingProfiles([]);
+      setApprovalHistory([]);
       return;
     }
     loadPendingProfiles();
-  }, [canApproveUsers, loadPendingProfiles]);
+    loadApprovalHistory();
+  }, [canApproveUsers, loadPendingProfiles, loadApprovalHistory]);
+
+  const loadApprovalHistory = useCallback(async () => {
+    if (!canApproveUsers) return;
+    setHistoryLoading(true);
+    setHistoryError('');
+    try {
+      const { data, error: historyErrorRes } = await supabase
+        .from('approval_audit')
+        .select('id,created_at,actor_email,target_email,action,from_status,to_status,from_role,to_role')
+        .order('created_at', { ascending: false })
+        .limit(200);
+      if (historyErrorRes) throw historyErrorRes;
+      setApprovalHistory(data ?? []);
+    } catch (loadError) {
+      setHistoryError(loadError.message ?? 'Impossibile caricare lo storico.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [canApproveUsers]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
@@ -938,6 +962,7 @@ export default function Report() {
       setApprovalsError('');
       try {
         const nextRole = roleAssignments[profileId] ?? 'socio';
+        const target = pendingProfiles.find((row) => row.id === profileId);
         const { error: updateError } = await supabase
           .from('profiles')
           .update({
@@ -947,14 +972,26 @@ export default function Report() {
           })
           .eq('id', profileId);
         if (updateError) throw updateError;
+        await supabase.from('approval_audit').insert({
+          actor_id: user?.id ?? null,
+          actor_email: user?.email ?? null,
+          target_id: profileId,
+          target_email: target?.email ?? null,
+          action: 'approve',
+          from_status: target?.approval_status ?? 'pending',
+          to_status: 'approved',
+          from_role: target?.role ?? null,
+          to_role: nextRole,
+        });
         await loadPendingProfiles();
+        await loadApprovalHistory();
       } catch (updateError) {
         setApprovalsError(updateError.message ?? 'Impossibile approvare il profilo.');
       } finally {
         setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
       }
     },
-    [roleAssignments, loadPendingProfiles],
+    [roleAssignments, loadPendingProfiles, pendingProfiles, loadApprovalHistory, user],
   );
 
   const handleRejectProfile = useCallback(
@@ -962,6 +999,7 @@ export default function Report() {
       setApprovalsUpdating((prev) => ({ ...prev, [profileId]: true }));
       setApprovalsError('');
       try {
+        const target = pendingProfiles.find((row) => row.id === profileId);
         const { error: updateError } = await supabase
           .from('profiles')
           .update({
@@ -970,14 +1008,60 @@ export default function Report() {
           })
           .eq('id', profileId);
         if (updateError) throw updateError;
+        await supabase.from('approval_audit').insert({
+          actor_id: user?.id ?? null,
+          actor_email: user?.email ?? null,
+          target_id: profileId,
+          target_email: target?.email ?? null,
+          action: 'reject',
+          from_status: target?.approval_status ?? 'pending',
+          to_status: 'rejected',
+          from_role: target?.role ?? null,
+          to_role: target?.role ?? null,
+        });
         await loadPendingProfiles();
+        await loadApprovalHistory();
       } catch (updateError) {
         setApprovalsError(updateError.message ?? 'Impossibile rifiutare il profilo.');
       } finally {
         setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
       }
     },
-    [loadPendingProfiles],
+    [loadPendingProfiles, pendingProfiles, loadApprovalHistory, user],
+  );
+
+  const handleRoleChange = useCallback(
+    async (profile) => {
+      const nextRole = roleAssignments[profile.id] ?? 'socio';
+      if (nextRole === profile.role) return;
+      setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: true }));
+      setApprovalsError('');
+      try {
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ role: nextRole })
+          .eq('id', profile.id);
+        if (updateError) throw updateError;
+        await supabase.from('approval_audit').insert({
+          actor_id: user?.id ?? null,
+          actor_email: user?.email ?? null,
+          target_id: profile.id,
+          target_email: profile.email ?? null,
+          action: 'role_change',
+          from_status: profile.approval_status ?? null,
+          to_status: profile.approval_status ?? null,
+          from_role: profile.role ?? null,
+          to_role: nextRole,
+        });
+        await loadPendingProfiles();
+        await loadApprovalHistory();
+      } catch (updateError) {
+        setApprovalsError(updateError.message ?? 'Impossibile aggiornare il ruolo.');
+      } finally {
+        setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: false }));
+      }
+    },
+    [roleAssignments, loadPendingProfiles, loadApprovalHistory, user],
   );
 
   const detectMembershipYear = useCallback((member) => {
@@ -1466,7 +1550,8 @@ export default function Report() {
         <p>Scarica gli elenchi aggiornati o sincronizza i dati con strumenti esterni.</p>
       </header>
       <article className="card">
-        <h2>Statistiche accessi</h2>
+        <details open>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Statistiche accessi</summary>
         <p style={{ color: 'var(--color-muted)', margin: '0 0 0.5rem' }}>
           Cronologia delle visite registrate dal portale amministrativo.
         </p>
@@ -1539,10 +1624,12 @@ export default function Report() {
         ) : (
           <p>Nessuna visita registrata nel periodo selezionato.</p>
         )}
+        </details>
       </article>
 
       <article className="card">
-        <h3>Accessi utenti</h3>
+        <details open>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Accessi utenti</summary>
         <div
           style={{
             display: 'flex',
@@ -1606,6 +1693,7 @@ export default function Report() {
         ) : (
           <p>Nessun accesso registrato nel periodo selezionato.</p>
         )}
+        </details>
       </article>
 
       {canApproveUsers && (
@@ -1656,6 +1744,14 @@ export default function Report() {
                         </label>
                         <button
                           type="button"
+                          style={{ background: '#adb5bd' }}
+                          onClick={() => handleRoleChange(profile)}
+                          disabled={approvalsUpdating[profile.id]}
+                        >
+                          Aggiorna ruolo
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => handleApproveProfile(profile.id)}
                           disabled={approvalsUpdating[profile.id]}
                         >
@@ -1676,6 +1772,46 @@ export default function Report() {
               ) : (
                 <p>Nessuna richiesta in attesa.</p>
               )}
+              <div style={{ marginTop: '1rem' }}>
+                <strong>Storico approvazioni</strong>
+                {historyError && <p style={{ color: '#c92a2a' }}>{historyError}</p>}
+                {historyLoading ? (
+                  <p>Caricamento storico...</p>
+                ) : approvalHistory.length ? (
+                  <div style={{ overflowX: 'auto', marginTop: '0.5rem' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Data</th>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Azione</th>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Utente</th>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Da</th>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>A</th>
+                          <th style={{ textAlign: 'left', borderBottom: '1px solid var(--color-border)' }}>Operatore</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {approvalHistory.map((entry) => (
+                          <tr key={entry.id}>
+                            <td style={{ padding: '0.35rem 0' }}>{formatDateTime(entry.created_at)}</td>
+                            <td style={{ padding: '0.35rem 0' }}>{entry.action}</td>
+                            <td style={{ padding: '0.35rem 0' }}>{entry.target_email ?? 'N/D'}</td>
+                            <td style={{ padding: '0.35rem 0' }}>
+                              {entry.from_status ?? ''} {entry.from_role ? `· ${entry.from_role}` : ''}
+                            </td>
+                            <td style={{ padding: '0.35rem 0' }}>
+                              {entry.to_status ?? ''} {entry.to_role ? `· ${entry.to_role}` : ''}
+                            </td>
+                            <td style={{ padding: '0.35rem 0' }}>{entry.actor_email ?? 'N/D'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <p>Nessuna azione registrata.</p>
+                )}
+              </div>
             </div>
           </details>
         </article>
@@ -1685,7 +1821,8 @@ export default function Report() {
       {error && <p style={{ color: '#c92a2a' }}>{error}</p>}
 
       <article className="card">
-        <h2>Scuola</h2>
+        <details open>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Scuola</summary>
         <h3 style={{ margin: '0.25rem 0' }}>Corsi</h3>
         {scuolaSummary ? (
           scuolaSummary.yearFolders.length ? (
@@ -1871,71 +2008,76 @@ export default function Report() {
             Non ci sono ancora dati della Scuola salvati. Compila corsi, istruttori e corsisti dalla pagina Scuola per consultarli qui.
           </p>
         )}
+        </details>
       </article>
 
-      {memberYears.length > 0 && (
-        <article className="card" style={{ marginBottom: '1rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px' }}>
-            Anno da esportare
-            <select value={membersYearFilter} onChange={(event) => setMembersYearFilter(event.target.value)}>
-              <option value="all">Tutti</option>
-              {memberYears.map((year) => (
-                <option key={year} value={String(year)}>
-                  {year}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-            Seleziona l&apos;anno prima di scaricare l&apos;elenco soci completo per esportare solo la cartella desiderata.
-          </p>
-        </article>
-      )}
-
-      <div className="card-list">
-        <ReportCard
-          title="Uscite"
-          description="Esporta elenco uscite registrate."
-          onCsv={() => handleExport('uscita')}
-          onPdf={() => handleExport('uscita', 'pdf')}
-          onXlsx={() => handleExport('uscita', 'xlsx')}
-          disabled={loading}
-        />
-        <ReportCard
-          title="Inventario"
-          description="Scarica lo stato del magazzino."
-          onCsv={() => handleExport('magazzino')}
-          onPdf={() => handleExport('magazzino', 'pdf')}
-          onXlsx={() => handleExport('magazzino', 'xlsx')}
-          disabled={loading}
-        />
-        <ReportCard
-          title="Elenco soci completo"
-          description="Scarica l'anagrafica dettagliata con anno e stato quota."
-          onCsv={() => handleMembersFullExport()}
-          onPdf={() => handleMembersFullExport('pdf')}
-          onXlsx={() => handleMembersFullExport('xlsx')}
-          disabled={loading}
-        />
-        <ReportCard
-          title="Riepilogo soci per anno"
-          description="Totale soci e quote pagate suddivisi per anno."
-          onCsv={() => handleMembersSummaryExport()}
-          onPdf={() => handleMembersSummaryExport('pdf')}
-          onXlsx={() => handleMembersSummaryExport('xlsx')}
-          disabled={loading}
-        />
-        {canViewActivityLog && (
-          <ReportCard
-            title="Log attività"
-            description="Eventi recenti eseguiti dagli utenti nell'app."
-            onCsv={() => handleActivityExport()}
-            onPdf={() => handleActivityExport('pdf')}
-            onXlsx={() => handleActivityExport('xlsx')}
-            disabled={loading}
-          />
-        )}
-      </div>
+      <article className="card">
+        <details open>
+          <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Esportazioni</summary>
+          {memberYears.length > 0 && (
+            <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '1rem', alignItems: 'center' }}>
+              <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '220px' }}>
+                Anno da esportare
+                <select value={membersYearFilter} onChange={(event) => setMembersYearFilter(event.target.value)}>
+                  <option value="all">Tutti</option>
+                  {memberYears.map((year) => (
+                    <option key={year} value={String(year)}>
+                      {year}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                Seleziona l&apos;anno prima di scaricare l&apos;elenco soci completo per esportare solo la cartella desiderata.
+              </p>
+            </div>
+          )}
+          <div className="card-list" style={{ marginTop: '0.75rem' }}>
+            <ReportCard
+              title="Uscite"
+              description="Esporta elenco uscite registrate."
+              onCsv={() => handleExport('uscita')}
+              onPdf={() => handleExport('uscita', 'pdf')}
+              onXlsx={() => handleExport('uscita', 'xlsx')}
+              disabled={loading}
+            />
+            <ReportCard
+              title="Inventario"
+              description="Scarica lo stato del magazzino."
+              onCsv={() => handleExport('magazzino')}
+              onPdf={() => handleExport('magazzino', 'pdf')}
+              onXlsx={() => handleExport('magazzino', 'xlsx')}
+              disabled={loading}
+            />
+            <ReportCard
+              title="Elenco soci completo"
+              description="Scarica l'anagrafica dettagliata con anno e stato quota."
+              onCsv={() => handleMembersFullExport()}
+              onPdf={() => handleMembersFullExport('pdf')}
+              onXlsx={() => handleMembersFullExport('xlsx')}
+              disabled={loading}
+            />
+            <ReportCard
+              title="Riepilogo soci per anno"
+              description="Totale soci e quote pagate suddivisi per anno."
+              onCsv={() => handleMembersSummaryExport()}
+              onPdf={() => handleMembersSummaryExport('pdf')}
+              onXlsx={() => handleMembersSummaryExport('xlsx')}
+              disabled={loading}
+            />
+            {canViewActivityLog && (
+              <ReportCard
+                title="Log attività"
+                description="Eventi recenti eseguiti dagli utenti nell'app."
+                onCsv={() => handleActivityExport()}
+                onPdf={() => handleActivityExport('pdf')}
+                onXlsx={() => handleActivityExport('xlsx')}
+                disabled={loading}
+              />
+            )}
+          </div>
+        </details>
+      </article>
     </section>
   );
 }
