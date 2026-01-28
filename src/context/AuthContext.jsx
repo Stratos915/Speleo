@@ -10,6 +10,7 @@ export default function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [profileNeedsPasswordReset, setProfileNeedsPasswordReset] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState(null);
+  const SUPER_ADMIN_EMAILS = ['stratosdiakatos@yahoo.it'];
 
   const resolveRole = useCallback((targetUser) => {
     if (!targetUser) return 'socio';
@@ -103,6 +104,12 @@ export default function AuthProvider({ children }) {
       if (!user) {
         setProfileNeedsPasswordReset(false);
         setApprovalStatus(null);
+        return;
+      }
+      if (SUPER_ADMIN_EMAILS.includes((user.email ?? '').toLowerCase())) {
+        setApprovalStatus('approved');
+        setRole('admin');
+        setProfileNeedsPasswordReset(false);
         return;
       }
       const provider =
