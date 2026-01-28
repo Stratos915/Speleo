@@ -9,6 +9,7 @@ export default function AuthProvider({ children }) {
   const [role, setRole] = useState('socio');
   const [loading, setLoading] = useState(true);
   const [profileNeedsPasswordReset, setProfileNeedsPasswordReset] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState(null);
 
   const resolveRole = useCallback((targetUser) => {
     if (!targetUser) return 'socio';
@@ -101,6 +102,7 @@ export default function AuthProvider({ children }) {
     async function syncProfileFlags() {
       if (!user) {
         setProfileNeedsPasswordReset(false);
+        setApprovalStatus(null);
         return;
       }
       const provider =
@@ -109,19 +111,25 @@ export default function AuthProvider({ children }) {
         null;
       if (provider && provider !== 'email') {
         setProfileNeedsPasswordReset(false);
-        return;
       }
       const { data, error } = await supabase
         .from('profiles')
-        .select('password_initialized')
+        .select('password_initialized, approval_status, role')
         .eq('id', user.id)
         .maybeSingle();
       if (!ignore) {
         if (error) {
-          console.warn('[AuthContext] impossibile leggere password_initialized:', error.message);
+          console.warn('[AuthContext] impossibile leggere profilo:', error.message);
           setProfileNeedsPasswordReset(false);
+          setApprovalStatus(null);
         } else {
-          setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
+          if (data?.role) setRole(data.role);
+          setApprovalStatus(data?.approval_status ?? 'pending');
+          if (provider && provider !== 'email') {
+            setProfileNeedsPasswordReset(false);
+          } else {
+            setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
+          }
         }
       }
     }
@@ -141,6 +149,7 @@ export default function AuthProvider({ children }) {
       loading,
       isAuthenticated: Boolean(user),
       needsPasswordReset: profileNeedsPasswordReset,
+      approvalStatus,
       login,
       logout,
       markPasswordInitialized,
@@ -153,6 +162,7 @@ export default function AuthProvider({ children }) {
       login,
       logout,
       profileNeedsPasswordReset,
+      approvalStatus,
       markPasswordInitialized,
     ],
   );

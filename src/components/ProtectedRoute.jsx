@@ -3,10 +3,11 @@ import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
 
 export default function ProtectedRoute({ children, roles = [], page }) {
-  const { loading, user, role, needsPasswordReset } = useAuth();
+  const { loading, user, role, needsPasswordReset, approvalStatus } = useAuth();
   const { canViewPage } = usePermissions();
   const location = useLocation();
   const isResetPath = ['/reset', '/reset-password'].includes(location.pathname);
+  const isApprovalPath = location.pathname === '/approval-pending';
 
   if (loading) {
     return <p>Caricamento credenziali...</p>;
@@ -18,6 +19,10 @@ export default function ProtectedRoute({ children, roles = [], page }) {
 
   if (user && needsPasswordReset && !isResetPath) {
     return <Navigate to="/reset-password?reason=setup" replace />;
+  }
+
+  if (user && approvalStatus && approvalStatus !== 'approved' && !isApprovalPath) {
+    return <Navigate to="/approval-pending" replace />;
   }
 
   if (page && !canViewPage(page)) {

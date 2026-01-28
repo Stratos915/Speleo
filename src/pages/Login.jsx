@@ -14,7 +14,7 @@ export default function Login() {
   const [resetInfo, setResetInfo] = useState('');
   const [resetting, setResetting] = useState(false);
   const navigate = useNavigate();
-  const { isAuthenticated, role, loading, login } = useAuth();
+  const { isAuthenticated, role, loading, login, approvalStatus } = useAuth();
 
   useEffect(() => {
     const hashParams = new URLSearchParams(window.location.hash.replace('#', ''));
@@ -33,9 +33,13 @@ export default function Login() {
   useEffect(() => {
     if (loading) return;
     if (isAuthenticated) {
-      navigate('/dashboard', { replace: true });
+      if (approvalStatus && approvalStatus !== 'approved') {
+        navigate('/approval-pending', { replace: true });
+      } else {
+        navigate('/dashboard', { replace: true });
+      }
     }
-  }, [isAuthenticated, role, loading, navigate]);
+  }, [isAuthenticated, role, loading, navigate, approvalStatus]);
 
   async function handleSubmit(event) {
     event.preventDefault();

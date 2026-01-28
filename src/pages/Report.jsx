@@ -5,6 +5,7 @@ import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
+import { getAllRoles } from '../utils/permissions.js';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 
 const csvColumns = {
@@ -667,10 +668,17 @@ function downloadXlsx(rows, key) {
 export default function Report() {
   const { role, isAuthenticated } = useAuth();
   const canViewActivityLog = role === 'admin' || role === 'presidente';
+  const canApproveUsers = role === 'admin' || role === 'presidente';
+  const rolesList = useMemo(() => getAllRoles(), []);
   const [members, setMembers] = useState([]);
   const [uscite, setUscite] = useState([]);
   const [magazzino, setMagazzino] = useState([]);
   const [activityLogs, setActivityLogs] = useState([]);
+  const [pendingProfiles, setPendingProfiles] = useState([]);
+  const [approvalsLoading, setApprovalsLoading] = useState(false);
+  const [approvalsError, setApprovalsError] = useState('');
+  const [approvalsUpdating, setApprovalsUpdating] = useState({});
+  const [roleAssignments, setRoleAssignments] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [visitsRange, setVisitsRange] = useState(30);
@@ -867,6 +875,39 @@ export default function Report() {
     };
   }, [isAuthenticated, ACTIVE_REFRESH_MS, activeRange]);
 
+  const loadPendingProfiles = useCallback(async () => {
+    if (!canApproveUsers) return;
+    setApprovalsLoading(true);
+    setApprovalsError('');
+    try {
+      const { data, error: profilesError } = await supabase
+        .from('profiles')
+        .select('id,email,role,approval_status,created_at')
+        .eq('approval_status', 'pending')
+        .order('created_at', { ascending: false });
+      if (profilesError) throw profilesError;
+      const rows = data ?? [];
+      setPendingProfiles(rows);
+      const nextAssignments = {};
+      rows.forEach((row) => {
+        nextAssignments[row.id] = row.role ?? 'socio';
+      });
+      setRoleAssignments(nextAssignments);
+    } catch (loadError) {
+      setApprovalsError(loadError.message ?? 'Impossibile caricare le richieste in attesa.');
+    } finally {
+      setApprovalsLoading(false);
+    }
+  }, [canApproveUsers]);
+
+  useEffect(() => {
+    if (!canApproveUsers) {
+      setPendingProfiles([]);
+      return;
+    }
+    loadPendingProfiles();
+  }, [canApproveUsers, loadPendingProfiles]);
+
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const handleFocus = () => refreshScuolaData();
@@ -889,6 +930,54 @@ export default function Report() {
   const membersMap = useMemo(
     () => new Map(members.map((member) => [String(member.id), member])),
     [members],
+  );
+
+  const handleApproveProfile = useCallback(
+    async (profileId) => {
+      setApprovalsUpdating((prev) => ({ ...prev, [profileId]: true }));
+      setApprovalsError('');
+      try {
+        const nextRole = roleAssignments[profileId] ?? 'socio';
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            approval_status: 'approved',
+            role: nextRole,
+            approved_at: new Date().toISOString(),
+          })
+          .eq('id', profileId);
+        if (updateError) throw updateError;
+        await loadPendingProfiles();
+      } catch (updateError) {
+        setApprovalsError(updateError.message ?? 'Impossibile approvare il profilo.');
+      } finally {
+        setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
+      }
+    },
+    [roleAssignments, loadPendingProfiles],
+  );
+
+  const handleRejectProfile = useCallback(
+    async (profileId) => {
+      setApprovalsUpdating((prev) => ({ ...prev, [profileId]: true }));
+      setApprovalsError('');
+      try {
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({
+            approval_status: 'rejected',
+            approved_at: null,
+          })
+          .eq('id', profileId);
+        if (updateError) throw updateError;
+        await loadPendingProfiles();
+      } catch (updateError) {
+        setApprovalsError(updateError.message ?? 'Impossibile rifiutare il profilo.');
+      } finally {
+        setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
+      }
+    },
+    [loadPendingProfiles],
   );
 
   const detectMembershipYear = useCallback((member) => {
@@ -1518,6 +1607,79 @@ export default function Report() {
           <p>Nessun accesso registrato nel periodo selezionato.</p>
         )}
       </article>
+
+      {canApproveUsers && (
+        <article className="card">
+          <details open>
+            <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Approvazioni accessi</summary>
+            <div style={{ marginTop: '0.75rem' }}>
+              {approvalsError && <p style={{ color: '#c92a2a' }}>{approvalsError}</p>}
+              {approvalsLoading ? (
+                <p>Caricamento richieste...</p>
+              ) : pendingProfiles.length ? (
+                <div style={{ display: 'grid', gap: '0.75rem' }}>
+                  {pendingProfiles.map((profile) => (
+                    <div
+                      key={profile.id}
+                      style={{
+                        border: '1px solid var(--color-border)',
+                        borderRadius: '0.75rem',
+                        padding: '0.75rem',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '0.75rem',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                      }}
+                    >
+                      <div>
+                        <strong>{profile.email ?? 'Email non disponibile'}</strong>
+                        <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                          Stato: in attesa · Creato il {profile.created_at ? formatDateTime(profile.created_at) : 'N/D'}
+                        </p>
+                      </div>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          Ruolo
+                          <select
+                            value={roleAssignments[profile.id] ?? 'socio'}
+                            onChange={(event) =>
+                              setRoleAssignments((prev) => ({ ...prev, [profile.id]: event.target.value }))
+                            }
+                          >
+                            {rolesList.map((roleOption) => (
+                              <option key={roleOption} value={roleOption}>
+                                {roleOption}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleApproveProfile(profile.id)}
+                          disabled={approvalsUpdating[profile.id]}
+                        >
+                          Approva
+                        </button>
+                        <button
+                          type="button"
+                          style={{ background: '#adb5bd' }}
+                          onClick={() => handleRejectProfile(profile.id)}
+                          disabled={approvalsUpdating[profile.id]}
+                        >
+                          Rifiuta
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p>Nessuna richiesta in attesa.</p>
+              )}
+            </div>
+          </details>
+        </article>
+      )}
 
       {loading && <p>Raccolta dati in corso...</p>}
       {error && <p style={{ color: '#c92a2a' }}>{error}</p>}

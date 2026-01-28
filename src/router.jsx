@@ -2,6 +2,7 @@ import { createBrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import Login from './pages/Login.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
+import ApprovalPending from './pages/ApprovalPending.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Uscite from './pages/Uscite.jsx';
 import UscitaDettaglio from './pages/UscitaDettaglio.jsx';
@@ -21,6 +22,7 @@ import { getPageEditRoles } from './utils/permissions.js';
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
   { path: '/auth/callback', element: <AuthCallback /> },
+  { path: '/approval-pending', element: <ApprovalPending /> },
   { path: '/reset', element: <ResetPassword /> },
   { path: '/reset-password', element: <ResetPassword /> },
   {
