@@ -81,9 +81,13 @@ serve(async (req) => {
   const SMTP_USER = Deno.env.get("SMTP_USER")?.trim();
   const SMTP_PASS = Deno.env.get("SMTP_PASS")?.trim();
   const SMTP_FROM = Deno.env.get("SMTP_FROM")?.trim();
-  const SMTP_SECURE = (Deno.env.get("SMTP_SECURE") ?? "").toLowerCase() === "true";
+  const SMTP_SECURE_ENV = Deno.env.get("SMTP_SECURE");
+  const SMTP_SECURE =
+    SMTP_SECURE_ENV !== undefined
+      ? SMTP_SECURE_ENV.toLowerCase() === "true"
+      : SMTP_PORT === 465;
 
-  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !SMTP_FROM) {
+  if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !SMTP_FROM || Number.isNaN(SMTP_PORT)) {
     return json({ error: "Missing SMTP configuration" }, 500);
   }
 
@@ -108,9 +112,11 @@ serve(async (req) => {
       subject,
       content,
     });
+    return json({ ok: true });
+  } catch (sendError) {
+    console.error("SMTP send failed", sendError);
+    return json({ error: "SMTP send failed", details: String(sendError) }, 500);
   } finally {
     await client.close();
   }
-
-  return json({ ok: true });
 });

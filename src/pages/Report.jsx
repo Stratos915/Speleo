@@ -1059,7 +1059,9 @@ export default function Report() {
                 app_url: window.location.origin,
               },
             });
-            if (!notifyError) {
+            if (notifyError) {
+              setApprovalsError(`Approvazione ok, ma email non inviata: ${notifyError.message ?? 'errore'}`);
+            } else {
               await supabase.from('approval_audit').insert({
                 actor_id: user?.id ?? null,
                 actor_email: user?.email ?? null,
@@ -1074,6 +1076,7 @@ export default function Report() {
             }
           } catch (notifyErr) {
             console.warn('[Report] Invio email approvazione fallito:', notifyErr);
+            setApprovalsError('Approvazione ok, ma email non inviata (errore SMTP).');
           }
         }
         await loadPendingProfiles();
