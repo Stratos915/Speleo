@@ -51,6 +51,8 @@ const ORDER_STATUS = [
 const PURCHASE_EXPORT_COLUMNS = [
   { key: 'created_at', label: 'Data' },
   { key: 'purchase_date', label: 'Data acquisto' },
+  { key: 'payment_date', label: 'Data pagamento' },
+  { key: 'delivery_date', label: 'Data consegna' },
   { key: 'member_name', label: 'Socio' },
   { key: 'membership_number', label: 'Numero tessera' },
   { key: 'item_type', label: 'Tipo' },
@@ -488,6 +490,8 @@ export default function Members() {
     payment_status: PAYMENT_STATUS[0].value,
     status: ORDER_STATUS[0].value,
     purchase_date: '',
+    payment_date: '',
+    delivery_date: '',
     purchase_year: DEFAULT_YEAR_STRING,
     notes: '',
   });
@@ -822,6 +826,8 @@ export default function Members() {
         return {
           created_at: purchase.created_at ? new Date(purchase.created_at).toLocaleString('it-IT') : '',
           purchase_date: purchase.purchase_date ?? '',
+          payment_date: purchase.payment_date ?? '',
+          delivery_date: purchase.delivery_date ?? '',
           member_name: member?.full_name ?? 'Socio non trovato',
           membership_number: member?.old_id ?? member?.membership_number ?? '',
           item_type: purchase.item_type ?? '',
@@ -934,6 +940,8 @@ export default function Members() {
       payment_status: PAYMENT_STATUS[0].value,
       status: ORDER_STATUS[0].value,
       purchase_date: '',
+      payment_date: '',
+      delivery_date: '',
       purchase_year: DEFAULT_YEAR_STRING,
       notes: '',
     });
@@ -970,6 +978,8 @@ export default function Members() {
       payment_status: purchase.payment_status ?? PAYMENT_STATUS[0].value,
       status: purchase.status ?? ORDER_STATUS[0].value,
       purchase_date: purchase.purchase_date ?? '',
+      payment_date: purchase.payment_date ?? '',
+      delivery_date: purchase.delivery_date ?? '',
       purchase_year: String(purchase.purchase_year ?? DEFAULT_YEAR_STRING),
       notes: purchase.notes ?? '',
     });
@@ -1006,6 +1016,8 @@ export default function Members() {
       payment_status: purchaseForm.payment_status,
       status: purchaseForm.status,
       purchase_date: purchaseForm.purchase_date || null,
+      payment_date: purchaseForm.payment_date || null,
+      delivery_date: purchaseForm.delivery_date || null,
       purchase_year: Number(purchaseForm.purchase_year) || DEFAULT_YEAR,
       notes: purchaseForm.notes?.trim() || null,
     };
@@ -1733,6 +1745,22 @@ export default function Members() {
                       />
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Data pagamento
+                      <input
+                        type="date"
+                        value={purchaseForm.payment_date}
+                        onChange={(event) => handlePurchaseChange('payment_date', event.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                      Data consegna
+                      <input
+                        type="date"
+                        value={purchaseForm.delivery_date}
+                        onChange={(event) => handlePurchaseChange('delivery_date', event.target.value)}
+                      />
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       Taglia
                       <select value={purchaseForm.size} onChange={(event) => handlePurchaseChange('size', event.target.value)}>
                         {PURCHASE_SIZES.map((size) => (
@@ -1887,7 +1915,9 @@ export default function Members() {
                             </header>
                             <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
                               Prezzo: {formatPurchasePrice(purchase.price)} ·
-                              Data {purchase.purchase_date ? formatDate(purchase.purchase_date) : 'N/D'} ·
+                              Data acquisto {purchase.purchase_date ? formatDate(purchase.purchase_date) : 'N/D'} ·
+                              Pagamento {purchase.payment_date ? formatDate(purchase.payment_date) : 'N/D'} ·
+                              Consegna {purchase.delivery_date ? formatDate(purchase.delivery_date) : 'N/D'} ·
                               Anno {purchase.purchase_year ?? 'N/D'}
                             </p>
                             <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
