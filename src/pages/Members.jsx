@@ -584,7 +584,7 @@ export default function Members() {
       try {
         const { data, error: profilesError } = await supabase
           .from('profiles')
-          .select('id,email,role');
+          .select('id,email,role,first_name,last_name,phone,member_id');
         if (profilesError) throw profilesError;
         if (!ignore) {
           const map = new Map();
@@ -611,6 +611,18 @@ export default function Members() {
     };
   }, [canManageRoles, supportsEmail]);
 
+  const profileSeed = useMemo(() => {
+    if (!supportsEmail) return null;
+    const email = search.trim().toLowerCase();
+    if (!email || !email.includes('@')) return null;
+    const profile = profilesByEmail.get(email);
+    if (!profile) return null;
+    const emailExists = members.some((member) => (member.email ?? '').toLowerCase() === email);
+    const memberIdExists = profile.member_id && membersById.has(String(profile.member_id));
+    if (emailExists || memberIdExists) return null;
+    return profile;
+  }, [members, membersById, profilesByEmail, search, supportsEmail]);
+
   useEffect(() => {
     if (showForm && formRef.current) {
       formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -631,6 +643,11 @@ export default function Members() {
       membership_year: Number(yearFilter) || DEFAULT_YEAR,
     }));
   }, [yearFilter, editingId]);
+
+  const membersById = useMemo(
+    () => new Map(members.map((member) => [String(member.id), member])),
+    [members],
+  );
 
   const availableYears = useMemo(() => {
     const set = new Set();
@@ -719,11 +736,6 @@ export default function Members() {
       return matchesText && matchesStatus && matchesYear;
     });
   }, [members, search, statusFilter, yearFilter]);
-
-  const membersById = useMemo(
-    () => new Map(members.map((member) => [String(member.id), member])),
-    [members],
-  );
   const uniqueMembers = useMemo(() => {
     const sorted = [...members].sort((a, b) => {
       const yearA = Number(a.membership_year ?? a.year ?? a.anno ?? 0);
@@ -986,13 +998,16 @@ export default function Members() {
     setShowPurchaseForm(true);
   }
 
-  function resetForm(yearValue = yearFilter) {
+  function resetForm(yearValue = yearFilter, seedProfile = null) {
+    const seedName = seedProfile
+      ? `${seedProfile.first_name ?? ''} ${seedProfile.last_name ?? ''}`.trim()
+      : '';
     setEditingId(null);
     setForm({
       membership_number: '',
-      full_name: '',
-      email: '',
-      phone: '',
+      full_name: seedName,
+      email: supportsEmail ? seedProfile?.email ?? '' : '',
+      phone: supportsPhone ? seedProfile?.phone ?? '' : '',
       membership_paid: false,
       membership_year: Number(yearValue) || DEFAULT_YEAR,
     });
@@ -2130,8 +2145,13 @@ export default function Members() {
               className="floating-button"
               type="button"
               onClick={() => {
-                setShowForm((prev) => !prev);
-                resetForm();
+                const nextShow = !showForm;
+                setShowForm(nextShow);
+                if (nextShow && !editingId) {
+                  resetForm(yearFilter, profileSeed);
+                } else {
+                  resetForm();
+                }
               }}
             >
               {showForm ? 'Chiudi modulo' : 'Aggiungi socio'}
