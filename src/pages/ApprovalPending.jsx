@@ -157,6 +157,7 @@ export default function ApprovalPending() {
         email: form.email.trim(),
         phone: form.phone.trim(),
         member_id: matchedMemberId ?? profile?.member_id ?? null,
+        approval_status: 'pending',
       };
       const { error } = await supabase.from('profiles').update(payload).eq('id', user.id);
       if (error) throw error;
