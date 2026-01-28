@@ -103,6 +103,14 @@ export default function AuthProvider({ children }) {
         setProfileNeedsPasswordReset(false);
         return;
       }
+      const provider =
+        user.app_metadata?.provider ??
+        user.identities?.[0]?.provider ??
+        null;
+      if (provider && provider !== 'email') {
+        setProfileNeedsPasswordReset(false);
+        return;
+      }
       const { data, error } = await supabase
         .from('profiles')
         .select('password_initialized')
@@ -113,7 +121,7 @@ export default function AuthProvider({ children }) {
           console.warn('[AuthContext] impossibile leggere password_initialized:', error.message);
           setProfileNeedsPasswordReset(false);
         } else {
-          setProfileNeedsPasswordReset(data ? !data.password_initialized : true);
+          setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
         }
       }
     }
