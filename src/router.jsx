@@ -3,6 +3,7 @@ import App from './App.jsx';
 import Login from './pages/Login.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
 import ApprovalPending from './pages/ApprovalPending.jsx';
+import PublicHome from './pages/PublicHome.jsx';
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -23,6 +24,7 @@ import { getPageEditRoles } from './utils/permissions.js';
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
+  { path: '/public', element: <PublicHome /> },
   { path: '/auth/callback', element: <AuthCallback /> },
   { path: '/approval-pending', element: <ApprovalPending /> },
   { path: '/privacy', element: <Privacy /> },
