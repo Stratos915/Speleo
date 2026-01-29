@@ -3,6 +3,8 @@ import App from './App.jsx';
 import Login from './pages/Login.jsx';
 import AuthCallback from './pages/AuthCallback.jsx';
 import ApprovalPending from './pages/ApprovalPending.jsx';
+import Privacy from './pages/Privacy.jsx';
+import Terms from './pages/Terms.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Uscite from './pages/Uscite.jsx';
 import UscitaDettaglio from './pages/UscitaDettaglio.jsx';
@@ -23,6 +25,8 @@ export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
   { path: '/auth/callback', element: <AuthCallback /> },
   { path: '/approval-pending', element: <ApprovalPending /> },
+  { path: '/privacy', element: <Privacy /> },
+  { path: '/terms', element: <Terms /> },
   { path: '/reset', element: <ResetPassword /> },
   { path: '/reset-password', element: <ResetPassword /> },
   {

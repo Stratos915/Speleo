@@ -167,6 +167,23 @@ export default function Login() {
           {resetting ? 'Invio in corso...' : 'Password dimenticata?'}
         </button>
         {resetInfo && <p style={{ color: 'var(--color-muted)', marginTop: '0.5rem' }}>{resetInfo}</p>}
+        <div
+          style={{
+            marginTop: '1.25rem',
+            display: 'flex',
+            gap: '1rem',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+            fontSize: '0.85rem',
+          }}
+        >
+          <a href="/privacy" style={{ color: 'var(--color-muted)' }}>
+            Privacy
+          </a>
+          <a href="/terms" style={{ color: 'var(--color-muted)' }}>
+            Termini di servizio
+          </a>
+        </div>
       </div>
     </div>
   );
