@@ -23,6 +23,7 @@ export default function ApprovalPending() {
   const [matchError, setMatchError] = useState('');
   const [matchedMember, setMatchedMember] = useState(null);
   const [matchedMemberId, setMatchedMemberId] = useState(null);
+  const [refreshMessage, setRefreshMessage] = useState('');
 
   const normalizeName = (value) => String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
   const fullNameValue = useMemo(
@@ -84,6 +85,32 @@ export default function ApprovalPending() {
     };
   }, [user]);
 
+  async function handleRefreshStatus() {
+    if (!user) return;
+    setProfileLoading(true);
+    setProfileError('');
+    setRefreshMessage('');
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id,email,first_name,last_name,phone,member_id,approval_status')
+        .eq('id', user.id)
+        .maybeSingle();
+      if (error) throw error;
+      setProfile(data ?? null);
+      if ((data?.approval_status ?? 'pending') === 'approved') {
+        navigate('/dashboard', { replace: true });
+        return;
+      }
+      setFormSaved(Boolean(data?.first_name && data?.last_name && data?.email && data?.phone));
+      setRefreshMessage('Account ancora in attesa di approvazione.');
+    } catch (refreshError) {
+      setProfileError(refreshError.message ?? 'Impossibile aggiornare lo stato.');
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
   useEffect(() => {
     if (!form.first_name || !form.last_name) {
       setMatchedMember(null);
@@ -100,15 +127,13 @@ export default function ApprovalPending() {
         const last = form.last_name.trim();
         const { data, error } = await supabase
           .from('members')
-          .select('id,full_name,email,phone,nome,cognome,first_name,last_name')
+          .select('id,full_name,email,phone')
           .or(
             [
               `full_name.ilike.%${first}%${last}%`,
               `full_name.ilike.%${last}%${first}%`,
-              `nome.ilike.%${first}%`,
-              `first_name.ilike.%${first}%`,
-              `cognome.ilike.%${last}%`,
-              `last_name.ilike.%${last}%`,
+              `full_name.ilike.%${first}%`,
+              `full_name.ilike.%${last}%`,
             ].join(','),
           )
           .limit(25);
@@ -117,9 +142,7 @@ export default function ApprovalPending() {
         const match =
           (data ?? []).find((member) => {
             const full = normalizeName(member.full_name);
-            const ita = normalizeName(`${member.nome ?? ''} ${member.cognome ?? ''}`.trim());
-            const alt = normalizeName(`${member.first_name ?? ''} ${member.last_name ?? ''}`.trim());
-            return [full, ita, alt].some((candidate) => candidate && candidate === normalizedTarget);
+            return full && full === normalizedTarget;
           }) ?? null;
         setMatchedMember(match);
         setMatchedMemberId(match?.id ?? profile?.member_id ?? null);
@@ -182,8 +205,9 @@ export default function ApprovalPending() {
             <p style={{ color: 'var(--color-muted)' }}>
               Il tuo account è in attesa di approvazione da parte dell&apos;amministratore.
             </p>
+            {refreshMessage && <p style={{ color: 'var(--color-muted)' }}>{refreshMessage}</p>}
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1.5rem' }}>
-              <button type="button" onClick={() => window.location.reload()}>
+              <button type="button" onClick={handleRefreshStatus} disabled={profileLoading}>
                 Ricarica stato
               </button>
               <button type="button" style={{ background: '#adb5bd' }} onClick={handleLogout} disabled={loading}>
