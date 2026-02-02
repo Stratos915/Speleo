@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
 import { getEquipment, getEquipmentById } from '../services/equipment.js';
+import { getUscite } from '../services/uscite.js';
 
 const FILTERS = [
   { value: 'all', label: 'Tutti' },
@@ -19,6 +20,7 @@ export default function StoricoPrestiti() {
   const navigate = useNavigate();
   const [loans, setLoans] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
+  const [usciteList, setUsciteList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [error, setError] = useState('');
@@ -46,7 +48,7 @@ export default function StoricoPrestiti() {
     setLoading(true);
     setError('');
     try {
-      const [{ data, error: fetchError }, equipmentData] = await Promise.all([
+      const [{ data, error: fetchError }, equipmentData, usciteData] = await Promise.all([
         supabase
           .from('loans')
           .select(
@@ -54,12 +56,14 @@ export default function StoricoPrestiti() {
           )
           .order('delivered_at', { ascending: false }),
         getEquipment(),
+        getUscite(),
       ]);
       if (fetchError) {
         throw fetchError;
       }
       setLoans(data ?? []);
       setEquipmentList(equipmentData ?? []);
+      setUsciteList(usciteData ?? []);
     } catch (loadError) {
       console.error('[StoricoPrestiti] Errore caricamento prestiti:', loadError);
       setLoans([]);
@@ -81,6 +85,24 @@ export default function StoricoPrestiti() {
       return matchesFilter && matchesQuery;
     });
   }, [loans, filter, query, equipmentMap]);
+
+  const usciteMap = useMemo(() => {
+    const map = new Map();
+    usciteList.forEach((uscita) => {
+      if (uscita?.id) {
+        map.set(String(uscita.id), uscita);
+      }
+    });
+    return map;
+  }, [usciteList]);
+
+  function addDays(dateValue, days) {
+    if (!dateValue) return null;
+    const date = new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return null;
+    date.setDate(date.getDate() + days);
+    return date;
+  }
 
   async function handleRestitution(loan) {
     const loanEmail = loan.borrower_email || loan.borrower_name;
@@ -184,6 +206,9 @@ export default function StoricoPrestiti() {
             const equipmentRow = equipmentMap.get(String(loan.equipment_id ?? ''));
             const equipmentName = equipmentRow?.name ?? 'Materiale';
             const reservedUntil = loan.reserved_until ? formatDateOnly(loan.reserved_until) : null;
+            const uscita = loan.uscita_id ? usciteMap.get(String(loan.uscita_id)) : null;
+            const uscitaDue = uscita?.data ? addDays(uscita.data, 7) : null;
+            const uscitaDueLabel = uscitaDue ? formatDateOnly(uscitaDue) : null;
             return (
               <article className="card" key={loan.id}>
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -217,6 +242,11 @@ export default function StoricoPrestiti() {
                 )}
                 {reservedUntil && (
                   <p style={{ margin: '0.25rem 0', color: '#d9480f' }}>Disponibile in sede entro {reservedUntil}</p>
+                )}
+                {uscitaDueLabel && (
+                  <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                    Riconsegna entro 7 giorni dalla data dell&apos;uscita: {uscitaDueLabel}
+                  </p>
                 )}
                 {loan.notes && <p style={{ fontStyle: 'italic' }}>Note: {loan.notes}</p>}
                 {(canManageLoans || (user?.email && (loan.borrower_email || loan.borrower_name) === user.email)) &&
