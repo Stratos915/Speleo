@@ -5,7 +5,6 @@ import usePermissions from '../hooks/usePermissions.js';
 import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
-import { getEquipmentById, setEquipmentAvailability } from '../services/equipment.js';
 import { supabase } from '../lib/supabaseClient';
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
@@ -166,15 +165,6 @@ export default function UscitaDettaglio() {
       setUscitaLoansError('Impossibile chiudere il prestito.');
       setLoanProcessingId(null);
       return;
-    }
-    try {
-      const equipmentRow = await getEquipmentById(loan.equipment_id);
-      const currentAvailable = Number(equipmentRow.quantity_available ?? equipmentRow.quantity ?? 0);
-      const newAvailability = currentAvailable + loan.quantity;
-      await setEquipmentAvailability({ column: 'equipment_id', value: loan.equipment_id }, newAvailability);
-    } catch (availabilityError) {
-      console.error('[UscitaDettaglio] Errore aggiornamento magazzino:', availabilityError);
-      setUscitaLoansError('Prestito chiuso ma quantita non aggiornata. Controlla il magazzino.');
     }
     setLoanProcessingId(null);
     setUscitaLoans((prev) =>

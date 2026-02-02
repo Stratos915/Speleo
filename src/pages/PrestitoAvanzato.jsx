@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useAuth from '../context/useAuth.js';
-import { getEquipment, setEquipmentAvailability } from '../services/equipment.js';
+import { getEquipment } from '../services/equipment.js';
 
 const initialForm = {
   equipmentId: '',
@@ -242,23 +242,10 @@ export default function PrestitoAvanzato() {
       return;
     }
 
-    const newAvailability = Math.max(totalAvailable - quantity, 0);
-    try {
-      const filter = selectedEquipment.equipment_id
-        ? { column: 'equipment_id', value: selectedEquipment.equipment_id }
-        : selectedEquipment;
-      await setEquipmentAvailability(filter, newAvailability);
-      setSuccess('Prestito registrato correttamente.');
-      setForm(initialForm);
-      loadData();
-      loadActiveLoans();
-    } catch (availabilityError) {
-      console.error('[PrestitoAvanzato] Errore aggiornamento disponibilità:', availabilityError);
-      setError(
-        availabilityError.message ??
-          'Prestito registrato ma impossibile aggiornare il magazzino. Verifica manualmente.',
-      );
-    }
+    setSuccess('Prestito registrato correttamente.');
+    setForm(initialForm);
+    loadData();
+    loadActiveLoans();
     setSubmitting(false);
   }
 

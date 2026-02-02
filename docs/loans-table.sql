@@ -27,3 +27,62 @@ $$ language plpgsql;
 create trigger handle_loans_updated_at
 before update on public.loans
 for each row execute function public.set_loans_updated_at();
+
+-- Keep equipment availability in sync with loans
+create or replace function public.adjust_equipment_on_loan_insert()
+returns trigger
+language plpgsql
+as $$
+begin
+  if new.status in ('in_corso', 'active') then
+    update public.equipment
+      set quantity_available = greatest(coalesce(quantity_available, quantity) - new.quantity, 0)
+      where equipment_id = new.equipment_id;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.adjust_equipment_on_loan_update()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status in ('in_corso', 'active') and new.status = 'chiuso' then
+    update public.equipment
+      set quantity_available = coalesce(quantity_available, quantity) + old.quantity
+      where equipment_id = old.equipment_id;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.adjust_equipment_on_loan_delete()
+returns trigger
+language plpgsql
+as $$
+begin
+  if old.status in ('in_corso', 'active') then
+    update public.equipment
+      set quantity_available = coalesce(quantity_available, quantity) + old.quantity
+      where equipment_id = old.equipment_id;
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists loans_adjust_equipment_insert on public.loans;
+drop trigger if exists loans_adjust_equipment_update on public.loans;
+drop trigger if exists loans_adjust_equipment_delete on public.loans;
+
+create trigger loans_adjust_equipment_insert
+after insert on public.loans
+for each row execute function public.adjust_equipment_on_loan_insert();
+
+create trigger loans_adjust_equipment_update
+after update of status on public.loans
+for each row execute function public.adjust_equipment_on_loan_update();
+
+create trigger loans_adjust_equipment_delete
+after delete on public.loans
+for each row execute function public.adjust_equipment_on_loan_delete();

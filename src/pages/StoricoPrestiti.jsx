@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
-import { getEquipment, getEquipmentById, setEquipmentAvailability } from '../services/equipment.js';
+import { getEquipment, getEquipmentById } from '../services/equipment.js';
 
 const FILTERS = [
   { value: 'all', label: 'Tutti' },
@@ -98,18 +98,6 @@ export default function StoricoPrestiti() {
       return;
     }
 
-    try {
-      let equipmentRow = equipmentMap.get(String(loan.equipment_id ?? ''));
-      if (!equipmentRow) {
-        equipmentRow = await getEquipmentById(loan.equipment_id);
-      }
-      const currentAvailable = Number(equipmentRow.quantity_available ?? equipmentRow.quantity ?? 0);
-      const newAvailability = currentAvailable + loan.quantity;
-      await setEquipmentAvailability({ column: 'equipment_id', value: loan.equipment_id }, newAvailability);
-    } catch (availabilityError) {
-      console.error('[StoricoPrestiti] Errore aggiornamento magazzino:', availabilityError);
-      setError('Prestito chiuso ma quantità non aggiornata. Controlla il magazzino.');
-    }
     setProcessingId(null);
     loadLoans();
   }
