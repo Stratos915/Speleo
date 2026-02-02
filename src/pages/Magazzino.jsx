@@ -30,6 +30,7 @@ export default function Magazzino() {
   const [editingId, setEditingId] = useState(null);
   const [editingBorrowed, setEditingBorrowed] = useState(0);
   const [selectedMaterialId, setSelectedMaterialId] = useState('');
+  const [restockMode, setRestockMode] = useState('replace');
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [supportsEquipmentNumber, setSupportsEquipmentNumber] = useState(true);
@@ -134,6 +135,7 @@ export default function Magazzino() {
       notes: notesField ? selectedMaterial[notesField] ?? '' : prev.notes,
     }));
     setEditingBorrowed(Math.max(total - available, 0));
+    setRestockMode('replace');
   }, [selectedMaterial, editingId, quantityField, availableField, notesField, supportsEquipmentNumber]);
 
   async function handleSubmit(event) {
@@ -173,7 +175,8 @@ export default function Magazzino() {
           selectedMaterial.available_quantity ??
           currentTotal,
       );
-      const updatedTotal = currentTotal + totalQuantity;
+      const shouldIncreaseTotal = restockMode === 'stock';
+      const updatedTotal = shouldIncreaseTotal ? currentTotal + totalQuantity : currentTotal;
       const updatedAvailable = currentAvailable + totalQuantity;
       payload[quantityField] = updatedTotal;
       if (availableField) {
@@ -232,6 +235,7 @@ export default function Magazzino() {
       setEditingId(null);
       setEditingBorrowed(0);
       setSelectedMaterialId('');
+      setRestockMode('replace');
       loadMaterials();
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio.');
@@ -250,6 +254,7 @@ export default function Magazzino() {
     setEditingId(material.id);
     setEditingBorrowed(Math.max(total - available, 0));
     setSelectedMaterialId('');
+    setRestockMode('replace');
     setForm({
       equipment_number: supportsEquipmentNumber ? material.equipment_number ?? '' : '',
       name: material.name ?? '',
@@ -263,6 +268,7 @@ export default function Magazzino() {
     setEditingId(null);
     setEditingBorrowed(0);
     setSelectedMaterialId('');
+    setRestockMode('replace');
     setForm(emptyMaterial);
   }
 
@@ -317,26 +323,61 @@ export default function Magazzino() {
             {!editingId && (
               <>
                 <label htmlFor="materialSelect">Aggiungi quantità a materiale esistente (opzionale)</label>
-                <select
-                  id="materialSelect"
-                  value={selectedMaterialId}
-                  onChange={(event) => setSelectedMaterialId(event.target.value)}
-                >
-                  <option value="">-- Nuovo materiale --</option>
-                  {materials.map((material, index) => {
-                    const optionKey = material?.id ?? `material-${index}`;
-                    const displayId = material?.equipment_number ?? index + 1;
-                    return (
-                      <option key={optionKey} value={String(material.id)}>
-                        {material.name ?? 'Materiale senza nome'} (ID #{displayId})
-                      </option>
-                    );
-                  })}
-                </select>
+                <div style={{ display: 'grid', gap: '0.35rem' }}>
+                  <select
+                    id="materialSelect"
+                    value={selectedMaterialId}
+                    onChange={(event) => setSelectedMaterialId(event.target.value)}
+                  >
+                    <option value="">-- Nuovo materiale (scrivi sotto) --</option>
+                    {materials.map((material, index) => {
+                      const optionKey = material?.id ?? `material-${index}`;
+                      const displayId = material?.equipment_number ?? index + 1;
+                      return (
+                        <option key={optionKey} value={String(material.id)}>
+                          {material.name ?? 'Materiale senza nome'} (ID #{displayId})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {selectedMaterialId && (
+                    <button
+                      type="button"
+                      style={{ background: '#adb5bd', width: 'fit-content' }}
+                      onClick={() => setSelectedMaterialId('')}
+                    >
+                      Usa nuovo materiale
+                    </button>
+                  )}
+                </div>
                 {selectedMaterialId && (
-                  <small style={{ color: 'var(--color-muted)' }}>
-                    Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
-                  </small>
+                  <>
+                    <small style={{ color: 'var(--color-muted)' }}>
+                      Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
+                    </small>
+                    <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.35rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <input
+                          type="radio"
+                          name="restockMode"
+                          value="replace"
+                          checked={restockMode === 'replace'}
+                          onChange={() => setRestockMode('replace')}
+                        />
+                        Sostituzione (materiale perso): aumenta solo disponibile (totale invariato)
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                        <input
+                          type="radio"
+                          name="restockMode"
+                          value="stock"
+                          checked={restockMode === 'stock'}
+                          onChange={() => setRestockMode('stock')}
+                        />
+                        Aggiunta scorte: aumenta totale e disponibile
+                      </label>
+                    </div>
+                  </>
                 )}
               </>
             )}
@@ -350,13 +391,13 @@ export default function Magazzino() {
                 disabled={Boolean(selectedMaterialId) && !editingId}
               />
             )}
-            <input
-              placeholder="Nome"
-              value={form.name}
-              onChange={(event) => handleChange('name', event.target.value)}
-              required
-              disabled={Boolean(selectedMaterialId) && !editingId}
-            />
+              <input
+                placeholder="Nome"
+                value={form.name}
+                onChange={(event) => handleChange('name', event.target.value)}
+                required
+                disabled={Boolean(selectedMaterialId) && !editingId}
+              />
             <textarea
               placeholder="Descrizione"
               value={form.description}
