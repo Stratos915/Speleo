@@ -5,7 +5,7 @@ import useAuth from '../context/useAuth.js';
 
 export default function ApprovalPending() {
   const navigate = useNavigate();
-  const { logout, user } = useAuth();
+  const { logout, user, refreshProfileFlags } = useAuth();
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState('');
@@ -98,6 +98,7 @@ export default function ApprovalPending() {
         .maybeSingle();
       if (error) throw error;
       setProfile(data ?? null);
+      await refreshProfileFlags();
       if ((data?.approval_status ?? 'pending') === 'approved') {
         navigate('/dashboard', { replace: true });
         return;

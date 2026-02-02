@@ -5,6 +5,7 @@ create table if not exists public.loans (
   uscita_id text,
   reserved_until date,
   borrower_name text not null,
+  borrower_email text,
   borrower_member_number integer,
   quantity integer not null check (quantity > 0),
   status text not null default 'in_corso',

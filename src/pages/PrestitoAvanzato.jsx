@@ -223,6 +223,7 @@ export default function PrestitoAvanzato() {
       uscita_id: uscitaIdParam || null,
       reserved_until: reservedUntilIso,
       borrower_name: borrower,
+      borrower_email: user?.email ?? null,
       borrower_member_number: form.borrowerMemberNumber ? Number(form.borrowerMemberNumber) : null,
       quantity,
       notes: form.notes.trim() || null,

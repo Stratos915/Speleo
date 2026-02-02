@@ -126,7 +126,7 @@ export default function UscitaDettaglio() {
       try {
         const { data, error: loansError } = await supabase
           .from('loans')
-          .select('id,equipment_id,borrower_name,quantity,status,delivered_at,returned_at,notes,equipment:equipment_id(name)')
+          .select('id,equipment_id,borrower_name,borrower_email,quantity,status,delivered_at,returned_at,notes,equipment:equipment_id(name)')
           .eq('uscita_id', id)
           .order('delivered_at', { ascending: false });
         if (loansError) throw loansError;
@@ -152,7 +152,8 @@ export default function UscitaDettaglio() {
   }, [id]);
 
   async function handleLoanReturn(loan) {
-    const isOwner = loan.borrower_name && user?.email && loan.borrower_name === user.email;
+    const loanEmail = loan.borrower_email || loan.borrower_name;
+    const isOwner = loanEmail && user?.email && loanEmail === user.email;
     if (!canManageLoans && !isOwner) return;
     setLoanProcessingId(loan.id);
     setUscitaLoansError('');
@@ -674,7 +675,7 @@ export default function UscitaDettaglio() {
                       </p>
                     )}
                     {loan.status === 'in_corso' &&
-                      (canManageLoans || (user?.email && loan.borrower_name === user.email)) && (
+                      (canManageLoans || (user?.email && (loan.borrower_email || loan.borrower_name) === user.email)) && (
                         <button
                           type="button"
                           style={{ marginTop: '0.35rem' }}

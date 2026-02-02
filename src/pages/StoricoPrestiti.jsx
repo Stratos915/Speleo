@@ -48,7 +48,7 @@ export default function StoricoPrestiti() {
         supabase
           .from('loans')
           .select(
-            'id,equipment_id,borrower_name,borrower_member_number,quantity,status,delivered_at,returned_at,notes,uscita_id,reserved_until',
+            'id,equipment_id,borrower_name,borrower_email,borrower_member_number,quantity,status,delivered_at,returned_at,notes,uscita_id,reserved_until',
           )
           .order('delivered_at', { ascending: false }),
         getEquipment(),
@@ -81,7 +81,8 @@ export default function StoricoPrestiti() {
   }, [loans, filter, query, equipmentMap]);
 
   async function handleRestitution(loan) {
-    const isOwner = loan.borrower_name && user?.email && loan.borrower_name === user.email;
+    const loanEmail = loan.borrower_email || loan.borrower_name;
+    const isOwner = loanEmail && user?.email && loanEmail === user.email;
     if (!canManageLoans && !isOwner) return;
     setProcessingId(loan.id);
     setError('');
@@ -219,7 +220,8 @@ export default function StoricoPrestiti() {
                       Apri uscita
                     </button>
                   )}
-                  {(canManageLoans || (user?.email && loan.borrower_name === user.email)) && loan.status === 'in_corso' && (
+                  {(canManageLoans || (user?.email && (loan.borrower_email || loan.borrower_name) === user.email)) &&
+                    loan.status === 'in_corso' && (
                     <button type="button" disabled={processingId === loan.id} onClick={() => handleRestitution(loan)}>
                       {processingId === loan.id ? 'Aggiornamento...' : 'Restituisci'}
                     </button>

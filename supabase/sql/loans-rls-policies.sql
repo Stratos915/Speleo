@@ -1,6 +1,12 @@
 -- RLS policies for loans to avoid recursive checks and allow members to manage their own loans
 alter table public.loans enable row level security;
 
+-- Ensure borrower_email exists for RLS checks (safe for existing data)
+alter table public.loans
+  add column if not exists borrower_email text;
+
+create index if not exists loans_borrower_email_idx on public.loans (borrower_email);
+
 -- Helper: resolve role from profiles (security definer)
 create or replace function public.current_user_role()
 returns text
@@ -25,6 +31,7 @@ create policy loans_select on public.loans
 for select to authenticated
 using (
   public.current_user_role() in ('admin', 'presidente', 'magazziniere')
+  or borrower_email = coalesce(auth.jwt() ->> 'email', '')
   or borrower_name = coalesce(auth.jwt() ->> 'email', '')
 );
 
@@ -33,6 +40,7 @@ create policy loans_insert on public.loans
 for insert to authenticated
 with check (
   public.current_user_role() in ('admin', 'presidente', 'magazziniere')
+  or borrower_email = coalesce(auth.jwt() ->> 'email', '')
   or borrower_name = coalesce(auth.jwt() ->> 'email', '')
 );
 
@@ -41,10 +49,12 @@ create policy loans_update on public.loans
 for update to authenticated
 using (
   public.current_user_role() in ('admin', 'presidente', 'magazziniere')
+  or borrower_email = coalesce(auth.jwt() ->> 'email', '')
   or borrower_name = coalesce(auth.jwt() ->> 'email', '')
 )
 with check (
   public.current_user_role() in ('admin', 'presidente', 'magazziniere')
+  or borrower_email = coalesce(auth.jwt() ->> 'email', '')
   or borrower_name = coalesce(auth.jwt() ->> 'email', '')
 );
 

@@ -98,23 +98,22 @@ export default function AuthProvider({ children }) {
     };
   }, [applySession]);
 
-  useEffect(() => {
-    let ignore = false;
-    async function syncProfileFlags() {
-      if (!user) {
+  const refreshProfileFlags = useCallback(
+    async (targetUser = user) => {
+      if (!targetUser) {
         setProfileNeedsPasswordReset(false);
         setApprovalStatus(null);
-        return;
+        return null;
       }
-      if (SUPER_ADMIN_EMAILS.includes((user.email ?? '').toLowerCase())) {
+      if (SUPER_ADMIN_EMAILS.includes((targetUser.email ?? '').toLowerCase())) {
         setApprovalStatus('approved');
         setRole('admin');
         setProfileNeedsPasswordReset(false);
-        return;
+        return { approval_status: 'approved', role: 'admin', password_initialized: true };
       }
       const provider =
-        user.app_metadata?.provider ??
-        user.identities?.[0]?.provider ??
+        targetUser.app_metadata?.provider ??
+        targetUser.identities?.[0]?.provider ??
         null;
       if (provider && provider !== 'email') {
         setProfileNeedsPasswordReset(false);
@@ -122,29 +121,38 @@ export default function AuthProvider({ children }) {
       const { data, error } = await supabase
         .from('profiles')
         .select('password_initialized, approval_status, role')
-        .eq('id', user.id)
+        .eq('id', targetUser.id)
         .maybeSingle();
-      if (!ignore) {
-        if (error) {
-          console.warn('[AuthContext] impossibile leggere profilo:', error.message);
-          setProfileNeedsPasswordReset(false);
-          setApprovalStatus(null);
-        } else {
-          if (data?.role) setRole(data.role);
-          setApprovalStatus(data?.approval_status ?? 'pending');
-          if (provider && provider !== 'email') {
-            setProfileNeedsPasswordReset(false);
-          } else {
-            setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
-          }
-        }
+      if (error) {
+        console.warn('[AuthContext] impossibile leggere profilo:', error.message);
+        setProfileNeedsPasswordReset(false);
+        setApprovalStatus(null);
+        return null;
       }
+      if (data?.role) setRole(data.role);
+      setApprovalStatus(data?.approval_status ?? 'pending');
+      if (provider && provider !== 'email') {
+        setProfileNeedsPasswordReset(false);
+      } else {
+        setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
+      }
+      return data ?? null;
+    },
+    [user],
+  );
+
+  useEffect(() => {
+    let ignore = false;
+    async function syncProfileFlags() {
+      const data = await refreshProfileFlags(user);
+      if (ignore) return;
+      return data;
     }
     syncProfileFlags();
     return () => {
       ignore = true;
     };
-  }, [user]);
+  }, [refreshProfileFlags, user]);
 
   const markPasswordInitialized = useCallback(() => setProfileNeedsPasswordReset(false), []);
 
@@ -160,6 +168,7 @@ export default function AuthProvider({ children }) {
       login,
       logout,
       markPasswordInitialized,
+      refreshProfileFlags,
     }),
     [
       session,
@@ -171,6 +180,7 @@ export default function AuthProvider({ children }) {
       profileNeedsPasswordReset,
       approvalStatus,
       markPasswordInitialized,
+      refreshProfileFlags,
     ],
   );
 

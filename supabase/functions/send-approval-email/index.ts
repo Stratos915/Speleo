@@ -87,6 +87,17 @@ serve(async (req) => {
       ? SMTP_SECURE_ENV.toLowerCase() === "true"
       : SMTP_PORT === 465;
 
+  // Log only presence (not values) to debug missing secrets safely
+  console.info("SMTP config presence", {
+    SMTP_HOST: Boolean(SMTP_HOST),
+    SMTP_PORT: Number.isNaN(SMTP_PORT) ? "NaN" : SMTP_PORT,
+    SMTP_USER: Boolean(SMTP_USER),
+    SMTP_PASS: Boolean(SMTP_PASS),
+    SMTP_FROM: Boolean(SMTP_FROM),
+    SMTP_SECURE,
+    SMTP_SECURE_ENV: SMTP_SECURE_ENV !== undefined,
+  });
+
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !SMTP_FROM || Number.isNaN(SMTP_PORT)) {
     return json({ error: "Missing SMTP configuration" }, 500);
   }
