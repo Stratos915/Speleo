@@ -62,7 +62,6 @@ export default function Uscite() {
   const [supportsClosedAt, setSupportsClosedAt] = useState(false);
   const canReopenUscita = role === 'admin' || role === 'presidente';
   const canDeleteUscita = role === 'admin' || role === 'presidente';
-  const canOpenPrestiti = role !== 'socio';
 
   const loadUscite = useCallback(async () => {
     setLoading(true);
@@ -294,19 +293,18 @@ export default function Uscite() {
       )}
 
       {showForm && canEditUscite && (
-        <UscitaForm
-          onSubmit={handleCreate}
-          submitting={formSubmitting}
-          errorMessage={formError}
-          successMessage={formSuccess}
-          onCancel={() => {
-            setShowForm(false);
-            setFormSuccess('');
-            setFormError('');
-          }}
-          membersList={members}
-          canOpenPrestiti={canOpenPrestiti}
-        />
+      <UscitaForm
+        onSubmit={handleCreate}
+        submitting={formSubmitting}
+        errorMessage={formError}
+        successMessage={formSuccess}
+        onCancel={() => {
+          setShowForm(false);
+          setFormSuccess('');
+          setFormError('');
+        }}
+        membersList={members}
+      />
       )}
 
       {loading ? (
@@ -320,7 +318,7 @@ export default function Uscite() {
             const uscitaDate = uscita.data ? new Date(uscita.data) : null;
             const isPast = uscitaDate && uscitaDate < new Date();
             const isClosed = uscita.status === 'chiusa';
-            const disableLoanButton = isClosed || !canOpenPrestiti;
+            const disableLoanButton = isClosed;
             return (
               <article className="card" key={uscita.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -374,11 +372,7 @@ export default function Uscite() {
                     onClick={() => goToPrestito(uscita)}
                     disabled={disableLoanButton}
                     title={
-                      disableLoanButton
-                        ? isClosed
-                          ? 'Uscita chiusa: non è possibile registrare materiale'
-                          : 'Non hai i permessi per aprire il modulo prestiti.'
-                        : undefined
+                      disableLoanButton ? 'Uscita chiusa: non è possibile registrare materiale' : undefined
                     }
                   >
                     Materiale necessario

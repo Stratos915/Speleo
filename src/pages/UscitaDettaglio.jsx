@@ -33,7 +33,6 @@ export default function UscitaDettaglio() {
   const canEditUscite = canEditSection('uscita');
   const canManageLoans = canEditSection('prestiti');
   const isSocio = role === 'socio';
-  const canOpenPrestiti = role !== 'socio';
   const [uscita, setUscita] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -619,7 +618,6 @@ export default function UscitaDettaglio() {
                 setSuccess('');
               }}
               submitLabel="Aggiorna uscita"
-              canOpenPrestiti={canOpenPrestiti}
             />
           ) : (
             <>
@@ -641,12 +639,10 @@ export default function UscitaDettaglio() {
                   onClick={() =>
                     navigate(prestitoParams ? `/prestito-avanzato?${prestitoParams}` : '/prestito-avanzato')
                   }
-                  disabled={checkingLoans || disableLoanButton || !canOpenPrestiti}
+                  disabled={checkingLoans || disableLoanButton}
                   title={
                     checkingLoans
                       ? 'Verifico lo stato dei prestiti collegati...'
-                      : !canOpenPrestiti
-                      ? 'Non hai i permessi per aprire il modulo prestiti.'
                       : disableLoanButton
                       ? 'Uscita conclusa: tutti i prestiti risultano chiusi'
                       : undefined
