@@ -29,6 +29,7 @@ export default function Magazzino() {
   const [form, setForm] = useState(emptyMaterial);
   const [editingId, setEditingId] = useState(null);
   const [editingBorrowed, setEditingBorrowed] = useState(0);
+  const [selectedMaterialId, setSelectedMaterialId] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [supportsEquipmentNumber, setSupportsEquipmentNumber] = useState(true);
@@ -108,6 +109,33 @@ export default function Magazzino() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
+  const selectedMaterial = useMemo(() => {
+    if (!selectedMaterialId) return null;
+    return materials.find((item) => String(item.id) === selectedMaterialId) ?? null;
+  }, [materials, selectedMaterialId]);
+
+  useEffect(() => {
+    if (!selectedMaterial || editingId) return;
+    const total = Number(
+      selectedMaterial[quantityField] ?? selectedMaterial.quantity ?? selectedMaterial.total_quantity ?? 0,
+    );
+    const available = Number(
+      selectedMaterial[availableField] ??
+        selectedMaterial.quantity_available ??
+        selectedMaterial.available_quantity ??
+        total,
+    );
+    setForm((prev) => ({
+      ...prev,
+      equipment_number: supportsEquipmentNumber ? selectedMaterial.equipment_number ?? '' : '',
+      name: selectedMaterial.name ?? prev.name,
+      description: selectedMaterial.description ?? prev.description,
+      quantity: '',
+      notes: notesField ? selectedMaterial[notesField] ?? '' : prev.notes,
+    }));
+    setEditingBorrowed(Math.max(total - available, 0));
+  }, [selectedMaterial, editingId, quantityField, availableField, notesField, supportsEquipmentNumber]);
+
   async function handleSubmit(event) {
     event.preventDefault();
     setError('');
@@ -118,6 +146,7 @@ export default function Magazzino() {
     };
     const totalQuantity = Number(form.quantity);
     const notesValue = form.notes.trim() || null;
+    const isRestock = Boolean(selectedMaterial && !editingId);
     if (supportsEquipmentNumber) {
       payload.equipment_number = form.equipment_number ? Number(form.equipment_number) : null;
     }
@@ -134,12 +163,32 @@ export default function Magazzino() {
       if (availableField) {
         payload[availableField] = newAvailable;
       }
+    } else if (isRestock && selectedMaterial) {
+      const currentTotal = Number(
+        selectedMaterial[quantityField] ?? selectedMaterial.quantity ?? selectedMaterial.total_quantity ?? 0,
+      );
+      const currentAvailable = Number(
+        selectedMaterial[availableField] ??
+          selectedMaterial.quantity_available ??
+          selectedMaterial.available_quantity ??
+          currentTotal,
+      );
+      const updatedTotal = currentTotal + totalQuantity;
+      const updatedAvailable = currentAvailable + totalQuantity;
+      payload[quantityField] = updatedTotal;
+      if (availableField) {
+        payload[availableField] = updatedAvailable;
+      }
+      if (notesField && notesValue) {
+        const existingNotes = selectedMaterial[notesField] ?? '';
+        payload.notes = existingNotes ? `${existingNotes}\n${notesValue}` : notesValue;
+      }
     } else {
       if (availableField) {
         payload[availableField] = totalQuantity;
       }
     }
-    if (notesField) {
+    if (notesField && !isRestock) {
       payload.notes = notesValue;
     }
 
@@ -153,6 +202,17 @@ export default function Magazzino() {
             entity: 'equipment',
             entityId: savedEquipment.id,
             details: { name: savedEquipment.name },
+          },
+          user,
+        );
+      } else if (isRestock && selectedMaterial) {
+        savedEquipment = await updateEquipment(selectedMaterial.id, payload);
+        safeLogActivity(
+          {
+            action: 'restock_equipment',
+            entity: 'equipment',
+            entityId: savedEquipment.id,
+            details: { name: savedEquipment.name, added: totalQuantity },
           },
           user,
         );
@@ -171,6 +231,7 @@ export default function Magazzino() {
       setForm(emptyMaterial);
       setEditingId(null);
       setEditingBorrowed(0);
+      setSelectedMaterialId('');
       loadMaterials();
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio.');
@@ -188,6 +249,7 @@ export default function Magazzino() {
     );
     setEditingId(material.id);
     setEditingBorrowed(Math.max(total - available, 0));
+    setSelectedMaterialId('');
     setForm({
       equipment_number: supportsEquipmentNumber ? material.equipment_number ?? '' : '',
       name: material.name ?? '',
@@ -200,6 +262,7 @@ export default function Magazzino() {
   function cancelEdit() {
     setEditingId(null);
     setEditingBorrowed(0);
+    setSelectedMaterialId('');
     setForm(emptyMaterial);
   }
 
@@ -251,6 +314,32 @@ export default function Magazzino() {
         <div className="card" ref={formRef}>
           <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
             <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
+            {!editingId && (
+              <>
+                <label htmlFor="materialSelect">Aggiungi quantità a materiale esistente (opzionale)</label>
+                <select
+                  id="materialSelect"
+                  value={selectedMaterialId}
+                  onChange={(event) => setSelectedMaterialId(event.target.value)}
+                >
+                  <option value="">-- Nuovo materiale --</option>
+                  {materials.map((material, index) => {
+                    const optionKey = material?.id ?? `material-${index}`;
+                    const displayId = material?.equipment_number ?? index + 1;
+                    return (
+                      <option key={optionKey} value={String(material.id)}>
+                        {material.name ?? 'Materiale senza nome'} (ID #{displayId})
+                      </option>
+                    );
+                  })}
+                </select>
+                {selectedMaterialId && (
+                  <small style={{ color: 'var(--color-muted)' }}>
+                    Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
+                  </small>
+                )}
+              </>
+            )}
             {supportsEquipmentNumber && (
               <input
                 type="number"
@@ -258,6 +347,7 @@ export default function Magazzino() {
                 placeholder="Codice materiale (opzionale)"
                 value={form.equipment_number}
                 onChange={(event) => handleChange('equipment_number', event.target.value)}
+                disabled={Boolean(selectedMaterialId) && !editingId}
               />
             )}
             <input
@@ -265,11 +355,13 @@ export default function Magazzino() {
               value={form.name}
               onChange={(event) => handleChange('name', event.target.value)}
               required
+              disabled={Boolean(selectedMaterialId) && !editingId}
             />
             <textarea
               placeholder="Descrizione"
               value={form.description}
               onChange={(event) => handleChange('description', event.target.value)}
+              disabled={Boolean(selectedMaterialId) && !editingId}
             />
             <label htmlFor="notes">Note (acquisti, sostituzioni, altro)</label>
             <textarea
@@ -291,7 +383,7 @@ export default function Magazzino() {
             <input
               type="number"
               min={0}
-              placeholder="Quantità"
+              placeholder={selectedMaterialId && !editingId ? 'Quantità da aggiungere' : 'Quantità'}
               value={form.quantity}
               onChange={(event) => handleChange('quantity', event.target.value)}
               required
@@ -388,6 +480,7 @@ export default function Magazzino() {
             setShowForm((prev) => !prev);
             setEditingId(null);
             setEditingBorrowed(0);
+            setSelectedMaterialId('');
             setForm(emptyMaterial);
           }}
         >
