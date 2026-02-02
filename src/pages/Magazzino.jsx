@@ -351,33 +351,45 @@ export default function Magazzino() {
                   )}
                 </div>
                 {selectedMaterialId && (
-                  <>
+                  <div
+                    style={{
+                      marginTop: '0.5rem',
+                      padding: '0.6rem 0.75rem',
+                      border: '1px solid rgba(0,0,0,0.08)',
+                      borderRadius: '0.75rem',
+                      background: '#f8f9fa',
+                      display: 'grid',
+                      gap: '0.4rem',
+                    }}
+                  >
                     <small style={{ color: 'var(--color-muted)' }}>
                       Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
                     </small>
-                    <div style={{ display: 'grid', gap: '0.25rem', marginTop: '0.35rem' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <input
-                          type="radio"
-                          name="restockMode"
-                          value="replace"
-                          checked={restockMode === 'replace'}
-                          onChange={() => setRestockMode('replace')}
-                        />
-                        Sostituzione (materiale perso): aumenta solo disponibile (totale invariato)
-                      </label>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                        <input
-                          type="radio"
-                          name="restockMode"
-                          value="stock"
-                          checked={restockMode === 'stock'}
-                          onChange={() => setRestockMode('stock')}
-                        />
-                        Aggiunta scorte: aumenta totale e disponibile
-                      </label>
-                    </div>
-                  </>
+                    <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
+                      <input
+                        type="radio"
+                        name="restockMode"
+                        value="replace"
+                        checked={restockMode === 'replace'}
+                        onChange={() => setRestockMode('replace')}
+                      />
+                      <span>
+                        <strong>Sostituzione</strong> (materiale perso): aumenta solo disponibile (totale invariato)
+                      </span>
+                    </label>
+                    <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
+                      <input
+                        type="radio"
+                        name="restockMode"
+                        value="stock"
+                        checked={restockMode === 'stock'}
+                        onChange={() => setRestockMode('stock')}
+                      />
+                      <span>
+                        <strong>Aggiunta scorte</strong>: aumenta totale e disponibile
+                      </span>
+                    </label>
+                  </div>
                 )}
               </>
             )}
