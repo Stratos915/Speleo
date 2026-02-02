@@ -24,6 +24,8 @@ export default function StoricoPrestiti() {
   const [error, setError] = useState('');
   const [processingId, setProcessingId] = useState(null);
   const [query, setQuery] = useState('');
+  const [returnMissingById, setReturnMissingById] = useState({});
+  const [returnNotesById, setReturnNotesById] = useState({});
 
   useEffect(() => {
     loadLoans();
@@ -48,7 +50,7 @@ export default function StoricoPrestiti() {
         supabase
           .from('loans')
           .select(
-            'id,equipment_id,borrower_name,borrower_email,borrower_member_number,quantity,status,delivered_at,returned_at,notes,uscita_id,reserved_until',
+            'id,equipment_id,borrower_name,borrower_email,borrower_member_number,quantity,status,delivered_at,returned_at,notes,uscita_id,reserved_until,missing_quantity,missing_notes',
           )
           .order('delivered_at', { ascending: false }),
         getEquipment(),
@@ -87,10 +89,23 @@ export default function StoricoPrestiti() {
     setProcessingId(loan.id);
     setError('');
     const now = new Date().toISOString();
+    const missingRaw = returnMissingById[loan.id];
+    const missingQuantity = missingRaw === '' || missingRaw === undefined ? 0 : Number(missingRaw);
+    if (Number.isNaN(missingQuantity) || missingQuantity < 0 || missingQuantity > Number(loan.quantity)) {
+      setError('Quantita mancante non valida.');
+      setProcessingId(null);
+      return;
+    }
+    const missingNotes = returnNotesById[loan.id]?.trim() || null;
 
     const { error: loanError } = await supabase
       .from('loans')
-      .update({ status: 'chiuso', returned_at: now })
+      .update({
+        status: 'chiuso',
+        returned_at: now,
+        missing_quantity: missingQuantity,
+        missing_notes: missingNotes,
+      })
       .eq('id', loan.id);
     if (loanError) {
       setError('Impossibile chiudere il prestito. Riprova.');
@@ -194,10 +209,42 @@ export default function StoricoPrestiti() {
                     restituito il: {formatDate(loan.returned_at)}
                   </p>
                 )}
+                {loan.status === 'chiuso' && loan.missing_quantity > 0 && (
+                  <p style={{ margin: '0.25rem 0', color: '#c92a2a' }}>
+                    Materiale mancante: x{loan.missing_quantity}
+                    {loan.missing_notes ? ` · ${loan.missing_notes}` : ''}
+                  </p>
+                )}
                 {reservedUntil && (
                   <p style={{ margin: '0.25rem 0', color: '#d9480f' }}>Disponibile in sede entro {reservedUntil}</p>
                 )}
                 {loan.notes && <p style={{ fontStyle: 'italic' }}>Note: {loan.notes}</p>}
+                {(canManageLoans || (user?.email && (loan.borrower_email || loan.borrower_name) === user.email)) &&
+                  loan.status === 'in_corso' && (
+                  <div style={{ display: 'grid', gap: '0.35rem', marginTop: '0.35rem' }}>
+                    <label style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
+                      Quantita mancante (0 se tutto restituito)
+                      <input
+                        type="number"
+                        min={0}
+                        max={loan.quantity}
+                        value={returnMissingById[loan.id] ?? ''}
+                        onChange={(event) =>
+                          setReturnMissingById((prev) => ({ ...prev, [loan.id]: event.target.value }))
+                        }
+                        style={{ marginTop: '0.25rem' }}
+                      />
+                    </label>
+                    <textarea
+                      rows={2}
+                      placeholder="Note materiale mancante (facoltative)"
+                      value={returnNotesById[loan.id] ?? ''}
+                      onChange={(event) =>
+                        setReturnNotesById((prev) => ({ ...prev, [loan.id]: event.target.value }))
+                      }
+                    />
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
                   {loan.uscita_id && (
                     <button

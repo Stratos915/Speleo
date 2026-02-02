@@ -32,6 +32,8 @@ export default function UscitaDettaglio() {
   const { canEditSection } = usePermissions();
   const canEditUscite = canEditSection('uscita');
   const canManageLoans = canEditSection('prestiti');
+  const isSocio = role === 'socio';
+  const canOpenPrestiti = role !== 'socio';
   const [uscita, setUscita] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -51,6 +53,8 @@ export default function UscitaDettaglio() {
   const [uscitaLoans, setUscitaLoans] = useState([]);
   const [uscitaLoansLoading, setUscitaLoansLoading] = useState(true);
   const [uscitaLoansError, setUscitaLoansError] = useState('');
+  const [returnMissingById, setReturnMissingById] = useState({});
+  const [returnNotesById, setReturnNotesById] = useState({});
   const [loanProcessingId, setLoanProcessingId] = useState(null);
   const [statusChanging, setStatusChanging] = useState(false);
   const [statusError, setStatusError] = useState('');
@@ -125,7 +129,7 @@ export default function UscitaDettaglio() {
       try {
         const { data, error: loansError } = await supabase
           .from('loans')
-          .select('id,equipment_id,borrower_name,borrower_email,quantity,status,delivered_at,returned_at,notes,equipment:equipment_id(name)')
+          .select('id,equipment_id,borrower_name,borrower_email,quantity,status,delivered_at,returned_at,notes,missing_quantity,missing_notes,equipment:equipment_id(name)')
           .eq('uscita_id', id)
           .order('delivered_at', { ascending: false });
         if (loansError) throw loansError;
@@ -157,9 +161,22 @@ export default function UscitaDettaglio() {
     setLoanProcessingId(loan.id);
     setUscitaLoansError('');
     const now = new Date().toISOString();
+    const missingRaw = returnMissingById[loan.id];
+    const missingQuantity = missingRaw === '' || missingRaw === undefined ? 0 : Number(missingRaw);
+    if (Number.isNaN(missingQuantity) || missingQuantity < 0 || missingQuantity > Number(loan.quantity)) {
+      setUscitaLoansError('Quantita mancante non valida.');
+      setLoanProcessingId(null);
+      return;
+    }
+    const missingNotes = returnNotesById[loan.id]?.trim() || null;
     const { error: loanError } = await supabase
       .from('loans')
-      .update({ status: 'chiuso', returned_at: now })
+      .update({
+        status: 'chiuso',
+        returned_at: now,
+        missing_quantity: missingQuantity,
+        missing_notes: missingNotes,
+      })
       .eq('id', loan.id);
     if (loanError) {
       setUscitaLoansError('Impossibile chiudere il prestito.');
@@ -168,7 +185,17 @@ export default function UscitaDettaglio() {
     }
     setLoanProcessingId(null);
     setUscitaLoans((prev) =>
-      prev.map((item) => (item.id === loan.id ? { ...item, status: 'chiuso', returned_at: now } : item)),
+      prev.map((item) =>
+        item.id === loan.id
+          ? {
+              ...item,
+              status: 'chiuso',
+              returned_at: now,
+              missing_quantity: missingQuantity,
+              missing_notes: missingNotes,
+            }
+          : item,
+      ),
     );
     setHasOpenLoans((prev) => (prev ? prev : false));
   }
@@ -228,6 +255,10 @@ export default function UscitaDettaglio() {
   }
 
   async function handleStatusToggle(nextStatus) {
+    if (nextStatus === 'chiusa' && isSocio && hasOpenLoans) {
+      setStatusError('Per chiudere l\'uscita devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).');
+      return;
+    }
     setStatusChanging(true);
     setStatusError('');
     try {
@@ -500,7 +531,12 @@ export default function UscitaDettaglio() {
                 type="button"
                 style={{ background: '#2b8a3e' }}
                 onClick={() => handleStatusToggle('chiusa')}
-                disabled={statusChanging}
+                disabled={statusChanging || (isSocio && hasOpenLoans)}
+                title={
+                  isSocio && hasOpenLoans
+                    ? 'Chiudi l\'uscita solo dopo aver restituito tutto il materiale collegato.'
+                    : undefined
+                }
               >
                 {statusChanging ? 'Aggiornamento...' : 'Chiudi uscita'}
               </button>
@@ -583,6 +619,7 @@ export default function UscitaDettaglio() {
                 setSuccess('');
               }}
               submitLabel="Aggiorna uscita"
+              canOpenPrestiti={canOpenPrestiti}
             />
           ) : (
             <>
@@ -604,10 +641,12 @@ export default function UscitaDettaglio() {
                   onClick={() =>
                     navigate(prestitoParams ? `/prestito-avanzato?${prestitoParams}` : '/prestito-avanzato')
                   }
-                  disabled={checkingLoans || disableLoanButton}
+                  disabled={checkingLoans || disableLoanButton || !canOpenPrestiti}
                   title={
                     checkingLoans
                       ? 'Verifico lo stato dei prestiti collegati...'
+                      : !canOpenPrestiti
+                      ? 'Non hai i permessi per aprire il modulo prestiti.'
                       : disableLoanButton
                       ? 'Uscita conclusa: tutti i prestiti risultano chiusi'
                       : undefined
@@ -619,10 +658,12 @@ export default function UscitaDettaglio() {
                   type="button"
                   style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
                   onClick={() => handleStatusToggle(isClosed ? 'aperta' : 'chiusa')}
-                  disabled={statusChanging || (isClosed && !canReopenUscita)}
+                  disabled={statusChanging || (isClosed && !canReopenUscita) || (!isClosed && isSocio && hasOpenLoans)}
                   title={
                     isClosed && !canReopenUscita
                       ? 'Solo admin e presidente possono riaprire un\'uscita chiusa.'
+                      : !isClosed && isSocio && hasOpenLoans
+                      ? 'Chiudi l\'uscita solo dopo aver restituito tutto il materiale collegato.'
                       : undefined
                   }
                 >
@@ -664,16 +705,45 @@ export default function UscitaDettaglio() {
                         restituito il {loan.returned_at ? new Date(loan.returned_at).toLocaleString('it-IT') : '—'}
                       </p>
                     )}
+                    {loan.status === 'chiuso' && loan.missing_quantity > 0 && (
+                      <p style={{ margin: '0.25rem 0', color: '#c92a2a' }}>
+                        Materiale mancante: x{loan.missing_quantity}
+                        {loan.missing_notes ? ` · ${loan.missing_notes}` : ''}
+                      </p>
+                    )}
                     {loan.status === 'in_corso' &&
                       (canManageLoans || (user?.email && (loan.borrower_email || loan.borrower_name) === user.email)) && (
-                        <button
-                          type="button"
-                          style={{ marginTop: '0.35rem' }}
-                          disabled={loanProcessingId === loan.id}
-                          onClick={() => handleLoanReturn(loan)}
-                        >
-                          {loanProcessingId === loan.id ? 'Aggiornamento...' : 'Restituisci materiale'}
-                        </button>
+                        <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.35rem' }}>
+                          <label style={{ fontSize: '0.85rem', color: 'var(--color-muted)' }}>
+                            Quantita mancante (0 se tutto restituito)
+                            <input
+                              type="number"
+                              min={0}
+                              max={loan.quantity}
+                              value={returnMissingById[loan.id] ?? ''}
+                              onChange={(event) =>
+                                setReturnMissingById((prev) => ({ ...prev, [loan.id]: event.target.value }))
+                              }
+                              style={{ marginTop: '0.25rem' }}
+                            />
+                          </label>
+                          <textarea
+                            rows={2}
+                            placeholder="Note materiale mancante (facoltative)"
+                            value={returnNotesById[loan.id] ?? ''}
+                            onChange={(event) =>
+                              setReturnNotesById((prev) => ({ ...prev, [loan.id]: event.target.value }))
+                            }
+                          />
+                          <button
+                            type="button"
+                            style={{ marginTop: '0.15rem' }}
+                            disabled={loanProcessingId === loan.id}
+                            onClick={() => handleLoanReturn(loan)}
+                          >
+                            {loanProcessingId === loan.id ? 'Aggiornamento...' : 'Restituisci materiale'}
+                          </button>
+                        </div>
                       )}
                   </li>
                 ))}

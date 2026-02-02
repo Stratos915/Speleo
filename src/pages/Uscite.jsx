@@ -62,6 +62,7 @@ export default function Uscite() {
   const [supportsClosedAt, setSupportsClosedAt] = useState(false);
   const canReopenUscita = role === 'admin' || role === 'presidente';
   const canDeleteUscita = role === 'admin' || role === 'presidente';
+  const canOpenPrestiti = role !== 'socio';
 
   const loadUscite = useCallback(async () => {
     setLoading(true);
@@ -130,6 +131,10 @@ export default function Uscite() {
   }
 
   async function handleStatusChange(uscita, nextStatus) {
+    if (nextStatus === 'chiusa' && role === 'socio' && activeLoansMap.get(uscita.id)) {
+      setError('Per chiudere l\'uscita devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).');
+      return;
+    }
     setStatusChangingId(uscita.id);
     setError('');
     try {
@@ -300,6 +305,7 @@ export default function Uscite() {
             setFormError('');
           }}
           membersList={members}
+          canOpenPrestiti={canOpenPrestiti}
         />
       )}
 
@@ -314,7 +320,7 @@ export default function Uscite() {
             const uscitaDate = uscita.data ? new Date(uscita.data) : null;
             const isPast = uscitaDate && uscitaDate < new Date();
             const isClosed = uscita.status === 'chiusa';
-            const disableLoanButton = isClosed;
+            const disableLoanButton = isClosed || !canOpenPrestiti;
             return (
               <article className="card" key={uscita.id}>
               <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.5rem' }}>
@@ -369,7 +375,9 @@ export default function Uscite() {
                     disabled={disableLoanButton}
                     title={
                       disableLoanButton
-                        ? 'Uscita chiusa: non è possibile registrare materiale'
+                        ? isClosed
+                          ? 'Uscita chiusa: non è possibile registrare materiale'
+                          : 'Non hai i permessi per aprire il modulo prestiti.'
                         : undefined
                     }
                   >

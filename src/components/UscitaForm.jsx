@@ -54,6 +54,7 @@ export default function UscitaForm({
   onCancel,
   submitLabel = 'Salva uscita',
   membersList = null,
+  canOpenPrestiti = true,
 }) {
   const navigate = useNavigate();
   const [form, setForm] = useState(() => ({
@@ -438,6 +439,8 @@ export default function UscitaForm({
             type="button"
             onClick={() => navigate(`/prestito-avanzato?${prestitoParams}`)}
             style={{ background: 'var(--color-primary-dark)' }}
+            disabled={!canOpenPrestiti}
+            title={!canOpenPrestiti ? 'Non hai i permessi per aprire il modulo prestiti.' : undefined}
           >
             Apri modulo prestiti
           </button>
