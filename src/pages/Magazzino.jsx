@@ -294,7 +294,7 @@ export default function Magazzino() {
   return (
     <section className="page-grid">
       <AlertList
-        alerts={[...adminAlerts, ...(canLoanInventory ? userAlerts : [])]}
+        alerts={[...adminAlerts]}
         navigate={navigate}
         onDismiss={dismissAlert}
       />
