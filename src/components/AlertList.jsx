@@ -10,7 +10,11 @@ export default function AlertList({ alerts = [], navigate, onDismiss }) {
       return path.startsWith('/biblioteca');
     }
     if (link.startsWith('/prestito-avanzato')) {
-      return path.startsWith('/magazzino');
+      return (
+        path.startsWith('/magazzino') ||
+        path.startsWith('/prestito-avanzato') ||
+        path.startsWith('/storico-prestiti')
+      );
     }
     return true;
   });

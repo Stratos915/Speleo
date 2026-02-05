@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
 import useAuth from '../context/useAuth.js';
 import { getEquipment } from '../services/equipment.js';
 
@@ -40,6 +42,7 @@ export default function PrestitoAvanzato() {
   const [loansError, setLoansError] = useState('');
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { adminAlerts, dismissAlert } = useAlerts();
   const borrowerName = useMemo(() => {
     if (!user) return '';
     return (
@@ -251,6 +254,7 @@ export default function PrestitoAvanzato() {
 
   return (
     <section className="page-grid">
+      <AlertList alerts={adminAlerts} navigate={navigate} onDismiss={dismissAlert} />
       <header>
         <h1>Prestito avanzato</h1>
         <p>Compila il modulo per consegnare materiale a soci o squadre operative.</p>

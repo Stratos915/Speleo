@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
+import useAlerts from '../hooks/useAlerts.js';
+import AlertList from '../components/AlertList.jsx';
 import { getEquipment, getEquipmentById } from '../services/equipment.js';
 import { getUscite } from '../services/uscite.js';
 
@@ -18,6 +20,7 @@ export default function StoricoPrestiti() {
   const canManageLoans = canEditSection('prestiti');
   const canDeleteLoans = role === 'admin' || role === 'presidente';
   const navigate = useNavigate();
+  const { adminAlerts, dismissAlert } = useAlerts();
   const [loans, setLoans] = useState([]);
   const [equipmentList, setEquipmentList] = useState([]);
   const [usciteList, setUsciteList] = useState([]);
@@ -171,6 +174,7 @@ export default function StoricoPrestiti() {
 
   return (
     <section className="page-grid">
+      <AlertList alerts={adminAlerts} navigate={navigate} onDismiss={dismissAlert} />
       <div>
         <h1>Storico prestiti</h1>
         <p>Consulta tutti i prestiti registrati e gestisci le restituzioni del materiale.</p>

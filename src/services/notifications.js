@@ -45,3 +45,19 @@ export async function markNotificationSeen(notificationId) {
     console.warn('[notifications] impossibile aggiornare la notifica:', error.message ?? error);
   }
 }
+
+export async function fetchAlertCounts() {
+  try {
+    const [{ count: activeLoans }, { count: activeLibraryLoans }] = await Promise.all([
+      supabase.from('loans').select('id', { count: 'exact', head: true }).eq('status', 'in_corso'),
+      supabase.from('library_loans').select('id', { count: 'exact', head: true }).eq('status', 'active'),
+    ]);
+    return {
+      activeLoans: activeLoans ?? 0,
+      activeLibraryLoans: activeLibraryLoans ?? 0,
+    };
+  } catch (error) {
+    console.warn('[notifications] impossibile leggere i conteggi alert:', error?.message ?? error);
+    return { activeLoans: 0, activeLibraryLoans: 0 };
+  }
+}
