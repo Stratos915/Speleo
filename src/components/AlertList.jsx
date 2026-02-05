@@ -1,10 +1,24 @@
+import { useLocation } from 'react-router-dom';
 import AlertBanner from './AlertBanner.jsx';
 
 export default function AlertList({ alerts = [], navigate, onDismiss }) {
-  if (!alerts.length) return null;
+  const location = useLocation();
+  const path = location.pathname || '';
+  const scopedAlerts = alerts.filter((alert) => {
+    const link = alert.link ?? '';
+    if (link.startsWith('/biblioteca')) {
+      return path.startsWith('/biblioteca');
+    }
+    if (link.startsWith('/prestito-avanzato')) {
+      return path.startsWith('/magazzino');
+    }
+    return true;
+  });
+
+  if (!scopedAlerts.length) return null;
   return (
     <div className="page-grid" style={{ gap: '0.75rem' }}>
-      {alerts.map((alert) => {
+      {scopedAlerts.map((alert) => {
         const actions = [];
         if (alert.link) {
           actions.push({
