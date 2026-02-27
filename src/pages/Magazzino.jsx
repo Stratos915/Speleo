@@ -21,6 +21,7 @@ const emptyMaterial = {
   notes: '',
   inspection_url: '',
 };
+const INSPECTIONS_FOLDER_STORAGE_KEY = 'speleo-inspections-folder-url';
 const INSPECTIONS_FOLDER_URL = import.meta.env.VITE_INSPECTIONS_FOLDER_URL ?? '';
 
 export default function Magazzino() {
@@ -310,11 +311,29 @@ export default function Magazzino() {
   }
 
   function openInspectionsFolder() {
-    if (!INSPECTIONS_FOLDER_URL) {
-      setError('Configura VITE_INSPECTIONS_FOLDER_URL per aprire la cartella generale Ispezioni.');
+    const storedUrl = typeof window !== 'undefined'
+      ? window.localStorage.getItem(INSPECTIONS_FOLDER_STORAGE_KEY) ?? ''
+      : '';
+    const fallbackMaterialUrl =
+      materials.find((item) => String(item.inspection_url ?? '').trim())?.inspection_url ?? '';
+    const initialTarget = INSPECTIONS_FOLDER_URL || storedUrl || fallbackMaterialUrl;
+    if (initialTarget && /^https?:\/\//i.test(initialTarget)) {
+      window.open(initialTarget, '_blank', 'noopener,noreferrer');
       return;
     }
-    window.open(INSPECTIONS_FOLDER_URL, '_blank', 'noopener,noreferrer');
+
+    const manualUrl = window.prompt(
+      'Inserisci il link della cartella Drive Ispezioni',
+      'https://drive.google.com/drive/folders/...',
+    );
+    if (!manualUrl) return;
+    const normalized = manualUrl.trim();
+    if (!/^https?:\/\//i.test(normalized)) {
+      setError('Inserisci un URL valido (http:// o https://).');
+      return;
+    }
+    window.localStorage.setItem(INSPECTIONS_FOLDER_STORAGE_KEY, normalized);
+    window.open(normalized, '_blank', 'noopener,noreferrer');
   }
 
   async function handleDelete(id) {
