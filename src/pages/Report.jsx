@@ -1172,6 +1172,7 @@ export default function Report() {
     return 'N/D';
   }, []);
 
+  const currentMembershipYear = String(new Date().getFullYear());
   const [membersYearFilter, setMembersYearFilter] = useState('all');
   const [scuolaYearFilter, setScuolaYearFilter] = useState('all');
 
@@ -1542,7 +1543,17 @@ export default function Report() {
 
   async function handleMembersStatusExport(status, format = 'csv') {
     setError('');
-    const rows = filteredMembersFullRows.filter((row) =>
+    const scopedRows =
+      membersYearFilter === 'all'
+        ? membersFullRows.filter((row) => String(row.year) === currentMembershipYear)
+        : filteredMembersFullRows;
+    const totalEnrolled = dedupeMembers(
+      scopedRows.map((row) => ({
+        ...row,
+        membership_number: row.old_id || null,
+      })),
+    ).length;
+    const rows = scopedRows.filter((row) =>
       status === 'paid' ? row.status_label === 'Pagato' : row.status_label === 'Da saldare',
     );
     const dedupedRows = dedupeMembers(
@@ -1555,12 +1566,16 @@ export default function Report() {
       delete nextRow.membership_number;
       return nextRow;
     });
+    const effectiveYear = membersYearFilter === 'all' ? currentMembershipYear : membersYearFilter;
     const rowsWithTotal = [
       ...dedupedRows,
       {
         year: '',
-        full_name: status === 'paid' ? 'Totale soci saldati' : 'Totale soci da saldare',
-        old_id: String(dedupedRows.length),
+        full_name:
+          status === 'paid'
+            ? `Totale soci saldati / iscritti (${effectiveYear})`
+            : `Totale soci da saldare / iscritti (${effectiveYear})`,
+        old_id: `${dedupedRows.length} / ${totalEnrolled}`,
         email: '',
         phone: '',
         status_label: status === 'paid' ? 'Pagato' : 'Da saldare',
@@ -1570,7 +1585,7 @@ export default function Report() {
       setError(status === 'paid' ? 'Nessun socio saldato da esportare.' : 'Nessun socio da saldare da esportare.');
       return;
     }
-    const suffix = membersYearFilter !== 'all' ? `-${membersYearFilter}` : '';
+    const suffix = effectiveYear ? `-${effectiveYear}` : '';
     const baseName = status === 'paid' ? 'soci-paid' : 'soci-unpaid';
     const title = status === 'paid' ? 'Elenco soci saldato' : 'Elenco soci da saldare';
     if (format === 'pdf') {
