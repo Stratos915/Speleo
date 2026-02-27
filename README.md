@@ -48,6 +48,18 @@ Se vuoi memorizzare note specifiche sui materiali (acquisti, sostituzioni, ecc.)
 alter table public.equipment add column if not exists notes text;
 ```
 
+Per collegare a ogni materiale la relativa scheda ispezione (link Drive), aggiungi anche:
+
+```sql
+alter table public.equipment add column if not exists inspection_url text;
+```
+
+Se vuoi usare il pulsante globale **Ispezioni** nella pagina Inventario, configura in `.env.local`:
+
+```
+VITE_INSPECTIONS_FOLDER_URL=https://drive.google.com/...
+```
+
 ## Expanding the ESLint configuration
 
 If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
