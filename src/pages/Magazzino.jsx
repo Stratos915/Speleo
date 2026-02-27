@@ -21,6 +21,7 @@ const emptyMaterial = {
   notes: '',
   inspection_url: '',
 };
+const INSPECTIONS_FOLDER_URL = import.meta.env.VITE_INSPECTIONS_FOLDER_URL ?? '';
 
 export default function Magazzino() {
   const [materials, setMaterials] = useState([]);
@@ -288,12 +289,6 @@ export default function Magazzino() {
 
   async function handleInspectionLinkEdit(material) {
     if (!canEditInventory) return;
-    if (!inspectionField) {
-      setError(
-        'Per salvare link ispezione aggiungi una colonna tra: inspection_url, inspection_link, ispezione_url, drive_url.',
-      );
-      return;
-    }
     const currentValue = material.inspection_url ?? '';
     const nextValue = window.prompt('Inserisci il link Drive della scheda ispezione', currentValue);
     if (nextValue === null) return;
@@ -307,8 +302,19 @@ export default function Magazzino() {
       await updateEquipment(material.id, { inspection_url: normalized || null });
       await loadMaterials();
     } catch (updateError) {
-      setError(updateError.message ?? 'Impossibile aggiornare il link ispezione.');
+      setError(
+        updateError.message ??
+          'Impossibile aggiornare il link ispezione. Verifica la colonna inspection_url nella tabella equipment.',
+      );
     }
+  }
+
+  function openInspectionsFolder() {
+    if (!INSPECTIONS_FOLDER_URL) {
+      setError('Configura VITE_INSPECTIONS_FOLDER_URL per aprire la cartella generale Ispezioni.');
+      return;
+    }
+    window.open(INSPECTIONS_FOLDER_URL, '_blank', 'noopener,noreferrer');
   }
 
   async function handleDelete(id) {
@@ -477,17 +483,14 @@ export default function Magazzino() {
               id="inspection_url"
               type="url"
               placeholder={
-                inspectionField
-                  ? 'https://drive.google.com/...'
-                  : 'Aggiungi una colonna inspection_url (o inspection_link/ispezione_url)'
+                inspectionField ? 'https://drive.google.com/...' : 'https://drive.google.com/...'
               }
               value={form.inspection_url}
-              disabled={!inspectionField}
               onChange={(event) => handleChange('inspection_url', event.target.value)}
             />
             {!inspectionField && (
               <small style={{ color: 'var(--color-muted)' }}>
-                Il link ispezione verrà salvato quando la tabella equipment includerà una colonna dedicata.
+                Se il salvataggio fallisce, aggiungi la colonna <code>inspection_url</code> alla tabella equipment.
               </small>
             )}
             <input
@@ -605,20 +608,30 @@ export default function Magazzino() {
           {!filtered.length && <p>Nessun materiale trovato.</p>}
         </div>
       )}
+      <button
+        type="button"
+        className="floating-button"
+        style={{ right: '1rem', bottom: canEditInventory ? '5.5rem' : '1rem', background: '#868e96' }}
+        onClick={openInspectionsFolder}
+      >
+        Ispezioni
+      </button>
       {canEditInventory && (
-        <button
-          type="button"
-          className="floating-button"
-          onClick={() => {
-            setShowForm((prev) => !prev);
-            setEditingId(null);
-            setEditingBorrowed(0);
-            setSelectedMaterialId('');
-            setForm(emptyMaterial);
-          }}
-        >
-          {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
-        </button>
+        <>
+          <button
+            type="button"
+            className="floating-button"
+            onClick={() => {
+              setShowForm((prev) => !prev);
+              setEditingId(null);
+              setEditingBorrowed(0);
+              setSelectedMaterialId('');
+              setForm(emptyMaterial);
+            }}
+          >
+            {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
+          </button>
+        </>
       )}
     </section>
   );

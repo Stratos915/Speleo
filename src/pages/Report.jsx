@@ -5,6 +5,7 @@ import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
+import { dedupeMembers } from '../utils/members.js';
 import { getAllRoles } from '../utils/permissions.js';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 
@@ -1544,7 +1545,28 @@ export default function Report() {
     const rows = filteredMembersFullRows.filter((row) =>
       status === 'paid' ? row.status_label === 'Pagato' : row.status_label === 'Da saldare',
     );
-    if (!rows.length) {
+    const dedupedRows = dedupeMembers(
+      rows.map((row) => ({
+        ...row,
+        membership_number: row.old_id || null,
+      })),
+    ).map((row) => {
+      const nextRow = { ...row };
+      delete nextRow.membership_number;
+      return nextRow;
+    });
+    const rowsWithTotal = [
+      ...dedupedRows,
+      {
+        year: '',
+        full_name: status === 'paid' ? 'Totale soci saldati' : 'Totale soci da saldare',
+        old_id: String(dedupedRows.length),
+        email: '',
+        phone: '',
+        status_label: status === 'paid' ? 'Pagato' : 'Da saldare',
+      },
+    ];
+    if (!dedupedRows.length) {
       setError(status === 'paid' ? 'Nessun socio saldato da esportare.' : 'Nessun socio da saldare da esportare.');
       return;
     }
@@ -1555,11 +1577,11 @@ export default function Report() {
       await downloadPdfTable(
         title,
         csvColumns.soci_full,
-        rows,
+        rowsWithTotal,
         `${baseName}${suffix}-${new Date().toISOString()}.pdf`,
       );
     } else if (format === 'xlsx') {
-      const sheet = buildWorksheetXml(csvColumns.soci_full, rows);
+      const sheet = buildWorksheetXml(csvColumns.soci_full, rowsWithTotal);
       const files = [
         { name: '[Content_Types].xml', content: buildContentTypesXml() },
         { name: '_rels/.rels', content: buildRootRelsXml() },
@@ -1570,7 +1592,7 @@ export default function Report() {
       const blob = buildZipFile(files);
       triggerDownload(blob, `${baseName}${suffix}-${new Date().toISOString()}.xlsx`);
     } else {
-      const csv = buildCsv(rows, csvColumns.soci_full);
+      const csv = buildCsv(rowsWithTotal, csvColumns.soci_full);
       triggerDownload(csv, `${baseName}${suffix}-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
     }
   }
