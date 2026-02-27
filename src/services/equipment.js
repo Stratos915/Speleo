@@ -138,8 +138,6 @@ export async function createEquipment(payload) {
   if (equipmentInspectionColumn && Object.prototype.hasOwnProperty.call(nextPayload, 'inspection_url')) {
     nextPayload[equipmentInspectionColumn] = nextPayload.inspection_url;
     delete nextPayload.inspection_url;
-  } else if (equipmentInspectionColumn === null) {
-    delete nextPayload.inspection_url;
   }
   const { data, error } = await supabase.from(TABLE).insert(nextPayload).select().single();
   if (error) throw error;
@@ -156,8 +154,6 @@ export async function updateEquipment(id, payload) {
   }
   if (equipmentInspectionColumn && Object.prototype.hasOwnProperty.call(nextPayload, 'inspection_url')) {
     nextPayload[equipmentInspectionColumn] = nextPayload.inspection_url;
-    delete nextPayload.inspection_url;
-  } else if (equipmentInspectionColumn === null) {
     delete nextPayload.inspection_url;
   }
   const { data, error } = await withEquipmentFilter(supabase.from(TABLE).update(nextPayload), id).select().single();
