@@ -43,10 +43,11 @@ export default function Magazzino() {
   const [notesField, setNotesField] = useState(null);
   const [inspectionField, setInspectionField] = useState(null);
   const formRef = useRef(null);
-  const { user } = useAuth();
+  const { role, user } = useAuth();
   const { canEditSection, canUseAction } = usePermissions();
   const canEditInventory = canEditSection('inventory');
   const canLoanInventory = canUseAction('magazzino', 'loan');
+  const canManageInspections = ['admin', 'presidente', 'magazziniere'].includes(role);
   const { adminAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
 
@@ -322,6 +323,7 @@ export default function Magazzino() {
   }
 
   async function handleInspectionLinkEdit(material) {
+    if (!canManageInspections) return;
     if (!canEditInventory) return;
     const currentValue = getInspectionUrlForMaterial(material);
     const nextValue = window.prompt('Inserisci il link Drive della scheda ispezione', currentValue);
@@ -353,6 +355,7 @@ export default function Magazzino() {
   }
 
   function openInspectionsFolder() {
+    if (!canManageInspections) return;
     const storedUrl = typeof window !== 'undefined'
       ? window.localStorage.getItem(INSPECTIONS_FOLDER_STORAGE_KEY) ?? ''
       : '';
@@ -539,20 +542,24 @@ export default function Magazzino() {
                 Questo campo verrà abilitato quando la tabella equipment includerà una colonna <code>notes</code>.
               </small>
             )}
+            {canManageInspections && (
+              <>
                 <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
-            <input
-              id="inspection_url"
-              type="url"
-              placeholder={
-                inspectionField ? 'https://drive.google.com/...' : 'https://drive.google.com/...'
-              }
-              value={form.inspection_url}
-              onChange={(event) => handleChange('inspection_url', event.target.value)}
-            />
-            {!inspectionField && (
-              <small style={{ color: 'var(--color-muted)' }}>
-                Se il salvataggio fallisce, aggiungi la colonna <code>inspection_url</code> alla tabella equipment.
-              </small>
+                <input
+                  id="inspection_url"
+                  type="url"
+                  placeholder={
+                    inspectionField ? 'https://drive.google.com/...' : 'https://drive.google.com/...'
+                  }
+                  value={form.inspection_url}
+                  onChange={(event) => handleChange('inspection_url', event.target.value)}
+                />
+                {!inspectionField && (
+                  <small style={{ color: 'var(--color-muted)' }}>
+                    Se il salvataggio fallisce, aggiungi la colonna <code>inspection_url</code> alla tabella equipment.
+                  </small>
+                )}
+              </>
             )}
             <input
               type="number"
@@ -607,29 +614,31 @@ export default function Magazzino() {
                 {notesField && material[notesField] && (
                   <p style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>Note: {material[notesField]}</p>
                 )}
-                <details style={{ marginTop: '0.5rem' }}>
-                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ispezioni</summary>
-                  <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
-                    {getInspectionUrlForMaterial(material) ? (
-                      <a href={getInspectionUrlForMaterial(material)} target="_blank" rel="noreferrer">
-                        Apri scheda ispezione su Drive
-                      </a>
-                    ) : (
-                      <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-                        Nessuna scheda ispezione collegata.
-                      </p>
-                    )}
-                    {canEditInventory && (
-                      <button
-                        type="button"
-                        style={{ width: 'fit-content', background: '#adb5bd' }}
-                        onClick={() => handleInspectionLinkEdit(material)}
-                      >
-                        {getInspectionUrlForMaterial(material) ? 'Modifica link ispezione' : 'Collega link ispezione'}
-                      </button>
-                    )}
-                  </div>
-                </details>
+                {canManageInspections && (
+                  <details style={{ marginTop: '0.5rem' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ispezioni</summary>
+                    <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                      {getInspectionUrlForMaterial(material) ? (
+                        <a href={getInspectionUrlForMaterial(material)} target="_blank" rel="noreferrer">
+                          Apri scheda ispezione su Drive
+                        </a>
+                      ) : (
+                        <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                          Nessuna scheda ispezione collegata.
+                        </p>
+                      )}
+                      {canEditInventory && (
+                        <button
+                          type="button"
+                          style={{ width: 'fit-content', background: '#adb5bd' }}
+                          onClick={() => handleInspectionLinkEdit(material)}
+                        >
+                          {getInspectionUrlForMaterial(material) ? 'Modifica link ispezione' : 'Collega link ispezione'}
+                        </button>
+                      )}
+                    </div>
+                  </details>
+                )}
                 {(canEditInventory || canLoanInventory) && (
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button
@@ -680,13 +689,15 @@ export default function Magazzino() {
           justifyItems: 'end',
         }}
       >
-        <button
-          type="button"
-          style={{ background: '#868e96' }}
-          onClick={openInspectionsFolder}
-        >
-          Ispezioni
-        </button>
+        {canManageInspections && (
+          <button
+            type="button"
+            style={{ background: '#868e96' }}
+            onClick={openInspectionsFolder}
+          >
+            Ispezioni
+          </button>
+        )}
         {canEditInventory && (
           <button
             type="button"
