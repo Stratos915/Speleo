@@ -146,7 +146,7 @@ export default function UscitaForm({
 
   const memberLabelsMap = useMemo(() => {
     const map = new Map();
-    members.forEach((member, index) => {
+    members.forEach((member) => {
       if (!member) return;
       const memberId = member?.id ? String(member.id) : null;
       if (!memberId) return;

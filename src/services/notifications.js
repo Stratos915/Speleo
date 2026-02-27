@@ -19,7 +19,7 @@ function normalizeRow(row) {
   };
 }
 
-export async function fetchNotifications({ role, userId } = {}) {
+export async function fetchNotifications() {
   try {
     const { data, error } = await supabase
       .from('notifications')

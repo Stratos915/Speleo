@@ -60,7 +60,7 @@ function extractRecoveryCode() {
 // Pagina raggiunta dai link email di Supabase (recovery/reset) per impostare una nuova password.
 export default function ResetPassword() {
   const navigate = useNavigate();
-  const { isAuthenticated, needsPasswordReset, user, markPasswordInitialized } = useAuth();
+  const { isAuthenticated, needsPasswordReset, markPasswordInitialized } = useAuth();
   const [ready, setReady] = useState(false);
   const [initializing, setInitializing] = useState(true);
   const [password, setPassword] = useState('');
@@ -71,7 +71,6 @@ export default function ResetPassword() {
   const [submitting, setSubmitting] = useState(false);
 
   const [forcedFlow, setForcedFlow] = useState(false);
-  const [profileUserId, setProfileUserId] = useState(null);
   const [completed, setCompleted] = useState(false);
   const [recoveryIntent] = useState(() => hasRecoveryIntent());
 
@@ -94,7 +93,7 @@ export default function ResetPassword() {
       try {
         const tokens = extractRecoveryTokens();
         if (tokens) {
-          const { data: upsertData, error: upsertError } = await supabase
+          const { error: upsertError } = await supabase
             .from('profiles')
             .upsert(
               {
@@ -116,8 +115,6 @@ export default function ResetPassword() {
           } else {
             setReady(true);
             setForcedFlow(false);
-            const { data } = await supabase.auth.getUser();
-            setProfileUserId(data?.user?.id ?? null);
           }
         } else {
           const code = extractRecoveryCode();
@@ -128,13 +125,10 @@ export default function ResetPassword() {
             } else {
               setReady(true);
               setForcedFlow(false);
-              const { data } = await supabase.auth.getUser();
-              setProfileUserId(data?.user?.id ?? null);
             }
           } else if (isAuthenticated && (needsPasswordReset || recoveryIntent)) {
             setReady(true);
             setForcedFlow(needsPasswordReset);
-            setProfileUserId(user?.id ?? null);
           } else if (!isAuthenticated) {
             setError('Link di reset non valido o scaduto. Richiedi una nuova email di recupero.');
           } else {

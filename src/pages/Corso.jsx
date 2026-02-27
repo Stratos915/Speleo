@@ -136,23 +136,6 @@ export default function Corso() {
   const canViewScuola = canViewPage('scuola');
   const canEditScuola = canEditSection('scuola');
 
-  if (!canViewScuola) {
-    return (
-      <section className="page-grid">
-        <p>Non hai i permessi per accedere a questa pagina.</p>
-      </section>
-    );
-  }
-
-  if (!canEditScuola) {
-    return (
-      <section className="page-grid">
-        <h1>Scuola</h1>
-        <p>Puoi consultare corsi e registro dalla pagina Report. Solo il direttore scuola o gli amministratori possono modificarli.</p>
-        <AlertList alerts={userAlerts} navigate={navigate} onDismiss={dismissAlert} />
-      </section>
-    );
-  }
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(true);
   const [membersError, setMembersError] = useState('');
@@ -1195,6 +1178,24 @@ function updateCourse(yearId, courseId, updater) {
   function handleTeachingMaterialUpdate(id, field, value) {
     setTeachingMaterials((prev) =>
       prev.map((doc) => (doc.id === id ? { ...doc, [field]: value } : doc)),
+    );
+  }
+
+  if (!canViewScuola) {
+    return (
+      <section className="page-grid">
+        <p>Non hai i permessi per accedere a questa pagina.</p>
+      </section>
+    );
+  }
+
+  if (!canEditScuola) {
+    return (
+      <section className="page-grid">
+        <h1>Scuola</h1>
+        <p>Puoi consultare corsi e registro dalla pagina Report. Solo il direttore scuola o gli amministratori possono modificarli.</p>
+        <AlertList alerts={userAlerts} navigate={navigate} onDismiss={dismissAlert} />
+      </section>
     );
   }
 

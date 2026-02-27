@@ -240,7 +240,7 @@ async function loadLetterheadImage() {
     } finally {
       URL.revokeObjectURL(objectUrl);
     }
-  } catch (_error) {
+  } catch {
     return null;
   }
 }
@@ -1539,6 +1539,42 @@ export default function Report() {
     }
   }
 
+  async function handleMembersStatusExport(status, format = 'csv') {
+    setError('');
+    const rows = filteredMembersFullRows.filter((row) =>
+      status === 'paid' ? row.status_label === 'Pagato' : row.status_label === 'Da saldare',
+    );
+    if (!rows.length) {
+      setError(status === 'paid' ? 'Nessun socio saldato da esportare.' : 'Nessun socio da saldare da esportare.');
+      return;
+    }
+    const suffix = membersYearFilter !== 'all' ? `-${membersYearFilter}` : '';
+    const baseName = status === 'paid' ? 'soci-paid' : 'soci-unpaid';
+    const title = status === 'paid' ? 'Elenco soci saldato' : 'Elenco soci da saldare';
+    if (format === 'pdf') {
+      await downloadPdfTable(
+        title,
+        csvColumns.soci_full,
+        rows,
+        `${baseName}${suffix}-${new Date().toISOString()}.pdf`,
+      );
+    } else if (format === 'xlsx') {
+      const sheet = buildWorksheetXml(csvColumns.soci_full, rows);
+      const files = [
+        { name: '[Content_Types].xml', content: buildContentTypesXml() },
+        { name: '_rels/.rels', content: buildRootRelsXml() },
+        { name: 'xl/workbook.xml', content: buildWorkbookXml() },
+        { name: 'xl/_rels/workbook.xml.rels', content: buildWorkbookRelsXml() },
+        { name: 'xl/worksheets/sheet1.xml', content: sheet },
+      ];
+      const blob = buildZipFile(files);
+      triggerDownload(blob, `${baseName}${suffix}-${new Date().toISOString()}.xlsx`);
+    } else {
+      const csv = buildCsv(rows, csvColumns.soci_full);
+      triggerDownload(csv, `${baseName}${suffix}-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
+    }
+  }
+
   async function handleActivityExport(format = 'csv') {
     setError('');
     if (!activityRows.length) {
@@ -2151,22 +2187,45 @@ export default function Report() {
               onXlsx={() => handleExport('magazzino', 'xlsx')}
               disabled={loading}
             />
-            <ReportCard
-              title="Elenco soci completo"
-              description="Scarica l'anagrafica dettagliata con anno e stato quota."
-              onCsv={() => handleMembersFullExport()}
-              onPdf={() => handleMembersFullExport('pdf')}
-              onXlsx={() => handleMembersFullExport('xlsx')}
-              disabled={loading}
-            />
-            <ReportCard
-              title="Riepilogo soci per anno"
-              description="Totale soci e quote pagate suddivisi per anno."
-              onCsv={() => handleMembersSummaryExport()}
-              onPdf={() => handleMembersSummaryExport('pdf')}
-              onXlsx={() => handleMembersSummaryExport('xlsx')}
-              disabled={loading}
-            />
+            <article className="card" style={{ padding: 0 }}>
+              <details open>
+                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '0.9rem 1rem' }}>Soci</summary>
+                <div className="card-list" style={{ padding: '0 1rem 1rem', marginTop: 0 }}>
+                  <ReportCard
+                    title="Elenco soci completo"
+                    description="Scarica l'anagrafica dettagliata con anno e stato quota."
+                    onCsv={() => handleMembersFullExport()}
+                    onPdf={() => handleMembersFullExport('pdf')}
+                    onXlsx={() => handleMembersFullExport('xlsx')}
+                    disabled={loading}
+                  />
+                  <ReportCard
+                    title="Riepilogo soci per anno"
+                    description="Totale soci e quote pagate suddivisi per anno."
+                    onCsv={() => handleMembersSummaryExport()}
+                    onPdf={() => handleMembersSummaryExport('pdf')}
+                    onXlsx={() => handleMembersSummaryExport('xlsx')}
+                    disabled={loading}
+                  />
+                  <ReportCard
+                    title="Elenco soci saldato"
+                    description="Esporta solo i soci con quota pagata."
+                    onCsv={() => handleMembersStatusExport('paid')}
+                    onPdf={() => handleMembersStatusExport('paid', 'pdf')}
+                    onXlsx={() => handleMembersStatusExport('paid', 'xlsx')}
+                    disabled={loading}
+                  />
+                  <ReportCard
+                    title="Elenco soci da saldare"
+                    description="Esporta solo i soci con quota da saldare."
+                    onCsv={() => handleMembersStatusExport('unpaid')}
+                    onPdf={() => handleMembersStatusExport('unpaid', 'pdf')}
+                    onXlsx={() => handleMembersStatusExport('unpaid', 'xlsx')}
+                    disabled={loading}
+                  />
+                </div>
+              </details>
+            </article>
             {canViewActivityLog && (
               <ReportCard
                 title="Log attività"

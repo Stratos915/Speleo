@@ -4,11 +4,13 @@ const TABLE = 'equipment';
 const TOTAL_KEYS = ['quantity', 'quantity_total', 'total_quantity', 'qty_total', 'total'];
 const AVAILABLE_KEYS = ['quantity_available', 'available_quantity', 'qty_available', 'available', 'disponibile'];
 const NOTES_KEYS = ['notes', 'note', 'memo', 'osservazioni'];
+const INSPECTION_KEYS = ['inspection_url', 'inspection_link', 'ispezione_url', 'drive_url', 'scheda_ispezione_url'];
 
 let equipmentPrimaryKey = 'id';
 let equipmentQuantityColumn = null;
 let equipmentAvailableColumn = null;
 let equipmentNotesColumn;
+let equipmentInspectionColumn;
 
 function detectPrimaryKey(row) {
   if (!row) return;
@@ -43,6 +45,10 @@ function rememberColumns(row) {
   if (equipmentNotesColumn === undefined) {
     const detected = detectColumn(row, NOTES_KEYS);
     equipmentNotesColumn = detected ?? null;
+  }
+  if (equipmentInspectionColumn === undefined) {
+    const detected = detectColumn(row, INSPECTION_KEYS);
+    equipmentInspectionColumn = detected ?? null;
   }
 }
 
@@ -97,6 +103,7 @@ export function normalizeEquipmentRow(row) {
     quantity,
     quantity_available: quantityAvailable,
     notes: equipmentNotesColumn ? row[equipmentNotesColumn] ?? null : row.notes ?? null,
+    inspection_url: equipmentInspectionColumn ? row[equipmentInspectionColumn] ?? null : row.inspection_url ?? null,
   };
 }
 
@@ -106,6 +113,7 @@ export function getEquipmentColumnNames() {
     quantity: equipmentQuantityColumn,
     available: equipmentAvailableColumn,
     notes: equipmentNotesColumn || null,
+    inspection: equipmentInspectionColumn || null,
   };
 }
 
@@ -127,6 +135,12 @@ export async function createEquipment(payload) {
   } else {
     delete nextPayload.notes;
   }
+  if (equipmentInspectionColumn && Object.prototype.hasOwnProperty.call(nextPayload, 'inspection_url')) {
+    nextPayload[equipmentInspectionColumn] = nextPayload.inspection_url;
+    delete nextPayload.inspection_url;
+  } else {
+    delete nextPayload.inspection_url;
+  }
   const { data, error } = await supabase.from(TABLE).insert(nextPayload).select().single();
   if (error) throw error;
   return normalizeEquipmentRow(data);
@@ -139,6 +153,12 @@ export async function updateEquipment(id, payload) {
     delete nextPayload.notes;
   } else {
     delete nextPayload.notes;
+  }
+  if (equipmentInspectionColumn && Object.prototype.hasOwnProperty.call(nextPayload, 'inspection_url')) {
+    nextPayload[equipmentInspectionColumn] = nextPayload.inspection_url;
+    delete nextPayload.inspection_url;
+  } else {
+    delete nextPayload.inspection_url;
   }
   const { data, error } = await withEquipmentFilter(supabase.from(TABLE).update(nextPayload), id).select().single();
   if (error) throw error;
@@ -175,7 +195,8 @@ async function ensureEquipmentSchema(identifier) {
   if (
     equipmentQuantityColumn &&
     equipmentAvailableColumn &&
-    equipmentNotesColumn !== undefined
+    equipmentNotesColumn !== undefined &&
+    equipmentInspectionColumn !== undefined
   ) {
     return;
   }

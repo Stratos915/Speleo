@@ -507,6 +507,7 @@ export default function Members() {
   const [yearFilter, setYearFilter] = useState(DEFAULT_YEAR_STRING);
   const formRef = useRef(null);
   const duplicatedYearsRef = useRef(new Set());
+  const lastScrollPositionRef = useRef(0);
   const [cloningYear, setCloningYear] = useState(null);
   const { user, role } = useAuth();
   const { canEditSection } = usePermissions();
@@ -611,11 +612,15 @@ export default function Members() {
     };
   }, [canManageRoles, supportsEmail]);
 
-  useEffect(() => {
-    if (showForm && formRef.current) {
-      formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  }, [showForm]);
+  function rememberScrollPosition() {
+    lastScrollPositionRef.current = window.scrollY || window.pageYOffset || 0;
+  }
+
+  function restoreScrollPosition() {
+    window.requestAnimationFrame(() => {
+      window.scrollTo(0, lastScrollPositionRef.current || 0);
+    });
+  }
 
   useEffect(() => {
     if (!canEditMembers && showForm) {
@@ -967,6 +972,7 @@ export default function Members() {
   }
 
   function handleEdit(member) {
+    rememberScrollPosition();
     setEditingId(member.id);
     setForm({
       membership_number: member.old_id ?? '',
@@ -1150,6 +1156,7 @@ export default function Members() {
     event.preventDefault();
     setSubmitting(true);
     setError('');
+    const wasEditing = Boolean(editingId);
     const membershipValue = form.membership_number ? Number(form.membership_number) : null;
     const normalizedYear = Number(form.membership_year) || DEFAULT_YEAR;
     const payload = {
@@ -1191,7 +1198,10 @@ export default function Members() {
       }
       resetForm();
       setShowForm(false);
-      loadMembers();
+      await loadMembers();
+      if (wasEditing) {
+        restoreScrollPosition();
+      }
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio del socio.');
     } finally {
@@ -2146,6 +2156,9 @@ export default function Members() {
               type="button"
               onClick={() => {
                 const nextShow = !showForm;
+                if (nextShow) {
+                  rememberScrollPosition();
+                }
                 setShowForm(nextShow);
                 if (nextShow && !editingId) {
                   resetForm(yearFilter, profileSeed);

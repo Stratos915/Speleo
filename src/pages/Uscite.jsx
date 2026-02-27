@@ -315,8 +315,6 @@ export default function Uscite() {
             const participantsList = [
               ...(uscita.participants_ids ?? []).map((id) => membersMap.get(id)).filter(Boolean),
             ];
-            const uscitaDate = uscita.data ? new Date(uscita.data) : null;
-            const isPast = uscitaDate && uscitaDate < new Date();
             const isClosed = uscita.status === 'chiusa';
             const disableLoanButton = isClosed;
             return (

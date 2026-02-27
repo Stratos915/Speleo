@@ -19,6 +19,7 @@ const emptyMaterial = {
   description: '',
   quantity: '',
   notes: '',
+  inspection_url: '',
 };
 
 export default function Magazzino() {
@@ -37,12 +38,13 @@ export default function Magazzino() {
   const [quantityField, setQuantityField] = useState('quantity');
   const [availableField, setAvailableField] = useState('quantity_available');
   const [notesField, setNotesField] = useState(null);
+  const [inspectionField, setInspectionField] = useState(null);
   const formRef = useRef(null);
-  const { role, user } = useAuth();
+  const { user } = useAuth();
   const { canEditSection, canUseAction } = usePermissions();
   const canEditInventory = canEditSection('inventory');
   const canLoanInventory = canUseAction('magazzino', 'loan');
-  const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
+  const { adminAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -64,7 +66,12 @@ export default function Magazzino() {
       setSupportsEquipmentNumber(
         data.some((item) => Object.prototype.hasOwnProperty.call(item, 'equipment_number')),
       );
-      const { quantity: detectedQuantity, available: detectedAvailable, notes: detectedNotes } = getEquipmentColumnNames();
+      const {
+        quantity: detectedQuantity,
+        available: detectedAvailable,
+        notes: detectedNotes,
+        inspection: detectedInspection,
+      } = getEquipmentColumnNames();
       if (detectedQuantity) {
         setQuantityField(detectedQuantity);
       } else if (data.length) {
@@ -88,6 +95,7 @@ export default function Magazzino() {
         }
       }
       setNotesField(detectedNotes);
+      setInspectionField(detectedInspection);
     } catch (loadError) {
       setError(loadError.message ?? 'Impossibile caricare il magazzino.');
     } finally {
@@ -133,6 +141,7 @@ export default function Magazzino() {
       description: selectedMaterial.description ?? prev.description,
       quantity: '',
       notes: notesField ? selectedMaterial[notesField] ?? '' : prev.notes,
+      inspection_url: selectedMaterial.inspection_url ?? '',
     }));
     setEditingBorrowed(Math.max(total - available, 0));
     setRestockMode('replace');
@@ -148,6 +157,7 @@ export default function Magazzino() {
     };
     const totalQuantity = Number(form.quantity);
     const notesValue = form.notes.trim() || null;
+    const inspectionUrl = form.inspection_url.trim() || null;
     const isRestock = Boolean(selectedMaterial && !editingId);
     if (supportsEquipmentNumber) {
       payload.equipment_number = form.equipment_number ? Number(form.equipment_number) : null;
@@ -193,6 +203,9 @@ export default function Magazzino() {
     }
     if (notesField && !isRestock) {
       payload.notes = notesValue;
+    }
+    if (inspectionField) {
+      payload.inspection_url = inspectionUrl;
     }
 
     try {
@@ -261,6 +274,7 @@ export default function Magazzino() {
       description: material.description ?? '',
       quantity: total || available || '',
       notes: notesField ? material[notesField] ?? '' : '',
+      inspection_url: material.inspection_url ?? '',
     });
   }
 
@@ -270,6 +284,31 @@ export default function Magazzino() {
     setSelectedMaterialId('');
     setRestockMode('replace');
     setForm(emptyMaterial);
+  }
+
+  async function handleInspectionLinkEdit(material) {
+    if (!canEditInventory) return;
+    if (!inspectionField) {
+      setError(
+        'Per salvare link ispezione aggiungi una colonna tra: inspection_url, inspection_link, ispezione_url, drive_url.',
+      );
+      return;
+    }
+    const currentValue = material.inspection_url ?? '';
+    const nextValue = window.prompt('Inserisci il link Drive della scheda ispezione', currentValue);
+    if (nextValue === null) return;
+    const normalized = nextValue.trim();
+    if (normalized && !/^https?:\/\//i.test(normalized)) {
+      setError('Inserisci un URL valido (http:// o https://).');
+      return;
+    }
+    setError('');
+    try {
+      await updateEquipment(material.id, { inspection_url: normalized || null });
+      await loadMaterials();
+    } catch (updateError) {
+      setError(updateError.message ?? 'Impossibile aggiornare il link ispezione.');
+    }
   }
 
   async function handleDelete(id) {
@@ -433,6 +472,24 @@ export default function Magazzino() {
                 Questo campo verrà abilitato quando la tabella equipment includerà una colonna <code>notes</code>.
               </small>
             )}
+            <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
+            <input
+              id="inspection_url"
+              type="url"
+              placeholder={
+                inspectionField
+                  ? 'https://drive.google.com/...'
+                  : 'Aggiungi una colonna inspection_url (o inspection_link/ispezione_url)'
+              }
+              value={form.inspection_url}
+              disabled={!inspectionField}
+              onChange={(event) => handleChange('inspection_url', event.target.value)}
+            />
+            {!inspectionField && (
+              <small style={{ color: 'var(--color-muted)' }}>
+                Il link ispezione verrà salvato quando la tabella equipment includerà una colonna dedicata.
+              </small>
+            )}
             <input
               type="number"
               min={0}
@@ -486,6 +543,29 @@ export default function Magazzino() {
                 {notesField && material[notesField] && (
                   <p style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>Note: {material[notesField]}</p>
                 )}
+                <details style={{ marginTop: '0.5rem' }}>
+                  <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ispezioni</summary>
+                  <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
+                    {material.inspection_url ? (
+                      <a href={material.inspection_url} target="_blank" rel="noreferrer">
+                        Apri scheda ispezione su Drive
+                      </a>
+                    ) : (
+                      <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                        Nessuna scheda ispezione collegata.
+                      </p>
+                    )}
+                    {canEditInventory && (
+                      <button
+                        type="button"
+                        style={{ width: 'fit-content', background: '#adb5bd' }}
+                        onClick={() => handleInspectionLinkEdit(material)}
+                      >
+                        {material.inspection_url ? 'Modifica link ispezione' : 'Collega link ispezione'}
+                      </button>
+                    )}
+                  </div>
+                </details>
                 {(canEditInventory || canLoanInventory) && (
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     <button

@@ -5,7 +5,7 @@ import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
-import { getEquipment, getEquipmentById } from '../services/equipment.js';
+import { getEquipment } from '../services/equipment.js';
 import { getUscite } from '../services/uscite.js';
 
 const FILTERS = [
