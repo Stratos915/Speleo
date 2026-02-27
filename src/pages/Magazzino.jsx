@@ -608,19 +608,31 @@ export default function Magazzino() {
           {!filtered.length && <p>Nessun materiale trovato.</p>}
         </div>
       )}
-      <button
-        type="button"
-        className="floating-button"
-        style={{ right: '1rem', bottom: canEditInventory ? '5.5rem' : '1rem', background: '#868e96' }}
-        onClick={openInspectionsFolder}
+      <div
+        style={{
+          position: 'fixed',
+          right: '1rem',
+          bottom: '1rem',
+          zIndex: 12,
+          display: 'grid',
+          gap: '0.6rem',
+          justifyItems: 'end',
+        }}
       >
-        Ispezioni
-      </button>
-      {canEditInventory && (
-        <>
+        <button
+          type="button"
+          style={{ background: '#868e96' }}
+          onClick={openInspectionsFolder}
+        >
+          Ispezioni
+        </button>
+        {canEditInventory && (
           <button
             type="button"
-            className="floating-button"
+            style={{
+              background: 'var(--color-accent)',
+              boxShadow: '0 12px 24px rgba(242, 115, 103, 0.35)',
+            }}
             onClick={() => {
               setShowForm((prev) => !prev);
               setEditingId(null);
@@ -631,8 +643,8 @@ export default function Magazzino() {
           >
             {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
           </button>
-        </>
-      )}
+        )}
+      </div>
     </section>
   );
 }
