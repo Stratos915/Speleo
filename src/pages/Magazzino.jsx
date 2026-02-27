@@ -22,6 +22,7 @@ const emptyMaterial = {
   inspection_url: '',
 };
 const INSPECTIONS_FOLDER_STORAGE_KEY = 'speleo-inspections-folder-url';
+const INSPECTIONS_BY_ITEM_STORAGE_KEY = 'speleo-inspections-by-item';
 const INSPECTIONS_FOLDER_URL = import.meta.env.VITE_INSPECTIONS_FOLDER_URL ?? '';
 
 export default function Magazzino() {
@@ -116,6 +117,29 @@ export default function Magazzino() {
     );
   }, [materials, search]);
 
+  function getStoredInspectionMap() {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = window.localStorage.getItem(INSPECTIONS_BY_ITEM_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  function saveStoredInspectionMap(nextMap) {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(INSPECTIONS_BY_ITEM_STORAGE_KEY, JSON.stringify(nextMap));
+  }
+
+  function getInspectionUrlForMaterial(material) {
+    const dbUrl = String(material?.inspection_url ?? '').trim();
+    if (dbUrl) return dbUrl;
+    const map = getStoredInspectionMap();
+    return String(map[String(material?.id ?? '')] ?? '').trim();
+  }
+
   function handleChange(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -143,7 +167,7 @@ export default function Magazzino() {
       description: selectedMaterial.description ?? prev.description,
       quantity: '',
       notes: notesField ? selectedMaterial[notesField] ?? '' : prev.notes,
-      inspection_url: selectedMaterial.inspection_url ?? '',
+      inspection_url: getInspectionUrlForMaterial(selectedMaterial),
     }));
     setEditingBorrowed(Math.max(total - available, 0));
     setRestockMode('replace');
@@ -251,6 +275,15 @@ export default function Magazzino() {
       setEditingBorrowed(0);
       setSelectedMaterialId('');
       setRestockMode('replace');
+      if (!inspectionField && savedEquipment?.id) {
+        const map = getStoredInspectionMap();
+        if (inspectionUrl) {
+          map[String(savedEquipment.id)] = inspectionUrl;
+        } else {
+          delete map[String(savedEquipment.id)];
+        }
+        saveStoredInspectionMap(map);
+      }
       loadMaterials();
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio.');
@@ -290,7 +323,7 @@ export default function Magazzino() {
 
   async function handleInspectionLinkEdit(material) {
     if (!canEditInventory) return;
-    const currentValue = material.inspection_url ?? '';
+    const currentValue = getInspectionUrlForMaterial(material);
     const nextValue = window.prompt('Inserisci il link Drive della scheda ispezione', currentValue);
     if (nextValue === null) return;
     const normalized = nextValue.trim();
@@ -299,14 +332,23 @@ export default function Magazzino() {
       return;
     }
     setError('');
+    if (!inspectionField) {
+      const map = getStoredInspectionMap();
+      if (normalized) {
+        map[String(material.id)] = normalized;
+      } else {
+        delete map[String(material.id)];
+      }
+      saveStoredInspectionMap(map);
+      setError('');
+      setMaterials((prev) => [...prev]);
+      return;
+    }
     try {
       await updateEquipment(material.id, { inspection_url: normalized || null });
       await loadMaterials();
     } catch (updateError) {
-      setError(
-        updateError.message ??
-          'Impossibile aggiornare il link ispezione. Verifica la colonna inspection_url nella tabella equipment.',
-      );
+      setError(updateError.message ?? 'Impossibile aggiornare il link ispezione.');
     }
   }
 
@@ -497,7 +539,7 @@ export default function Magazzino() {
                 Questo campo verrà abilitato quando la tabella equipment includerà una colonna <code>notes</code>.
               </small>
             )}
-            <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
+                <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
             <input
               id="inspection_url"
               type="url"
@@ -568,8 +610,8 @@ export default function Magazzino() {
                 <details style={{ marginTop: '0.5rem' }}>
                   <summary style={{ cursor: 'pointer', fontWeight: 600 }}>Ispezioni</summary>
                   <div style={{ marginTop: '0.5rem', display: 'grid', gap: '0.5rem' }}>
-                    {material.inspection_url ? (
-                      <a href={material.inspection_url} target="_blank" rel="noreferrer">
+                    {getInspectionUrlForMaterial(material) ? (
+                      <a href={getInspectionUrlForMaterial(material)} target="_blank" rel="noreferrer">
                         Apri scheda ispezione su Drive
                       </a>
                     ) : (
@@ -583,7 +625,7 @@ export default function Magazzino() {
                         style={{ width: 'fit-content', background: '#adb5bd' }}
                         onClick={() => handleInspectionLinkEdit(material)}
                       >
-                        {material.inspection_url ? 'Modifica link ispezione' : 'Collega link ispezione'}
+                        {getInspectionUrlForMaterial(material) ? 'Modifica link ispezione' : 'Collega link ispezione'}
                       </button>
                     )}
                   </div>
