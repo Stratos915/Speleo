@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: denoland/setup-deno@v2
         with:
@@ -32,4 +32,5 @@ jobs:
           NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET }}
           NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE }}
         run: |
+          deno run -A supabase/functions/notification-cron/index.ts --run-once
           deno run -A supabase/functions/notification-cron/index.ts --run-once
