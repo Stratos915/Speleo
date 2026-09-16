@@ -7,6 +7,7 @@ import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
 import { getEquipment } from '../services/equipment.js';
 import { getUscite } from '../services/uscite.js';
+import { returnLoan } from '../services/loans.js';
 
 const FILTERS = [
   { value: 'all', label: 'Tutti' },
@@ -113,7 +114,6 @@ export default function StoricoPrestiti() {
     if (!canManageLoans && !isOwner) return;
     setProcessingId(loan.id);
     setError('');
-    const now = new Date().toISOString();
     const missingRaw = returnMissingById[loan.id];
     const missingQuantity = missingRaw === '' || missingRaw === undefined ? 0 : Number(missingRaw);
     if (Number.isNaN(missingQuantity) || missingQuantity < 0 || missingQuantity > Number(loan.quantity)) {
@@ -123,17 +123,10 @@ export default function StoricoPrestiti() {
     }
     const missingNotes = returnNotesById[loan.id]?.trim() || null;
 
-    const { error: loanError } = await supabase
-      .from('loans')
-      .update({
-        status: 'chiuso',
-        returned_at: now,
-        missing_quantity: missingQuantity,
-        missing_notes: missingNotes,
-      })
-      .eq('id', loan.id);
-    if (loanError) {
-      setError('Impossibile chiudere il prestito. Riprova.');
+    try {
+      await returnLoan({ loanId: loan.id, missingQuantity, missingNotes });
+    } catch (loanError) {
+      setError(loanError.message);
       setProcessingId(null);
       return;
     }

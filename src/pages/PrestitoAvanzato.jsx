@@ -5,6 +5,7 @@ import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
 import useAuth from '../context/useAuth.js';
 import { getEquipment } from '../services/equipment.js';
+import { createLoan } from '../services/loans.js';
 
 const initialForm = {
   equipmentId: '',
@@ -221,27 +222,20 @@ export default function PrestitoAvanzato() {
 
     const reservedUntilIso = reservedUntilDate ? reservedUntilDate.toISOString().split('T')[0] : null;
 
-    const payload = {
-      equipment_id: selectedEquipment.id ?? selectedEquipment.equipment_id,
-      uscita_id: uscitaIdParam || null,
-      reserved_until: reservedUntilIso,
-      borrower_name: borrower,
-      borrower_email: user?.email ?? null,
-      borrower_member_number: form.borrowerMemberNumber ? Number(form.borrowerMemberNumber) : null,
-      quantity,
-      notes: form.notes.trim() || null,
-      status: 'in_corso',
-      delivered_at: new Date().toISOString(),
-    };
-
-    const { error: insertError } = await supabase.from('loans').insert(payload);
-    if (insertError) {
-      const friendly =
-        insertError.message && insertError.message.includes('public.loans')
-          ? 'La tabella "loans" non esiste ancora su Supabase. Apri docs/loans-table.sql e incolla il contenuto nell\'SQL Editor per crearla.'
-          : insertError.message;
-      setError(friendly);
+    try {
+      await createLoan({
+        equipmentId: selectedEquipment.id ?? selectedEquipment.equipment_id,
+        quantity,
+        borrowerName: borrower,
+        borrowerMemberNumber: form.borrowerMemberNumber ? Number(form.borrowerMemberNumber) : null,
+        uscitaId: uscitaIdParam || null,
+        reservedUntil: reservedUntilIso,
+        notes: form.notes.trim() || null,
+      });
+    } catch (loanError) {
+      setError(loanError.message);
       setSubmitting(false);
+      loadData();
       return;
     }
 
