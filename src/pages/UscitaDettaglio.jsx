@@ -6,6 +6,7 @@ import UscitaForm from '../components/UscitaForm.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
+import { returnLoan } from '../services/loans.js';
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
@@ -168,17 +169,11 @@ export default function UscitaDettaglio() {
       return;
     }
     const missingNotes = returnNotesById[loan.id]?.trim() || null;
-    const { error: loanError } = await supabase
-      .from('loans')
-      .update({
-        status: 'chiuso',
-        returned_at: now,
-        missing_quantity: missingQuantity,
-        missing_notes: missingNotes,
-      })
-      .eq('id', loan.id);
-    if (loanError) {
-      setUscitaLoansError('Impossibile chiudere il prestito.');
+    let closedLoan;
+    try {
+      closedLoan = await returnLoan({ loanId: loan.id, missingQuantity, missingNotes });
+    } catch (loanError) {
+      setUscitaLoansError(loanError.message);
       setLoanProcessingId(null);
       return;
     }
@@ -189,7 +184,7 @@ export default function UscitaDettaglio() {
           ? {
               ...item,
               status: 'chiuso',
-              returned_at: now,
+              returned_at: closedLoan?.returned_at ?? now,
               missing_quantity: missingQuantity,
               missing_notes: missingNotes,
             }
@@ -432,6 +427,21 @@ export default function UscitaDettaglio() {
           </dd>
           <dt>Tipo</dt>
           <dd>{uscita.tipo || '-'}</dd>
+          <dt>Rientro previsto</dt>
+          <dd>
+            {uscita.rientro_previsto ? (
+              <>
+                {new Date(uscita.rientro_previsto).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })}
+                {!isClosed && new Date(uscita.rientro_previsto) < new Date() && (
+                  <strong style={{ color: '#c92a2a', display: 'block' }}>
+                    Orario superato: se il gruppo è rientrato, chiudi l&apos;uscita.
+                  </strong>
+                )}
+              </>
+            ) : (
+              'Non indicato'
+            )}
+          </dd>
           <dt>Responsabile</dt>
           <dd>{uscita.responsabile_nome || uscita.responsabile_full_name || 'Da assegnare'}</dd>
           <dt>Partecipanti</dt>
