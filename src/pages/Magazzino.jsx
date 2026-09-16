@@ -10,8 +10,12 @@ import {
   getEquipment,
   getEquipmentColumnNames,
   updateEquipment,
+  restockEquipment,
 } from '../services/equipment';
 import { safeLogActivity } from '../services/activityLogs.js';
+import { getSetting, setSetting } from '../services/settings.js';
+import { friendlyDbError } from '../services/loans.js';
+import { getDpiAlerts } from '../utils/dpi.js';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -20,10 +24,17 @@ const emptyMaterial = {
   quantity: '',
   notes: '',
   inspection_url: '',
+  prossima_ispezione: '',
+  fine_vita: '',
 };
 const INSPECTIONS_FOLDER_STORAGE_KEY = 'speleo-inspections-folder-url';
 const INSPECTIONS_BY_ITEM_STORAGE_KEY = 'speleo-inspections-by-item';
 const INSPECTIONS_FOLDER_URL = import.meta.env.VITE_INSPECTIONS_FOLDER_URL ?? '';
+const INSPECTIONS_FOLDER_SETTING = 'ispezioni_cartella_url';
+
+function dateInputValue(value) {
+  return value ? String(value).slice(0, 10) : '';
+}
 
 export default function Magazzino() {
   const [materials, setMaterials] = useState([]);
@@ -42,6 +53,8 @@ export default function Magazzino() {
   const [availableField, setAvailableField] = useState('quantity_available');
   const [notesField, setNotesField] = useState(null);
   const [inspectionField, setInspectionField] = useState(null);
+  const [inspectionsFolderUrl, setInspectionsFolderUrl] = useState('');
+  const [dpiFilter, setDpiFilter] = useState(false);
   const formRef = useRef(null);
   const { role, user } = useAuth();
   const { canEditSection, canUseAction } = usePermissions();
@@ -54,6 +67,28 @@ export default function Magazzino() {
   useEffect(() => {
     loadMaterials();
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+    async function loadFolderSetting() {
+      try {
+        let value = await getSetting(INSPECTIONS_FOLDER_SETTING);
+        const legacy = typeof window !== 'undefined' ? window.localStorage.getItem(INSPECTIONS_FOLDER_STORAGE_KEY) : null;
+        if (!value && legacy && canManageInspections) {
+          await setSetting(INSPECTIONS_FOLDER_SETTING, legacy, user);
+          value = legacy;
+        }
+        if (legacy && value) window.localStorage.removeItem(INSPECTIONS_FOLDER_STORAGE_KEY);
+        if (!ignore) setInspectionsFolderUrl(value ?? '');
+      } catch (settingError) {
+        console.warn('[Magazzino] impostazione cartella ispezioni non disponibile:', settingError.message);
+      }
+    }
+    loadFolderSetting();
+    return () => {
+      ignore = true;
+    };
+  }, [canManageInspections, user]);
 
   useEffect(() => {
     if (showForm && formRef.current) {
@@ -100,6 +135,9 @@ export default function Magazzino() {
       }
       setNotesField(detectedNotes);
       setInspectionField(detectedInspection);
+      if (detectedInspection && canManageInspections) {
+        await migrateLegacyInspectionLinks(data);
+      }
     } catch (loadError) {
       setError(loadError.message ?? 'Impossibile caricare il magazzino.');
     } finally {
@@ -108,15 +146,45 @@ export default function Magazzino() {
   }
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return materials;
+    const source = dpiFilter ? materials.filter((item) => getDpiAlerts(item).length > 0) : materials;
+    if (!search.trim()) return source;
     const term = search.toLowerCase();
-    return materials.filter(
+    return source.filter(
       (item) =>
         item.name?.toLowerCase().includes(term) ||
         item.description?.toLowerCase().includes(term) ||
         String(item.equipment_number ?? '').includes(term),
     );
-  }, [materials, search]);
+  }, [materials, search, dpiFilter]);
+
+  const dpiAlertCount = useMemo(
+    () => materials.filter((item) => getDpiAlerts(item).length > 0).length,
+    [materials],
+  );
+
+  // Una tantum: i link salvati in passato solo nel browser vengono copiati nel database.
+  async function migrateLegacyInspectionLinks(items) {
+    if (typeof window === 'undefined') return;
+    const map = getStoredInspectionMap();
+    const entries = Object.entries(map).filter(([, url]) => String(url ?? '').trim());
+    if (!entries.length) return;
+    let moved = 0;
+    for (const [id, url] of entries) {
+      const item = items.find((material) => String(material.id) === id);
+      if (!item || String(item.inspection_url ?? '').trim()) continue;
+      try {
+        await updateEquipment(item.id, { inspection_url: url });
+        moved += 1;
+      } catch (migrationError) {
+        console.warn('[Magazzino] link ispezione non trasferito:', migrationError.message);
+        return;
+      }
+    }
+    window.localStorage.removeItem(INSPECTIONS_BY_ITEM_STORAGE_KEY);
+    if (moved) {
+      setMaterials(await getEquipment());
+    }
+  }
 
   function getStoredInspectionMap() {
     if (typeof window === 'undefined') return {};
@@ -129,16 +197,8 @@ export default function Magazzino() {
     }
   }
 
-  function saveStoredInspectionMap(nextMap) {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(INSPECTIONS_BY_ITEM_STORAGE_KEY, JSON.stringify(nextMap));
-  }
-
   function getInspectionUrlForMaterial(material) {
-    const dbUrl = String(material?.inspection_url ?? '').trim();
-    if (dbUrl) return dbUrl;
-    const map = getStoredInspectionMap();
-    return String(map[String(material?.id ?? '')] ?? '').trim();
+    return String(material?.inspection_url ?? '').trim();
   }
 
   function handleChange(field, value) {
@@ -167,8 +227,10 @@ export default function Magazzino() {
       name: selectedMaterial.name ?? prev.name,
       description: selectedMaterial.description ?? prev.description,
       quantity: '',
-      notes: notesField ? selectedMaterial[notesField] ?? '' : prev.notes,
+      notes: '',
       inspection_url: getInspectionUrlForMaterial(selectedMaterial),
+      prossima_ispezione: dateInputValue(selectedMaterial.prossima_ispezione),
+      fine_vita: dateInputValue(selectedMaterial.fine_vita),
     }));
     setEditingBorrowed(Math.max(total - available, 0));
     setRestockMode('replace');
@@ -178,66 +240,69 @@ export default function Magazzino() {
     event.preventDefault();
     setError('');
     setSubmitting(true);
-    const payload = {
-      name: form.name.trim(),
-      description: form.description.trim() || null,
-    };
     const totalQuantity = Number(form.quantity);
     const notesValue = form.notes.trim() || null;
     const inspectionUrl = form.inspection_url.trim() || null;
     const isRestock = Boolean(selectedMaterial && !editingId);
-    if (supportsEquipmentNumber) {
-      payload.equipment_number = form.equipment_number ? Number(form.equipment_number) : null;
-    }
-    if (quantityField) {
-      payload[quantityField] = totalQuantity;
-    }
-    if (Number.isNaN(totalQuantity) || totalQuantity < 0) {
-      setError('Inserisci una quantità totale valida.');
+
+    if (Number.isNaN(totalQuantity) || totalQuantity < 0 || (isRestock && totalQuantity <= 0)) {
+      setError(isRestock ? 'Inserisci quanti pezzi aggiungere.' : 'Inserisci una quantità totale valida.');
       setSubmitting(false);
       return;
     }
-    if (editingId) {
-      const newAvailable = Math.max(totalQuantity - editingBorrowed, 0);
-      if (availableField) {
-        payload[availableField] = newAvailable;
-      }
-    } else if (isRestock && selectedMaterial) {
-      const currentTotal = Number(
-        selectedMaterial[quantityField] ?? selectedMaterial.quantity ?? selectedMaterial.total_quantity ?? 0,
-      );
-      const currentAvailable = Number(
-        selectedMaterial[availableField] ??
-          selectedMaterial.quantity_available ??
-          selectedMaterial.available_quantity ??
-          currentTotal,
-      );
-      const shouldIncreaseTotal = restockMode === 'stock';
-      const updatedTotal = shouldIncreaseTotal ? currentTotal + totalQuantity : currentTotal;
-      const updatedAvailable = currentAvailable + totalQuantity;
-      payload[quantityField] = updatedTotal;
-      if (availableField) {
-        payload[availableField] = updatedAvailable;
-      }
-      if (notesField && notesValue) {
-        const existingNotes = selectedMaterial[notesField] ?? '';
-        payload.notes = existingNotes ? `${existingNotes}\n${notesValue}` : notesValue;
-      }
-    } else {
-      if (availableField) {
-        payload[availableField] = totalQuantity;
-      }
+    if (inspectionUrl && !/^https?:\/\//i.test(inspectionUrl)) {
+      setError('Il link della scheda ispezione deve iniziare con http:// o https://.');
+      setSubmitting(false);
+      return;
     }
-    if (notesField && !isRestock) {
+
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim() || null,
+    };
+    if (supportsEquipmentNumber) {
+      payload.equipment_number = form.equipment_number ? Number(form.equipment_number) : null;
+    }
+    if (notesField) {
       payload.notes = notesValue;
     }
-    if (inspectionField) {
-      payload.inspection_url = inspectionUrl;
+    if (canManageInspections) {
+      if (inspectionField) payload.inspection_url = inspectionUrl;
+      payload.prossima_ispezione = form.prossima_ispezione || null;
+      payload.fine_vita = form.fine_vita || null;
     }
 
     try {
       let savedEquipment;
-      if (editingId) {
+      if (isRestock && selectedMaterial) {
+        // Rifornimento calcolato dal database sui valori attuali, non su quelli nel browser.
+        savedEquipment = await restockEquipment({
+          id: selectedMaterial.id,
+          quantity: totalQuantity,
+          increaseTotal: restockMode === 'stock',
+          note: notesValue,
+        });
+        if (canManageInspections) {
+          const inspectionPatch = {
+            prossima_ispezione: form.prossima_ispezione || null,
+            fine_vita: form.fine_vita || null,
+          };
+          if (inspectionField) inspectionPatch.inspection_url = inspectionUrl;
+          savedEquipment = await updateEquipment(selectedMaterial.id, inspectionPatch);
+        }
+        safeLogActivity(
+          {
+            action: 'restock_equipment',
+            entity: 'equipment',
+            entityId: savedEquipment.id,
+            details: { name: savedEquipment.name, added: totalQuantity, mode: restockMode },
+          },
+          user,
+        );
+      } else if (editingId) {
+        // Si invia solo il totale: il database sposta la disponibilità della stessa
+        // differenza, così i pezzi attualmente in prestito restano conteggiati.
+        if (quantityField) payload[quantityField] = totalQuantity;
         savedEquipment = await updateEquipment(editingId, payload);
         safeLogActivity(
           {
@@ -248,18 +313,9 @@ export default function Magazzino() {
           },
           user,
         );
-      } else if (isRestock && selectedMaterial) {
-        savedEquipment = await updateEquipment(selectedMaterial.id, payload);
-        safeLogActivity(
-          {
-            action: 'restock_equipment',
-            entity: 'equipment',
-            entityId: savedEquipment.id,
-            details: { name: savedEquipment.name, added: totalQuantity },
-          },
-          user,
-        );
       } else {
+        if (quantityField) payload[quantityField] = totalQuantity;
+        if (availableField) payload[availableField] = totalQuantity;
         savedEquipment = await createEquipment(payload);
         safeLogActivity(
           {
@@ -276,18 +332,9 @@ export default function Magazzino() {
       setEditingBorrowed(0);
       setSelectedMaterialId('');
       setRestockMode('replace');
-      if (!inspectionField && savedEquipment?.id) {
-        const map = getStoredInspectionMap();
-        if (inspectionUrl) {
-          map[String(savedEquipment.id)] = inspectionUrl;
-        } else {
-          delete map[String(savedEquipment.id)];
-        }
-        saveStoredInspectionMap(map);
-      }
       loadMaterials();
     } catch (submitError) {
-      setError(submitError.message ?? 'Errore durante il salvataggio.');
+      setError(friendlyDbError(submitError, 'Errore durante il salvataggio.'));
     } finally {
       setSubmitting(false);
     }
@@ -311,6 +358,8 @@ export default function Magazzino() {
       quantity: total || available || '',
       notes: notesField ? material[notesField] ?? '' : '',
       inspection_url: material.inspection_url ?? '',
+      prossima_ispezione: dateInputValue(material.prossima_ispezione),
+      fine_vita: dateInputValue(material.fine_vita),
     });
   }
 
@@ -335,15 +384,7 @@ export default function Magazzino() {
     }
     setError('');
     if (!inspectionField) {
-      const map = getStoredInspectionMap();
-      if (normalized) {
-        map[String(material.id)] = normalized;
-      } else {
-        delete map[String(material.id)];
-      }
-      saveStoredInspectionMap(map);
-      setError('');
-      setMaterials((prev) => [...prev]);
+      setError('Aggiorna il database (migrazione 05) per salvare i link delle ispezioni.');
       return;
     }
     try {
@@ -354,21 +395,15 @@ export default function Magazzino() {
     }
   }
 
-  function openInspectionsFolder() {
+  async function openInspectionsFolder() {
     if (!canManageInspections) return;
-    const storedUrl = typeof window !== 'undefined'
-      ? window.localStorage.getItem(INSPECTIONS_FOLDER_STORAGE_KEY) ?? ''
-      : '';
-    const fallbackMaterialUrl =
-      materials.find((item) => String(item.inspection_url ?? '').trim())?.inspection_url ?? '';
-    const initialTarget = INSPECTIONS_FOLDER_URL || storedUrl || fallbackMaterialUrl;
-    if (initialTarget && /^https?:\/\//i.test(initialTarget)) {
-      window.open(initialTarget, '_blank', 'noopener,noreferrer');
+    const target = INSPECTIONS_FOLDER_URL || inspectionsFolderUrl;
+    if (target && /^https?:\/\//i.test(target)) {
+      window.open(target, '_blank', 'noopener,noreferrer');
       return;
     }
-
     const manualUrl = window.prompt(
-      'Inserisci il link della cartella Drive Ispezioni',
+      'Inserisci il link della cartella Drive Ispezioni (verrà salvato per tutto lo staff)',
       'https://drive.google.com/drive/folders/...',
     );
     if (!manualUrl) return;
@@ -377,7 +412,12 @@ export default function Magazzino() {
       setError('Inserisci un URL valido (http:// o https://).');
       return;
     }
-    window.localStorage.setItem(INSPECTIONS_FOLDER_STORAGE_KEY, normalized);
+    try {
+      await setSetting(INSPECTIONS_FOLDER_SETTING, normalized, user);
+      setInspectionsFolderUrl(normalized);
+    } catch (settingError) {
+      setError(friendlyDbError(settingError, 'Impossibile salvare il link della cartella.'));
+    }
     window.open(normalized, '_blank', 'noopener,noreferrer');
   }
 
@@ -418,6 +458,12 @@ export default function Magazzino() {
         value={search}
         onChange={(event) => setSearch(event.target.value)}
       />
+      {dpiAlertCount > 0 && (
+        <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', color: '#c92a2a' }}>
+          <input type="checkbox" checked={dpiFilter} onChange={(event) => setDpiFilter(event.target.checked)} />
+          Mostra solo i {dpiAlertCount} materiali con ispezione o fine vita in scadenza
+        </label>
+      )}
 
       {!canEditInventory && (
         <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
@@ -525,7 +571,9 @@ export default function Magazzino() {
               onChange={(event) => handleChange('description', event.target.value)}
               disabled={Boolean(selectedMaterialId) && !editingId}
             />
-            <label htmlFor="notes">Note (acquisti, sostituzioni, altro)</label>
+            <label htmlFor="notes">
+              {selectedMaterialId && !editingId ? 'Nota da aggiungere (facoltativa)' : 'Note (acquisti, sostituzioni, altro)'}
+            </label>
             <textarea
               id="notes"
               placeholder={
@@ -554,21 +602,43 @@ export default function Magazzino() {
                   value={form.inspection_url}
                   onChange={(event) => handleChange('inspection_url', event.target.value)}
                 />
-                {!inspectionField && (
-                  <small style={{ color: 'var(--color-muted)' }}>
-                    Se il salvataggio fallisce, aggiungi la colonna <code>inspection_url</code> alla tabella equipment.
-                  </small>
-                )}
+                <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+                  <label style={{ display: 'grid', gap: '0.25rem' }}>
+                    Prossima ispezione
+                    <input
+                      type="date"
+                      value={form.prossima_ispezione}
+                      onChange={(event) => handleChange('prossima_ispezione', event.target.value)}
+                    />
+                  </label>
+                  <label style={{ display: 'grid', gap: '0.25rem' }}>
+                    Fine vita del dispositivo
+                    <input
+                      type="date"
+                      value={form.fine_vita}
+                      onChange={(event) => handleChange('fine_vita', event.target.value)}
+                    />
+                  </label>
+                </div>
+                <small style={{ color: 'var(--color-muted)' }}>
+                  Per corde, imbraghi e connettori la fine vita la indica il produttore nella nota informativa.
+                  L&apos;app avvisa 30 giorni prima dell&apos;ispezione e 90 giorni prima della fine vita.
+                </small>
               </>
             )}
             <input
               type="number"
               min={0}
-              placeholder={selectedMaterialId && !editingId ? 'Quantità da aggiungere' : 'Quantità'}
+              placeholder={selectedMaterialId && !editingId ? 'Quantità da aggiungere' : 'Quantità totale'}
               value={form.quantity}
               onChange={(event) => handleChange('quantity', event.target.value)}
               required
             />
+            {editingId && editingBorrowed > 0 && (
+              <small style={{ color: 'var(--color-muted)' }}>
+                {editingBorrowed} {editingBorrowed === 1 ? 'pezzo è' : 'pezzi sono'} in prestito: restano conteggiati anche se cambi il totale.
+              </small>
+            )}
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" disabled={submitting}>
                 {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
@@ -611,6 +681,22 @@ export default function Magazzino() {
                   </strong>
                 </header>
                 <p style={{ color: 'var(--color-muted)' }}>{material.description || 'Nessuna descrizione'}</p>
+                {getDpiAlerts(material).map((alert) => (
+                  <p
+                    key={alert.kind}
+                    style={{
+                      margin: '0 0 0.35rem',
+                      padding: '0.35rem 0.6rem',
+                      borderRadius: '0.5rem',
+                      background: alert.level === 'expired' ? '#fff5f5' : '#fff9db',
+                      color: alert.level === 'expired' ? '#c92a2a' : '#8a6d00',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {alert.text}
+                    {alert.kind === 'fine_vita' && alert.level === 'expired' ? ' · non usare, da ritirare' : ''}
+                  </p>
+                ))}
                 {notesField && material[notesField] && (
                   <p style={{ color: 'var(--color-muted)', fontStyle: 'italic' }}>Note: {material[notesField]}</p>
                 )}
