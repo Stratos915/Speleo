@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import AuthContext from './authContext';
 import { safeLogActivity } from '../services/activityLogs.js';
@@ -10,24 +10,24 @@ export default function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [profileNeedsPasswordReset, setProfileNeedsPasswordReset] = useState(false);
   const [approvalStatus, setApprovalStatus] = useState(null);
-  const SUPER_ADMIN_EMAILS = ['stratosdiakatos@yahoo.it'];
+  const [profileLoadedFor, setProfileLoadedFor] = useState(null);
 
-  const resolveRole = useCallback((targetUser) => {
-    if (!targetUser) return 'socio';
-    return (
-      targetUser.user_metadata?.role ??
-      targetUser.app_metadata?.role ??
-      targetUser.raw_user_meta_data?.role ??
-      'socio'
-    );
-  }, []);
+  const currentUserIdRef = useRef(null);
+
+  // Il ruolo arriva solo dalla tabella profiles (protetta lato database).
+  // user_metadata non è affidabile: l'utente può modificarlo da solo.
+  const resolveRole = useCallback(() => 'socio', []);
 
   const applySession = useCallback(
     (nextSession) => {
       setSession(nextSession);
       const nextUser = nextSession?.user ?? null;
       setUser(nextUser);
-      setRole(resolveRole(nextUser));
+      // Al rinnovo del token lo stesso utente mantiene il ruolo già letto dal profilo.
+      if ((nextUser?.id ?? null) !== currentUserIdRef.current) {
+        currentUserIdRef.current = nextUser?.id ?? null;
+        setRole(resolveRole(nextUser));
+      }
     },
     [resolveRole],
   );
@@ -103,13 +103,8 @@ export default function AuthProvider({ children }) {
       if (!targetUser) {
         setProfileNeedsPasswordReset(false);
         setApprovalStatus(null);
+        setProfileLoadedFor(null);
         return null;
-      }
-      if (SUPER_ADMIN_EMAILS.includes((targetUser.email ?? '').toLowerCase())) {
-        setApprovalStatus('approved');
-        setRole('admin');
-        setProfileNeedsPasswordReset(false);
-        return { approval_status: 'approved', role: 'admin', password_initialized: true };
       }
       const provider =
         targetUser.app_metadata?.provider ??
@@ -125,17 +120,20 @@ export default function AuthProvider({ children }) {
         .maybeSingle();
       if (error) {
         console.warn('[AuthContext] impossibile leggere profilo:', error.message);
+        setRole('socio');
         setProfileNeedsPasswordReset(false);
         setApprovalStatus(null);
+        setProfileLoadedFor(targetUser.id);
         return null;
       }
-      if (data?.role) setRole(data.role);
+      setRole(data?.role ?? 'socio');
       setApprovalStatus(data?.approval_status ?? 'pending');
       if (provider && provider !== 'email') {
         setProfileNeedsPasswordReset(false);
       } else {
         setProfileNeedsPasswordReset(data ? !data.password_initialized : false);
       }
+      setProfileLoadedFor(targetUser.id);
       return data ?? null;
     },
     [user],
@@ -161,7 +159,8 @@ export default function AuthProvider({ children }) {
       session,
       user,
       role,
-      loading,
+      // Finché il profilo non è letto il ruolo non è noto: le rotte protette attendono.
+      loading: loading || Boolean(user && profileLoadedFor !== user.id),
       isAuthenticated: Boolean(user),
       needsPasswordReset: profileNeedsPasswordReset,
       approvalStatus,
@@ -175,6 +174,7 @@ export default function AuthProvider({ children }) {
       user,
       role,
       loading,
+      profileLoadedFor,
       login,
       logout,
       profileNeedsPasswordReset,

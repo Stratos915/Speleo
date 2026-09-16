@@ -172,21 +172,6 @@ export async function getEquipmentById(identifier) {
   return normalizeEquipmentRow(data);
 }
 
-export async function setEquipmentAvailability(identifier, quantityAvailable) {
-  if (!equipmentAvailableColumn) {
-    await ensureEquipmentSchema(identifier);
-  }
-  const targetColumn = equipmentAvailableColumn ?? 'quantity_available';
-  const { data, error } = await withEquipmentFilter(
-    supabase.from(TABLE).update({ [targetColumn]: quantityAvailable }),
-    identifier,
-  )
-    .select('*')
-    .single();
-  if (error) throw error;
-  return normalizeEquipmentRow(data);
-}
-
 async function ensureEquipmentSchema(identifier) {
   if (
     equipmentQuantityColumn &&
@@ -222,4 +207,15 @@ async function getNextEquipmentIdentifier() {
   if (error) throw error;
   const current = data?.equipment_id ?? 0;
   return Number(current) + 1;
+}
+
+export async function restockEquipment({ id, quantity, increaseTotal, note = null }) {
+  const { data, error } = await supabase.rpc('equipment_restock', {
+    p_equipment_id: id,
+    p_quantity: quantity,
+    p_increase_total: Boolean(increaseTotal),
+    p_note: note,
+  });
+  if (error) throw error;
+  return normalizeEquipmentRow(data);
 }
