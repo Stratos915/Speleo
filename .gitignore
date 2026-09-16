@@ -22,3 +22,6 @@ pnpm-debug.log*
 
 # Supabase CLI temp
 supabase/.temp/
+
+# Icone PWA generate da scripts/genera-icone.mjs
+public/icons/

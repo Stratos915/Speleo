@@ -1,12 +1,17 @@
 {
   "name": "speleo",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
+    "icone": "node scripts/genera-icone.mjs",
+    "predev": "node scripts/genera-icone.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/genera-icone.mjs",
     "build": "vite build",
     "lint": "eslint src",
+    "test": "npx --yes vitest@3.2.4 run",
+    "test:watch": "npx --yes vitest@3.2.4",
     "preview": "vite preview"
   },
   "dependencies": {

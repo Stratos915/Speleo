@@ -23,51 +23,10 @@ create table if not exists public.user_sessions (
 alter table public.analytics_events enable row level security;
 alter table public.user_sessions enable row level security;
 
-create policy "allow analytics insert for authenticated"
-  on public.analytics_events
-  for insert
-  to authenticated
-  with check (true);
-
-create policy "allow analytics select for authenticated"
-  on public.analytics_events
-  for select
-  to authenticated
-  using (true);
-
-create policy "allow session upsert for authenticated"
-  on public.user_sessions
-  for insert
-  to authenticated
-  with check (auth.uid() = user_id);
-
-create policy "allow session update for authenticated"
-  on public.user_sessions
-  for update
-  to authenticated
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
-create policy "allow session select for authenticated"
-  on public.user_sessions
-  for select
-  to authenticated
-  using (true);
+-- Le policy RLS sono in supabase/migrations/20260916090200_privacy_statistiche.sql
+-- (le statistiche sono visibili solo ad admin e presidente).
 
 create index if not exists analytics_events_created_at_idx on public.analytics_events (created_at desc);
 create index if not exists user_sessions_last_seen_idx on public.user_sessions (last_seen_at desc);
 
-create or replace function public.analytics_visits_by_day(since_param timestamptz)
-returns table(day date, visits bigint, unique_users bigint)
-language sql
-stable
-as $$
-  select
-    date_trunc('day', created_at) as day,
-    count(*) as visits,
-    count(distinct coalesce(user_email, 'anonymous')) as unique_users
-  from public.analytics_events
-  where created_at >= coalesce(since_param, timezone('utc', now()) - interval '30 days')
-  group by 1
-  order by 1;
-$$;
+-- La funzione analytics_visits_by_day è definita nella migrazione 20260916090200.
