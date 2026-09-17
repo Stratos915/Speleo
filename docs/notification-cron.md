@@ -1,135 +1,57 @@
-# Automazione notification-cron
+# Notifiche automatiche (`notification-cron`)
 
-Questa funzione sostituisce temporaneamente il deploy su Supabase delle notifiche automatiche. Qui trovi tutti i passaggi per eseguirla in locale o da un job pianificato.
+Il job `supabase/functions/notification-cron/index.ts` controlla:
 
-## 1. Variabili d'ambiente
+| Tipo | Quando scatta | Chi viene avvisato |
+|---|---|---|
+| `OVERDUE` | prestito materiale ancora aperto oltre la data di riconsegna | magazziniere (in app) + webhook email |
+| `USCITA_RIENTRO` | uscita ancora aperta oltre il **rientro previsto** + tolleranza (60 minuti di default) | presidente e responsabile (in app) + webhook email |
+| `DPI_ISPEZIONE` | ispezione scaduta o entro 30 giorni | magazziniere (in app) + webhook email |
+| `DPI_FINE_VITA` | fine vita superata o entro 90 giorni | magazziniere (in app) + webhook email |
 
-Crea un file `.env.notification-cron` (non va committato) con le chiavi richieste dalla funzione:
+Ogni avviso viene registrato una sola volta in `notification_log` (chiave `kind` + `ref_id`): il job può girare
+spesso senza mandare doppioni. Se cambia la data di riconsegna o il rientro previsto, l'avviso riparte.
 
-```
-SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
-NOTIFICATION_CRON_SECRET=una-stringa-lunga
-# facoltativo ma consigliato
-NOTIFICATION_EMAIL_WEBHOOK=https://...
-NOTIFICATION_ADMIN_EMAIL=presidente@gsu.it
-NOTIFICATION_MAGAZZINIERE_EMAIL=magazzino@gsu.it
-```
+> Il promemoria di rientro **non è un sistema di allerta soccorso**. GitHub può ritardare le esecuzioni
+> pianificate di 10-20 minuti e il job dipende da connessione, email e configurazione. Le procedure di
+> sicurezza del gruppo restano quelle di sempre; in emergenza si chiama il 112.
 
-- le email `NOTIFICATION_<RUOLO>_EMAIL` sono usate per spedire i promemoria ai ruoli admin/magazziniere;
-- il webhook è opzionale: se mancante, la funzione crea comunque le notifiche nel DB ma non manda email.
+## Esecuzione pianificata (GitHub Actions)
 
-## 2. Comando npm
+Il workflow `.github/workflows/notification-cron.yml` gira ogni 30 minuti. Configura in
+*Settings → Secrets and variables → Actions*:
 
-Aggiungi allo `package.json` (se non già presente):
+- **Secrets**: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NOTIFICATION_CRON_SECRET` (facoltativo),
+  `NOTIFICATION_EMAIL_WEBHOOK`, `NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET`, `NOTIFICATION_ADMIN_EMAIL`,
+  `NOTIFICATION_MAGAZZINIERE_EMAIL`, `NOTIFICATION_PRESIDENTE_EMAIL`, `NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE`.
+- **Variables** (facoltativa): `USCITA_RIENTRO_TOLLERANZA_MINUTI`.
 
-```json
-{
-  "scripts": {
-    "notification:cron": "env $(cat .env.notification-cron | xargs) deno run -A supabase/functions/notification-cron/index.ts"
-  }
-}
-```
+GitHub disattiva i workflow pianificati dei repository pubblici dopo 60 giorni senza commit: se succede,
+riattivalo dalla scheda *Actions*.
 
-Su Windows PowerShell è più semplice fare:
+## Formato del webhook
 
-```json
-"notification:cron": "powershell -Command \"$env:SUPABASE_URL=(Get-Content .env.notification-cron | ConvertFrom-StringData)['SUPABASE_URL']; deno run -A supabase/functions/notification-cron/index.ts\""
-```
+Il webhook riceve un `POST` JSON firmato (header `x-speleo-signature`, HMAC-SHA256 in base64url del corpo) con
+uno di questi `type`:
 
-In alternativa, esporta le variabili prima di eseguire `npm run notification:cron`.
+- `loans_due`: stesso formato di prima (`loans`, `count`, `total_due_count`, `recipients`);
+- `uscite_rientro_superato`: `uscite` (con `responsabile_email`), `tolerance_minutes`, `recipients.responsabili`;
+- `dpi_in_scadenza`: `items` con `tipo` (`ispezione` | `fine_vita`), `data`, `nome`.
 
-## 3. Esecuzione manuale
+Se il servizio che invia le email gestisce solo `loans_due`, va esteso per i due nuovi tipi.
+
+## Esecuzione manuale
 
 ```bash
-cd Speleo
-source .env.notification-cron
-npm run notification:cron
+export SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...
+deno run -A supabase/functions/notification-cron/index.ts --run-once
 ```
 
-L'output `{"success": true}` significa che prestiti/libri in ritardo sono stati trasformati in notifiche e, se configurato, sono partite anche le email.
+La risposta riporta per ogni controllo quanti elementi sono stati trovati (`total`) e quanti erano nuovi (`new`).
 
-## 4. Pianificazione temporanea
+## Correzioni rispetto alla versione precedente
 
-Finché non sarà possibile deployare l'Edge Function, puoi programmare l'esecuzione automatica in tre modi (scegline uno):
-
-### Cron locale (Linux/macOS)
-
-1. Apri il crontab con `crontab -e`.
-2. Aggiungi:
-
-```
-0 7 * * * cd /Users/<user>/Documents/GitHub/Speleo && source .env.notification-cron && npm run notification:cron >> cron-notification.log 2>&1
-```
-
-Esegue ogni giorno alle 7:00 e salva il log accanto al repo.
-
-### Launchd (macOS)
-
-1. Crea `~/Library/LaunchAgents/it.gsu.notification-cron.plist` con un payload simile:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple Computer//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-  <dict>
-    <key>Label</key>
-    <string>it.gsu.notification-cron</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>/bin/zsh</string>
-      <string>-lc</string>
-      <string>cd /Users/<user>/Documents/GitHub/Speleo && source .env.notification-cron && npm run notification:cron</string>
-    </array>
-    <key>StartCalendarInterval</key>
-    <dict>
-      <key>Hour</key>
-      <integer>7</integer>
-      <key>Minute</key>
-      <integer>0</integer>
-    </dict>
-    <key>StandardOutPath</key>
-    <string>/Users/<user>/Documents/GitHub/Speleo/notification-cron.log</string>
-    <key>StandardErrorPath</key>
-    <string>/Users/<user>/Documents/GitHub/Speleo/notification-cron-error.log</string>
-  </dict>
-</plist>
-```
-
-2. Carica il job: `launchctl load ~/Library/LaunchAgents/it.gsu.notification-cron.plist`.
-
-### GitHub Actions
-
-1. Aggiungi `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `NOTIFICATION_CRON_SECRET`, ecc. come *Repository secrets*.
-2. Crea `.github/workflows/notification-cron.yml`:
-
-```yaml
-name: notification-cron
-on:
-  schedule:
-    - cron: '0 6 * * *'
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: denoland/setup-deno@v2
-        with:
-          deno-version: v1.x
-      - name: Run cron
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          NOTIFICATION_CRON_SECRET: ${{ secrets.NOTIFICATION_CRON_SECRET }}
-          NOTIFICATION_EMAIL_WEBHOOK: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK }}
-          NOTIFICATION_ADMIN_EMAIL: ${{ secrets.NOTIFICATION_ADMIN_EMAIL }}
-          NOTIFICATION_MAGAZZINIERE_EMAIL: ${{ secrets.NOTIFICATION_MAGAZZINIERE_EMAIL }}
-        run: deno run -A supabase/functions/notification-cron/index.ts
-```
-
-Questo approccio centralizza l'esecuzione e conserva i log dentro GitHub Actions.
-
----
-
-Quando saranno disponibili i crediti Supabase, sarà sufficiente deployare l'Edge Function (`supabase functions deploy notification-cron`) e configurare lo Scheduler di Supabase con lo stesso `NOTIFICATION_CRON_SECRET` per tornare a un flusso completamente gestito.
-
+- la query dei prestiti chiedeva la colonna `borrower_contact`, che non esiste in `loans`: il controllo falliva;
+- non venivano esclusi i prestiti già chiusi;
+- l'indice anti-doppioni conteneva colonne `NULL` e quindi non bloccava nulla; il workflow inoltre eseguiva lo
+  script due volte di seguito.
