@@ -41,6 +41,18 @@ alter table public.notification_log
 
 
 -- ---------------------------------------------------------------------
+-- loan_id facoltativo
+-- ---------------------------------------------------------------------
+--
+-- Nei database esistenti loan_id poteva essere obbligatoria, perche' il
+-- vecchio job notificava solo i prestiti scaduti. I nuovi avvisi su
+-- rientro delle uscite e scadenze DPI non riguardano un prestito.
+
+alter table public.notification_log
+  alter column loan_id drop not null;
+
+
+-- ---------------------------------------------------------------------
 -- RLS
 -- ---------------------------------------------------------------------
 -- Questa tabella viene utilizzata dal job tramite service role.
@@ -95,6 +107,12 @@ update public.notification_log
 -- realmente l'idempotenza.
 
 drop index if exists public.notification_log_unique_idx;
+
+
+-- Un altro indice storico, su (loan_id, kind), non serve piu':
+-- gli avvisi che non riguardano un prestito hanno loan_id vuoto.
+
+drop index if exists public.notification_log_unique;
 
 
 -- Ricreiamo anche il nuovo indice nel caso la migration venga
