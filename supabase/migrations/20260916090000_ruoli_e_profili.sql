@@ -58,7 +58,7 @@ begin
   alter table public.profiles
     alter column approval_status set default 'pending';
 
-end
+end;
 $migration$;
 
 
