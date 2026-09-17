@@ -2,24 +2,22 @@ name: notification-cron
 
 on:
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
-    inputs:
-      reason:
-        description: "Motivo dell'esecuzione manuale"
-        required: false
+
+concurrency:
+  group: notification-cron
+  cancel-in-progress: false
 
 jobs:
   run-cron:
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v5
-
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-
       - name: Run notification cron (one-shot)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -31,6 +29,5 @@ jobs:
           NOTIFICATION_PRESIDENTE_EMAIL: ${{ secrets.NOTIFICATION_PRESIDENTE_EMAIL }}
           NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET }}
           NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE: ${{ secrets.NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE }}
-        run: |
-          deno run -A supabase/functions/notification-cron/index.ts --run-once
-          deno run -A supabase/functions/notification-cron/index.ts --run-once
+          USCITA_RIENTRO_TOLLERANZA_MINUTI: ${{ vars.USCITA_RIENTRO_TOLLERANZA_MINUTI }}
+        run: deno run -A supabase/functions/notification-cron/index.ts --run-once
