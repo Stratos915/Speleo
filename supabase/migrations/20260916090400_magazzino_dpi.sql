@@ -1,15 +1,20 @@
 -- =====================================================================
 -- 05 · Magazzino: ispezioni, scadenze DPI, impostazioni condivise
 -- ---------------------------------------------------------------------
--- * Colonne per link ispezione, note e scadenze DPI (prossima ispezione
---   e fine vita del dispositivo).
--- * Tabella app_settings: la cartella Drive delle ispezioni non è più
---   salvata nel singolo browser.
--- * equipment_restock(): rifornimento atomico (niente conteggi
---   calcolati su dati vecchi nel browser).
--- * Se lo staff cambia la quantità totale, la disponibilità si sposta
---   della stessa differenza, senza perdere i pezzi in prestito.
+-- * Colonne per link ispezione, note e scadenze DPI.
+-- * Tabella app_settings per impostazioni condivise.
+-- * equipment_restock(): rifornimento atomico.
+-- * Se cambia la quantità totale, il database conserva correttamente
+--   il numero di pezzi già impegnati nei prestiti.
+-- * Non è possibile ridurre il totale sotto il numero di pezzi
+--   attualmente indisponibili.
+-- * Richiede le migrazioni 01 e 02.
 -- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- Dati DPI / ispezioni
+-- ---------------------------------------------------------------------
 
 alter table public.equipment
   add column if not exists notes text,
@@ -17,8 +22,17 @@ alter table public.equipment
   add column if not exists prossima_ispezione date,
   add column if not exists fine_vita date;
 
-create index if not exists equipment_prossima_ispezione_idx on public.equipment (prossima_ispezione);
-create index if not exists equipment_fine_vita_idx on public.equipment (fine_vita);
+
+create index if not exists equipment_prossima_ispezione_idx
+  on public.equipment (prossima_ispezione);
+
+create index if not exists equipment_fine_vita_idx
+  on public.equipment (fine_vita);
+
+
+-- =====================================================================
+-- IMPOSTAZIONI CONDIVISE
+-- =====================================================================
 
 create table if not exists public.app_settings (
   key text primary key,
@@ -27,41 +41,160 @@ create table if not exists public.app_settings (
   updated_by uuid
 );
 
-alter table public.app_settings enable row level security;
 
-drop policy if exists app_settings_select on public.app_settings;
-drop policy if exists app_settings_write on public.app_settings;
+alter table public.app_settings
+  enable row level security;
 
-create policy app_settings_select on public.app_settings
-for select to authenticated
-using (public.current_user_role() is not null);
 
-create policy app_settings_write on public.app_settings
-for all to authenticated
-using (public.has_any_role(array['admin', 'presidente', 'magazziniere']))
-with check (public.has_any_role(array['admin', 'presidente', 'magazziniere']));
+drop policy if exists app_settings_select
+  on public.app_settings;
 
-create or replace function public.equipment_keep_borrowed_on_total_change()
+drop policy if exists app_settings_write
+  on public.app_settings;
+
+
+-- Qualunque profilo approvato può leggere le impostazioni.
+
+create policy app_settings_select
+on public.app_settings
+for select
+to authenticated
+using (
+  public.current_user_role() is not null
+);
+
+
+-- Solo chi gestisce il magazzino può modificarle.
+
+create policy app_settings_write
+on public.app_settings
+for all
+to authenticated
+using (
+  public.has_any_role(
+    array['admin', 'presidente', 'magazziniere']
+  )
+)
+with check (
+  public.has_any_role(
+    array['admin', 'presidente', 'magazziniere']
+  )
+);
+
+
+-- =====================================================================
+-- MODIFICA DELLA QUANTITÀ TOTALE
+-- =====================================================================
+--
+-- Esempio:
+--
+-- totale precedente      = 10
+-- disponibile precedente =  6
+-- impegnato              =  4
+--
+-- nuovo totale = 12
+-- nuovo disponibile = 8
+--
+-- nuovo totale = 5
+-- nuovo disponibile = 1
+--
+-- Non è invece consentito impostare il totale a 3 perché ci sono
+-- ancora 4 pezzi impegnati.
+-- =====================================================================
+
+create or replace function
+public.equipment_keep_borrowed_on_total_change()
 returns trigger
 language plpgsql
+set search_path = public
 as $$
+declare
+  v_old_total integer;
+  v_old_available integer;
+  v_unavailable integer;
+  v_new_total integer;
 begin
-  if new.quantity_total is distinct from old.quantity_total
-     and new.quantity_available is not distinct from old.quantity_available then
-    new.quantity_available := greatest(
-      coalesce(old.quantity_available, old.quantity_total, 0)
-        + (coalesce(new.quantity_total, 0) - coalesce(old.quantity_total, 0)),
+
+  if new.quantity_total
+     is not distinct from old.quantity_total then
+    return new;
+  end if;
+
+
+  v_old_total :=
+    coalesce(old.quantity_total, 0);
+
+  v_old_available :=
+    coalesce(
+      old.quantity_available,
+      old.quantity_total,
       0
     );
+
+  v_new_total :=
+    coalesce(new.quantity_total, 0);
+
+
+  if v_new_total < 0 then
+    raise exception
+      'La quantità totale non può essere negativa.'
+      using errcode = '22023';
   end if;
+
+
+  -- Quantità attualmente non disponibile.
+  v_unavailable :=
+    greatest(
+      v_old_total - v_old_available,
+      0
+    );
+
+
+  -- Non possiamo eliminare dal totale materiale che risulta
+  -- ancora impegnato in un prestito o mancante.
+  if v_new_total < v_unavailable then
+
+    raise exception
+      'Impossibile impostare il totale a %. Ci sono ancora % pezzi indisponibili.',
+      v_new_total,
+      v_unavailable
+      using errcode = 'P0001';
+
+  end if;
+
+
+  -- Se il chiamante NON sta modificando direttamente anche
+  -- quantity_available, manteniamo invariata la quantità impegnata.
+  if new.quantity_available
+     is not distinct from old.quantity_available then
+
+    new.quantity_available :=
+      v_new_total - v_unavailable;
+
+  end if;
+
+
   return new;
 end;
 $$;
 
-drop trigger if exists equipment_keep_borrowed_on_total_change on public.equipment;
+
+drop trigger if exists
+  equipment_keep_borrowed_on_total_change
+  on public.equipment;
+
+
 create trigger equipment_keep_borrowed_on_total_change
-before update of quantity_total on public.equipment
-for each row execute function public.equipment_keep_borrowed_on_total_change();
+before update of quantity_total
+on public.equipment
+for each row
+execute function
+  public.equipment_keep_borrowed_on_total_change();
+
+
+-- =====================================================================
+-- RIFORNIMENTO MAGAZZINO
+-- =====================================================================
 
 create or replace function public.equipment_restock(
   p_equipment_id bigint,
@@ -73,44 +206,144 @@ returns public.equipment
 language plpgsql
 security definer
 set search_path = public
+set row_security = off
 as $$
 declare
   v_row public.equipment;
 begin
-  if not public.has_any_role(array['admin', 'presidente', 'magazziniere']) then
-    raise exception 'Non hai i permessi per rifornire il magazzino.' using errcode = '42501';
+
+  if not public.has_any_role(
+    array['admin', 'presidente', 'magazziniere']
+  ) then
+
+    raise exception
+      'Non hai i permessi per rifornire il magazzino.'
+      using errcode = '42501';
+
   end if;
-  if p_quantity is null or p_quantity <= 0 then
-    raise exception 'La quantità deve essere maggiore di zero.' using errcode = '22023';
+
+
+  if p_quantity is null
+     or p_quantity <= 0 then
+
+    raise exception
+      'La quantità deve essere maggiore di zero.'
+      using errcode = '22023';
+
   end if;
+
+
+  -- Blocchiamo la riga per evitare due rifornimenti concorrenti.
+
+  perform 1
+  from public.equipment
+  where equipment_id = p_equipment_id
+  for update;
+
+
+  if not found then
+    raise exception
+      'Materiale non trovato.'
+      using errcode = 'P0002';
+  end if;
+
 
   update public.equipment
-     set quantity_total = case
-           when p_increase_total then coalesce(quantity_total, 0) + p_quantity
-           else quantity_total
-         end,
-         quantity_available = case
-           when p_increase_total then coalesce(quantity_available, quantity_total, 0) + p_quantity
-           else least(
-             coalesce(quantity_available, quantity_total, 0) + p_quantity,
-             coalesce(quantity_total, coalesce(quantity_available, 0) + p_quantity)
-           )
-         end,
-         notes = case
-           when nullif(trim(p_note), '') is null then notes
-           when coalesce(notes, '') = '' then trim(p_note)
-           else notes || E'\n' || trim(p_note)
-         end
-   where equipment_id = p_equipment_id
-  returning * into v_row;
 
-  if v_row.equipment_id is null then
-    raise exception 'Materiale non trovato.' using errcode = 'P0002';
-  end if;
+     set quantity_total =
+           case
+             when p_increase_total then
+               coalesce(quantity_total, 0) + p_quantity
+             else
+               quantity_total
+           end,
+
+         quantity_available =
+           case
+             when p_increase_total then
+
+               coalesce(
+                 quantity_available,
+                 quantity_total,
+                 0
+               ) + p_quantity
+
+             else
+
+               least(
+                 coalesce(
+                   quantity_available,
+                   quantity_total,
+                   0
+                 ) + p_quantity,
+
+                 coalesce(
+                   quantity_total,
+                   coalesce(quantity_available, 0) + p_quantity
+                 )
+               )
+           end,
+
+         notes =
+           case
+             when nullif(trim(p_note), '') is null then
+               notes
+
+             when coalesce(notes, '') = '' then
+               trim(p_note)
+
+             else
+               notes || E'\n' || trim(p_note)
+           end
+
+   where equipment_id = p_equipment_id
+
+  returning *
+       into v_row;
+
 
   return v_row;
 end;
 $$;
 
-revoke all on function public.equipment_restock(bigint, integer, boolean, text) from public, anon;
-grant execute on function public.equipment_restock(bigint, integer, boolean, text) to authenticated;
+
+-- ---------------------------------------------------------------------
+-- Permessi RPC
+-- ---------------------------------------------------------------------
+
+revoke all
+on function public.equipment_restock(
+  bigint,
+  integer,
+  boolean,
+  text
+)
+from public, anon;
+
+
+grant execute
+on function public.equipment_restock(
+  bigint,
+  integer,
+  boolean,
+  text
+)
+to authenticated;
+
+
+-- =====================================================================
+-- VERIFICHE CONSIGLIATE
+-- =====================================================================
+--
+-- select
+--   equipment_id,
+--   name,
+--   quantity_total,
+--   quantity_available,
+--   quantity_total - quantity_available as indisponibili,
+--   prossima_ispezione,
+--   fine_vita
+-- from public.equipment
+-- order by name;
+--
+-- =====================================================================
