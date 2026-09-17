@@ -11,6 +11,8 @@
 --   pezzi mancanti.
 -- * Correzioni, riaperture, cambi materiale e cancellazioni vengono
 --   gestiti senza falsare la disponibilità.
+-- * Eliminare un prestito chiuso non modifica il magazzino.
+-- * La disponibilità non scende mai sotto zero e non supera il totale.
 -- * Richiede la migrazione 01.
 -- =====================================================================
 
@@ -183,11 +185,13 @@ begin
   end if;
 
 
+  -- Verso l'alto non blocchiamo: nei dati storici la disponibilità può
+  -- essere già al massimo anche con prestiti aperti (il vecchio gestionale
+  -- la calcolava nel browser). Un errore qui impedirebbe ai soci di
+  -- restituire il materiale: il valore viene quindi limitato al totale.
   if v_total is not null
      and v_new_available > v_total then
-    raise exception
-      'La disponibilità non può superare la quantità totale.'
-      using errcode = 'P0001';
+    v_new_available := v_total;
   end if;
 
 
@@ -355,12 +359,15 @@ declare
   v_unavailable integer;
 begin
 
+  -- Solo un prestito ancora attivo restituisce i pezzi al magazzino.
+  -- Eliminare dallo storico un prestito chiuso non deve far
+  -- "ricomparire" eventuali pezzi mancanti, che restano persi.
   v_unavailable :=
     case
       when old.status in ('in_corso', 'active')
         then coalesce(old.quantity, 0)
       else
-        coalesce(old.missing_quantity, 0)
+        0
     end;
 
 
@@ -690,6 +697,24 @@ to authenticated;
 -- =====================================================================
 -- VERIFICHE CONSIGLIATE DOPO L'ESECUZIONE
 -- =====================================================================
+--
+-- Materiali la cui disponibilità non corrisponde ai prestiti registrati
+-- (attesi = totale - pezzi in prestito attivo). Nessuna riga = tutto ok.
+-- Le differenze possono dipendere anche da pezzi persi in passato:
+-- vanno valutate caso per caso dal magazziniere.
+--
+-- select e.equipment_id, e.name, e.quantity_total, e.quantity_available,
+--        e.quantity_total - coalesce(l.in_prestito, 0) as disponibili_attesi
+--   from public.equipment e
+--   left join (
+--     select equipment_id, sum(quantity) as in_prestito
+--       from public.loans
+--      where status in ('in_corso', 'active')
+--      group by equipment_id
+--   ) l using (equipment_id)
+--  where e.quantity_available is distinct from
+--        e.quantity_total - coalesce(l.in_prestito, 0)
+--  order by e.name;
 --
 -- select
 --   id,
