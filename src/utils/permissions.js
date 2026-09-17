@@ -22,7 +22,7 @@ const PAGE_PERMISSIONS = {
     },
   },
   uscite: { view: ALL_ROLES, edit: [...FULL_ACCESS_ROLES, 'magazziniere', 'socio'] },
-  prestiti: { view: ALL_ROLES, edit: FULL_ACCESS_ROLES },
+  prestiti: { view: ALL_ROLES, edit: [...FULL_ACCESS_ROLES, 'magazziniere'] },
   scuola: { view: VIEW_ALL_ROLES, edit: [...FULL_ACCESS_ROLES, 'direttore_scuola'] },
   biblioteca: {
     view: ALL_ROLES,

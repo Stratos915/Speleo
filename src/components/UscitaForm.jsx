@@ -14,6 +14,7 @@ const EMPTY_FORM = {
   note: '',
   participants_ids: [],
   participants_manual: '',
+  rientro_previsto: '',
 };
 
 const TIPO_OPTIONS = [
@@ -39,6 +40,23 @@ function timetzForInput(value) {
   return time.slice(0, 5);
 }
 
+// Converte un timestamp in valore per <input type="datetime-local"> nell'ora locale.
+function datetimeLocalForInput(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = (number) => String(number).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(
+    date.getMinutes(),
+  )}`;
+}
+
+function datetimeLocalToIso(value) {
+  if (!value) return null;
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 function timeToTimetz(value) {
   if (!value) return null;
   // Supabase richiede un valore di tipo timetz, aggiungiamo i secondi + timezone per compatibilità.
@@ -62,6 +80,7 @@ export default function UscitaForm({
     data: initialValues?.data ? dateForInput(initialValues.data) : '',
     ora: initialValues?.ora ? timetzForInput(initialValues.ora) : '',
     participants_ids: initialValues?.participants_ids?.map(String) ?? [],
+    rientro_previsto: datetimeLocalForInput(initialValues?.rientro_previsto),
   }));
   const [members, setMembers] = useState(membersList ?? []);
   const [membersLoading, setMembersLoading] = useState(!membersList);
@@ -88,6 +107,7 @@ export default function UscitaForm({
       responsabile_nome: initialValues?.responsabile_nome ?? initialValues?.responsabile ?? '',
       participants_ids: initialValues?.participants_ids?.map(String) ?? [],
       participants_manual: initialValues?.participants_manual ?? '',
+      rientro_previsto: datetimeLocalForInput(initialValues?.rientro_previsto),
     });
     setParticipantsSearch('');
     setSelectedParticipantId('');
@@ -175,6 +195,7 @@ export default function UscitaForm({
       participants_ids: form.participants_ids?.length ? form.participants_ids : null,
       participants_manual: form.participants_manual.trim() || null,
       note: form.note?.trim() ? form.note.trim() : null,
+      rientro_previsto: datetimeLocalToIso(form.rientro_previsto),
     };
     await onSubmit(payload);
   }
@@ -235,6 +256,22 @@ export default function UscitaForm({
             required
           />
         </div>
+      </div>
+
+      <div className="card">
+        <label htmlFor="rientro_previsto">Rientro previsto (facoltativo)</label>
+        <input
+          id="rientro_previsto"
+          type="datetime-local"
+          value={form.rientro_previsto}
+          min={form.data ? `${form.data}T00:00` : undefined}
+          onChange={(event) => handleChange('rientro_previsto', event.target.value)}
+        />
+        <small style={{ color: 'var(--color-muted)' }}>
+          Se l&apos;uscita non viene chiusa entro quest&apos;ora (con un margine di tolleranza), l&apos;app manda un
+          promemoria al responsabile e al presidente. È solo un promemoria: in caso di ritardo reale seguite le procedure
+          del gruppo e, se serve, chiamate il 112.
+        </small>
       </div>
 
       <div className="card">

@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import { createBrowserRouter } from 'react-router-dom';
 import App from './App.jsx';
 import Login from './pages/Login.jsx';
@@ -6,21 +7,25 @@ import ApprovalPending from './pages/ApprovalPending.jsx';
 import PublicHome from './pages/PublicHome.jsx';
 import Privacy from './pages/Privacy.jsx';
 import Terms from './pages/Terms.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Uscite from './pages/Uscite.jsx';
-import UscitaDettaglio from './pages/UscitaDettaglio.jsx';
-import UscitaNuova from './pages/UscitaNuova.jsx';
-import Magazzino from './pages/Magazzino.jsx';
-import Corso from './pages/Corso.jsx';
-import Biblioteca from './pages/Biblioteca.jsx';
-import Report from './pages/Report.jsx';
-import Members from './pages/Members.jsx';
-import PrestitoAvanzato from './pages/PrestitoAvanzato.jsx';
-import StoricoPrestiti from './pages/StoricoPrestiti.jsx';
 import ResetPassword from './pages/ResetPassword.jsx';
 import NotFound from './pages/NotFound.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
+import Lazy from './components/LazyPage.jsx';
 import { getPageEditRoles } from './utils/permissions.js';
+
+// Le pagine interne vengono scaricate solo quando servono: l'app si apre più in fretta.
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Uscite = lazy(() => import('./pages/Uscite.jsx'));
+const UscitaDettaglio = lazy(() => import('./pages/UscitaDettaglio.jsx'));
+const UscitaNuova = lazy(() => import('./pages/UscitaNuova.jsx'));
+const Magazzino = lazy(() => import('./pages/Magazzino.jsx'));
+const Corso = lazy(() => import('./pages/Corso.jsx'));
+const Biblioteca = lazy(() => import('./pages/Biblioteca.jsx'));
+const Report = lazy(() => import('./pages/Report.jsx'));
+const Members = lazy(() => import('./pages/Members.jsx'));
+const PrestitoAvanzato = lazy(() => import('./pages/PrestitoAvanzato.jsx'));
+const StoricoPrestiti = lazy(() => import('./pages/StoricoPrestiti.jsx'));
+
 
 export const router = createBrowserRouter([
   { path: '/', element: <Login /> },
@@ -43,7 +48,9 @@ export const router = createBrowserRouter([
         path: 'dashboard',
         element: (
           <ProtectedRoute page="dashboard">
-            <Dashboard />
+            <Lazy>
+              <Dashboard />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -51,7 +58,9 @@ export const router = createBrowserRouter([
         path: 'uscite',
         element: (
           <ProtectedRoute page="uscite">
-            <Uscite />
+            <Lazy>
+              <Uscite />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -59,7 +68,9 @@ export const router = createBrowserRouter([
         path: 'uscite/new',
         element: (
           <ProtectedRoute page="uscite" roles={getPageEditRoles('uscite')}>
-            <UscitaNuova />
+            <Lazy>
+              <UscitaNuova />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -67,7 +78,9 @@ export const router = createBrowserRouter([
         path: 'uscite/:id',
         element: (
           <ProtectedRoute page="uscite">
-            <UscitaDettaglio />
+            <Lazy>
+              <UscitaDettaglio />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -75,7 +88,9 @@ export const router = createBrowserRouter([
         path: 'magazzino',
         element: (
           <ProtectedRoute page="magazzino">
-            <Magazzino />
+            <Lazy>
+              <Magazzino />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -83,7 +98,9 @@ export const router = createBrowserRouter([
         path: 'soci',
         element: (
           <ProtectedRoute page="soci">
-            <Members />
+            <Lazy>
+              <Members />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -91,7 +108,9 @@ export const router = createBrowserRouter([
         path: 'prestito-avanzato',
         element: (
           <ProtectedRoute page="prestiti">
-            <PrestitoAvanzato />
+            <Lazy>
+              <PrestitoAvanzato />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -99,7 +118,9 @@ export const router = createBrowserRouter([
         path: 'storico-prestiti',
         element: (
           <ProtectedRoute page="prestiti">
-            <StoricoPrestiti />
+            <Lazy>
+              <StoricoPrestiti />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -107,7 +128,9 @@ export const router = createBrowserRouter([
         path: 'corsi',
         element: (
           <ProtectedRoute page="scuola">
-            <Corso />
+            <Lazy>
+              <Corso />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -115,7 +138,9 @@ export const router = createBrowserRouter([
         path: 'biblioteca',
         element: (
           <ProtectedRoute page="biblioteca">
-            <Biblioteca />
+            <Lazy>
+              <Biblioteca />
+            </Lazy>
           </ProtectedRoute>
         ),
       },
@@ -123,7 +148,9 @@ export const router = createBrowserRouter([
         path: 'report',
         element: (
           <ProtectedRoute page="report">
-            <Report />
+            <Lazy>
+              <Report />
+            </Lazy>
           </ProtectedRoute>
         ),
       },

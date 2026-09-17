@@ -21,18 +21,8 @@ create index if not exists member_purchases_created_at_idx on public.member_purc
 
 alter table public.member_purchases enable row level security;
 
--- Helper: resolve role from profiles (security definer)
-create or replace function public.current_user_role()
-returns text
-language sql
-security definer
-set search_path = public
-set row_security = off
-as $$
-  select role from public.profiles where id = auth.uid();
-$$;
-
-grant execute on function public.current_user_role() to authenticated;
+-- current_user_role() è definita una sola volta in
+-- supabase/migrations/20260916090000_ruoli_e_profili.sql (non ridefinirla qui).
 
 drop policy if exists member_purchases_select on public.member_purchases;
 drop policy if exists member_purchases_insert on public.member_purchases;
