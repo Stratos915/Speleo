@@ -16,10 +16,12 @@ const FILTERS = [
 ];
 
 export default function StoricoPrestiti() {
-  const { role, user } = useAuth();
+  const { user } = useAuth();
   const { canEditSection } = usePermissions();
   const canManageLoans = canEditSection('prestiti');
-  const canDeleteLoans = role === 'admin' || role === 'presidente';
+  // Chi gestisce i prestiti (admin, presidente, magazziniere) puo' anche
+  // eliminarli dallo storico, come gia' consente il database.
+  const canDeleteLoans = canManageLoans;
   const navigate = useNavigate();
   const { adminAlerts, dismissAlert } = useAlerts();
   const [loans, setLoans] = useState([]);
