@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getMembers } from '../services/members';
+import useAuth from '../context/useAuth.js';
+import {
+  ScuolaConflictError,
+  archiveLegacyLocalScuola,
+  getScuolaFileUrl,
+  loadScuolaData,
+  moveInlineFilesToStorage,
+  readLegacyLocalScuola,
+  removeScuolaFile,
+  saveScuolaData,
+  uploadScuolaFile,
+} from '../services/scuola.js';
+import { SCUOLA_UI_STATE_KEY, extractScuolaDocument, hasScuolaContent } from '../utils/scuolaData.js';
 import { dedupeMembers } from '../utils/members.js';
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
@@ -53,7 +66,46 @@ const REGISTRY_QUALIFICATION_OPTIONS = [
   { value: 'aiuto_istruttore', label: 'Aiuto istruttore' },
 ];
 
-const SCUOLA_STORAGE_KEY = 'speleo-scuola-data-v2';
+const SAVE_DELAY_MS = 1200;
+
+function readUiState() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SCUOLA_UI_STATE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function ScuolaFileLink({ file }) {
+  const [opening, setOpening] = useState(false);
+  if (!file) return null;
+  if (!file.storagePath) {
+    return file.dataUrl ? (
+      <a href={file.dataUrl} download={file.name}>
+        Scarica
+      </a>
+    ) : null;
+  }
+  async function handleOpen(event) {
+    event.preventDefault();
+    setOpening(true);
+    try {
+      const url = await getScuolaFileUrl(file.storagePath, file.name);
+      window.open(url, '_blank', 'noopener,noreferrer');
+    } catch (error) {
+      window.alert(error.message ?? 'Impossibile aprire il file.');
+    } finally {
+      setOpening(false);
+    }
+  }
+  return (
+    <a href="#scarica" onClick={handleOpen} aria-busy={opening}>
+      {opening ? 'Apertura...' : 'Scarica'}
+    </a>
+  );
+}
 
 const emptyRegistryForm = {
   memberId: '',
@@ -135,6 +187,7 @@ export default function Corso() {
   const navigate = useNavigate();
   const canViewScuola = canViewPage('scuola');
   const canEditScuola = canEditSection('scuola');
+  const { user } = useAuth();
 
   const [members, setMembers] = useState([]);
   const [membersLoading, setMembersLoading] = useState(true);
@@ -170,6 +223,15 @@ export default function Corso() {
   const [teachingMaterialsUploadStatus, setTeachingMaterialsUploadStatus] = useState(false);
   const [teachingMaterialsError, setTeachingMaterialsError] = useState('');
   const [hydrated, setHydrated] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('loading');
+  const [syncMessage, setSyncMessage] = useState('');
+  const [importNotice, setImportNotice] = useState('');
+  const [lastSavedAt, setLastSavedAt] = useState(null);
+  const [saveTick, setSaveTick] = useState(0);
+  const versionRef = useRef(0);
+  const lastSavedJsonRef = useRef('');
+  const savingRef = useRef(false);
+  const blockedRef = useRef(true);
 
   const loadMembers = useCallback(async () => {
     setMembersLoading(true);
@@ -188,84 +250,158 @@ export default function Corso() {
     loadMembers();
   }, [loadMembers]);
 
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      setHydrated(true);
-      return;
-    }
+  const applyScuolaDocument = useCallback(
+    (document, uiState) => {
+      const doc = extractScuolaDocument(document);
+      const nextYears = doc.yearFolders.length ? doc.yearFolders : [initialYear];
+      setYearFolders(nextYears);
+      const storedYearId =
+        uiState?.activeYearId && nextYears.some((year) => year.id === uiState.activeYearId)
+          ? uiState.activeYearId
+          : nextYears[0].id;
+      setActiveYearId(storedYearId);
+      setExpandedYearId(storedYearId);
+      const storedYear = nextYears.find((year) => year.id === storedYearId);
+      const storedCourseId =
+        uiState?.activeCourseId && storedYear?.courses.some((course) => course.id === uiState.activeCourseId)
+          ? uiState.activeCourseId
+          : storedYear?.courses[0]?.id ?? null;
+      setActiveCourseId(storedCourseId);
+      setRegistrySelectedYearId(
+        uiState?.registrySelectedYearId && nextYears.some((year) => year.id === uiState.registrySelectedYearId)
+          ? uiState.registrySelectedYearId
+          : storedYearId,
+      );
+      const nextRegistry = doc.registry.map((entry) => normalizeRegistryEntry(entry));
+      const nextMaterials = doc.teachingMaterials.map((material) => normalizeTeachingMaterial(material));
+      setRegistry(nextRegistry);
+      setTeachingMaterials(nextMaterials);
+      if (uiState) {
+        if (typeof uiState.coursesFolderExpanded === 'boolean') setCoursesFolderExpanded(uiState.coursesFolderExpanded);
+        if (typeof uiState.registryFolderExpanded === 'boolean') setRegistryFolderExpanded(uiState.registryFolderExpanded);
+        if (typeof uiState.materialsFolderExpanded === 'boolean') setMaterialsFolderExpanded(uiState.materialsFolderExpanded);
+        if (uiState.teachingMaterialsFilter === 'all' || isValidTeachingMaterialCategory(uiState.teachingMaterialsFilter)) {
+          setTeachingMaterialsFilter(uiState.teachingMaterialsFilter);
+        }
+        if (isValidTeachingMaterialSort(uiState.teachingMaterialsSort)) {
+          setTeachingMaterialsSort(uiState.teachingMaterialsSort);
+        }
+        if (isValidTeachingMaterialCategory(uiState.teachingMaterialsNewCategory)) {
+          setTeachingMaterialsNewCategory(uiState.teachingMaterialsNewCategory);
+        }
+      }
+      return JSON.stringify({ yearFolders: nextYears, registry: nextRegistry, teachingMaterials: nextMaterials });
+    },
+    [initialYear],
+  );
+
+  const loadRemoteScuola = useCallback(async () => {
+    blockedRef.current = true;
+    setHydrated(false);
+    setSyncStatus('loading');
+    setSyncMessage('');
     try {
-      const raw = window.localStorage.getItem(SCUOLA_STORAGE_KEY);
-      if (!raw) {
-        setHydrated(true);
-        return;
+      const legacy = readLegacyLocalScuola();
+      const uiState = readUiState() ?? legacy?.state ?? null;
+      let remote = await loadScuolaData();
+      if (!remote && legacy && canEditScuola && hasScuolaContent(legacy)) {
+        setSyncMessage('Trasferisco sul server i dati della scuola salvati in questo browser...');
+        const { document, failures } = await moveInlineFilesToStorage(extractScuolaDocument(legacy));
+        const saved = await saveScuolaData(document, 0);
+        archiveLegacyLocalScuola();
+        remote = { document, version: saved.version, updatedAt: saved.updatedAt };
+        setImportNotice(
+          failures.length
+            ? `Dati trasferiti sul server. Questi file non sono stati caricati e vanno ricaricati a mano: ${failures
+                .map((item) => item.name)
+                .join(', ')}.`
+            : 'I dati della scuola salvati in questo browser sono stati trasferiti sul server e ora sono condivisi.',
+        );
+      } else if (remote && legacy && canEditScuola && hasScuolaContent(legacy)) {
+        archiveLegacyLocalScuola();
+        setImportNotice(
+          'Sul server c\'erano già dati della scuola, quindi quelli salvati in passato in questo browser non sono stati caricati. Ne resta una copia di sicurezza nel browser: chiedi all\'amministratore se serve recuperarla.',
+        );
       }
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed.yearFolders) && parsed.yearFolders.length) {
-        setYearFolders(parsed.yearFolders);
-        const storedYearId =
-          parsed.state?.activeYearId && parsed.yearFolders.some((year) => year.id === parsed.state.activeYearId)
-            ? parsed.state.activeYearId
-            : parsed.yearFolders[0].id;
-        setActiveYearId(storedYearId);
-        setExpandedYearId(storedYearId);
-        const storedYear = parsed.yearFolders.find((year) => year.id === storedYearId);
-        const storedCourseId =
-          parsed.state?.activeCourseId && storedYear?.courses.some((course) => course.id === parsed.state.activeCourseId)
-            ? parsed.state.activeCourseId
-            : storedYear?.courses[0]?.id ?? null;
-        setActiveCourseId(storedCourseId);
-        const nextRegistrySelectedYear =
-          parsed.state?.registrySelectedYearId &&
-          parsed.yearFolders.some((year) => year.id === parsed.state.registrySelectedYearId)
-            ? parsed.state.registrySelectedYearId
-            : storedYearId;
-        setRegistrySelectedYearId(nextRegistrySelectedYear);
-      }
-      if (Array.isArray(parsed.registry)) {
-        setRegistry(parsed.registry.map((entry) => normalizeRegistryEntry(entry)));
-      }
-      if (Array.isArray(parsed.teachingMaterials)) {
-        setTeachingMaterials(parsed.teachingMaterials.map((material) => normalizeTeachingMaterial(material)));
-      }
-      if (parsed.state) {
-        if (typeof parsed.state.coursesFolderExpanded === 'boolean') {
-          setCoursesFolderExpanded(parsed.state.coursesFolderExpanded);
-        }
-        if (typeof parsed.state.registryFolderExpanded === 'boolean') {
-          setRegistryFolderExpanded(parsed.state.registryFolderExpanded);
-        }
-        if (typeof parsed.state.materialsFolderExpanded === 'boolean') {
-          setMaterialsFolderExpanded(parsed.state.materialsFolderExpanded);
-        }
-        if (
-          parsed.state.teachingMaterialsFilter === 'all' ||
-          isValidTeachingMaterialCategory(parsed.state.teachingMaterialsFilter)
-        ) {
-          setTeachingMaterialsFilter(parsed.state.teachingMaterialsFilter);
-        }
-        if (isValidTeachingMaterialSort(parsed.state.teachingMaterialsSort)) {
-          setTeachingMaterialsSort(parsed.state.teachingMaterialsSort);
-        }
-        if (isValidTeachingMaterialCategory(parsed.state.teachingMaterialsNewCategory)) {
-          setTeachingMaterialsNewCategory(parsed.state.teachingMaterialsNewCategory);
-        }
-      }
-    } catch (storageError) {
-      console.error('[Scuola] Impossibile caricare i dati salvati:', storageError);
+      versionRef.current = remote?.version ?? 0;
+      setLastSavedAt(remote?.updatedAt ?? null);
+      lastSavedJsonRef.current = applyScuolaDocument(remote?.document ?? null, uiState);
+      setSyncStatus(canEditScuola ? 'saved' : 'readonly');
+      setSyncMessage('');
+      blockedRef.current = false;
+    } catch (loadError) {
+      console.error('[Scuola] Errore caricamento dati:', loadError);
+      setSyncStatus('error');
+      setSyncMessage(
+        /scuola_dati|scuola_salva/i.test(loadError.message ?? '')
+          ? 'Il database non è ancora aggiornato per la scuola: esegui le migrazioni in supabase/migrations.'
+          : loadError.message ?? 'Impossibile caricare i dati della scuola.',
+      );
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [applyScuolaDocument, canEditScuola]);
+
+  useEffect(() => {
+    if (!canViewScuola) return;
+    loadRemoteScuola();
+  }, [canViewScuola, loadRemoteScuola]);
+
+  const scuolaDocument = useMemo(
+    () => ({ yearFolders, registry, teachingMaterials }),
+    [yearFolders, registry, teachingMaterials],
+  );
+
+  useEffect(() => {
+    if (!hydrated || !canEditScuola || blockedRef.current) return undefined;
+    const json = JSON.stringify(scuolaDocument);
+    if (json === lastSavedJsonRef.current) return undefined;
+    setSyncStatus((prev) => (prev === 'saving' ? prev : 'dirty'));
+    const timer = setTimeout(async () => {
+      if (savingRef.current || blockedRef.current) return;
+      savingRef.current = true;
+      setSyncStatus('saving');
+      try {
+        const saved = await saveScuolaData(scuolaDocument, versionRef.current);
+        versionRef.current = saved.version;
+        lastSavedJsonRef.current = json;
+        setLastSavedAt(saved.updatedAt);
+        setSyncStatus('saved');
+        setSyncMessage('');
+      } catch (saveError) {
+        if (saveError instanceof ScuolaConflictError) {
+          blockedRef.current = true;
+          setSyncStatus('conflict');
+          setSyncMessage(saveError.message);
+        } else {
+          console.error('[Scuola] Errore salvataggio:', saveError);
+          setSyncStatus('error');
+          setSyncMessage(saveError.message ?? 'Salvataggio non riuscito. Controlla la connessione.');
+        }
+      } finally {
+        savingRef.current = false;
+        setSaveTick((tick) => tick + 1);
+      }
+    }, SAVE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [hydrated, canEditScuola, scuolaDocument, saveTick]);
+
+  useEffect(() => {
+    if (!['dirty', 'saving'].includes(syncStatus)) return undefined;
+    const handleBeforeUnload = (event) => {
+      event.preventDefault();
+      event.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [syncStatus]);
 
   useEffect(() => {
     if (!hydrated || typeof window === 'undefined') return;
     try {
-      const payload = {
-        updatedAt: new Date().toISOString(),
-        yearFolders,
-        registry,
-        teachingMaterials,
-        state: {
+      window.localStorage.setItem(
+        SCUOLA_UI_STATE_KEY,
+        JSON.stringify({
           activeYearId,
           activeCourseId,
           registrySelectedYearId,
@@ -275,18 +411,13 @@ export default function Corso() {
           teachingMaterialsFilter,
           teachingMaterialsSort,
           teachingMaterialsNewCategory,
-        },
-      };
-      window.localStorage.setItem(SCUOLA_STORAGE_KEY, JSON.stringify(payload));
-      window.dispatchEvent(new Event('speleo-scuola-update'));
-    } catch (storageError) {
-      console.error('[Scuola] Impossibile salvare i dati della scuola:', storageError);
+        }),
+      );
+    } catch {
+      // Preferenze dell'interfaccia: se il browser non le salva non è un problema.
     }
   }, [
     hydrated,
-    yearFolders,
-    registry,
-    teachingMaterials,
     activeYearId,
     activeCourseId,
     registrySelectedYearId,
@@ -1084,13 +1215,17 @@ function updateCourse(yearId, courseId, updater) {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  function readFileAsDataUrl(file) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error(`Impossibile leggere il file ${file.name}`));
-      reader.readAsDataURL(file);
-    });
+  async function uploadFileRecord(file, scope) {
+    const storagePath = await uploadScuolaFile(file, scope);
+    return {
+      id: generateId(),
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      storagePath,
+      uploadedAt: new Date().toISOString(),
+      uploadedBy: user?.email ?? null,
+    };
   }
 
   async function handleRegistryDocumentsUpload(entryId, fileList) {
@@ -1099,16 +1234,7 @@ function updateCourse(yearId, courseId, updater) {
     setRegistryUploadErrors((prev) => ({ ...prev, [entryId]: '' }));
     setRegistryUploadStatus((prev) => ({ ...prev, [entryId]: true }));
     try {
-      const documents = await Promise.all(
-        files.map(async (file) => ({
-          id: generateId(),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          dataUrl: await readFileAsDataUrl(file),
-          uploadedAt: new Date().toISOString(),
-        })),
-      );
+      const documents = await Promise.all(files.map((file) => uploadFileRecord(file, 'registro')));
       setRegistry((prev) =>
         prev.map((entry) => {
           if (entry.id !== entryId) return entry;
@@ -1130,6 +1256,10 @@ function updateCourse(yearId, courseId, updater) {
   }
 
   function handleRegistryDocumentRemove(entryId, documentId) {
+    const entry = registry.find((item) => item.id === entryId);
+    const target = entry?.documents?.find((document) => document.id === documentId);
+    if (target && !window.confirm(`Eliminare il file "${target.name}"?`)) return;
+    if (target?.storagePath) removeScuolaFile(target.storagePath);
     setRegistry((prev) =>
       prev.map((entry) => {
         if (entry.id !== entryId) return entry;
@@ -1151,16 +1281,8 @@ function updateCourse(yearId, courseId, updater) {
     setTeachingMaterialsError('');
     setTeachingMaterialsUploadStatus(true);
     try {
-      const documents = await Promise.all(
-        files.map(async (file) => ({
-          id: generateId(),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          dataUrl: await readFileAsDataUrl(file),
-          uploadedAt: new Date().toISOString(),
-          category: teachingMaterialsNewCategory,
-        })),
+      const documents = (await Promise.all(files.map((file) => uploadFileRecord(file, 'materiali')))).map(
+        (document) => ({ ...document, category: teachingMaterialsNewCategory }),
       );
       setTeachingMaterials((prev) => [...prev, ...documents]);
     } catch (uploadError) {
@@ -1172,6 +1294,9 @@ function updateCourse(yearId, courseId, updater) {
   }
 
   function handleTeachingMaterialRemove(id) {
+    const target = teachingMaterials.find((doc) => doc.id === id);
+    if (target && !window.confirm(`Eliminare il file "${target.name}"?`)) return;
+    if (target?.storagePath) removeScuolaFile(target.storagePath);
     setTeachingMaterials((prev) => prev.filter((doc) => doc.id !== id));
   }
 
@@ -1208,10 +1333,18 @@ function updateCourse(yearId, courseId, updater) {
           Organizza i corsi raggruppandoli per anno, tieni traccia dei corsisti e mantieni il registro delle
           qualifiche istruttori con scadenze quinquennali.
         </p>
-        <small style={{ color: 'var(--color-muted)' }}>
-          Le modifiche vengono salvate automaticamente e sono consultabili dalla pagina Report.
-        </small>
+        <SyncStatus status={syncStatus} message={syncMessage} lastSavedAt={lastSavedAt} onReload={loadRemoteScuola} />
+        {importNotice && (
+          <p className="card" role="status" style={{ background: '#e7f5ff', borderColor: '#a5d8ff', margin: '0.5rem 0 0' }}>
+            {importNotice}{' '}
+            <button type="button" style={{ background: '#adb5bd', marginLeft: '0.5rem' }} onClick={() => setImportNotice('')}>
+              Ok
+            </button>
+          </p>
+        )}
       </header>
+
+      {syncStatus === 'loading' && <p>Caricamento dati della scuola...</p>}
 
       <article className="card">
         <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
@@ -1587,9 +1720,7 @@ function updateCourse(yearId, courseId, updater) {
                                         </p>
                                       </div>
                                       <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                                        <a href={document.dataUrl} download={document.name}>
-                                          Scarica
-                                        </a>
+                                        <ScuolaFileLink file={document} />
                                         <button
                                           type="button"
                                           style={{ background: '#e03131' }}
@@ -1858,9 +1989,7 @@ function updateCourse(yearId, courseId, updater) {
                       </label>
                     </div>
                     <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                      <a href={doc.dataUrl} download={doc.name}>
-                        Scarica
-                      </a>
+                      <ScuolaFileLink file={doc} />
                       <button type="button" style={{ background: '#e03131' }} onClick={() => handleTeachingMaterialRemove(doc.id)}>
                         Rimuovi
                       </button>
@@ -1879,5 +2008,33 @@ function updateCourse(yearId, courseId, updater) {
         )}
       </article>
 </section>
+  );
+}
+
+function SyncStatus({ status, message, lastSavedAt, onReload }) {
+  const time = lastSavedAt
+    ? new Date(lastSavedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' })
+    : null;
+  const labels = {
+    loading: 'Caricamento dal server...',
+    saved: time ? `Tutte le modifiche sono salvate sul server (ultimo salvataggio ${time}).` : 'Le modifiche vengono salvate automaticamente sul server.',
+    dirty: 'Modifiche in attesa di salvataggio...',
+    saving: 'Salvataggio in corso...',
+    readonly: 'Consultazione in sola lettura.',
+  };
+  const isProblem = status === 'conflict' || status === 'error';
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      style={{ margin: '0.25rem 0 0', color: isProblem ? '#c92a2a' : 'var(--color-muted)', fontSize: '0.9rem' }}
+    >
+      {isProblem ? message : message || labels[status]}
+      {isProblem && (
+        <button type="button" style={{ marginLeft: '0.5rem' }} onClick={onReload}>
+          Ricarica i dati
+        </button>
+      )}
+    </p>
   );
 }
