@@ -51,7 +51,8 @@ La risposta riporta per ogni controllo quanti elementi sono stati trovati (`tota
 
 ## Correzioni rispetto alla versione precedente
 
-- la query dei prestiti chiedeva la colonna `borrower_contact`, che non esiste in `loans`: il controllo falliva;
 - non venivano esclusi i prestiti già chiusi;
 - l'indice anti-doppioni conteneva colonne `NULL` e quindi non bloccava nulla; il workflow inoltre eseguiva lo
-  script due volte di seguito.
+  script due volte di seguito;
+- la colonna `loan_id` di `notification_log` era obbligatoria: gli avvisi su uscite e DPI, che non riguardano un
+  prestito, non potevano essere registrati (risolto dalla migrazione 07).
