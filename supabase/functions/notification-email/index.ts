@@ -4,12 +4,17 @@
 //   (header x-speleo-signature), con il segreto NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET.
 // * Gestisce i tre tipi di avviso: loans_due, uscite_rientro_superato, dpi_in_scadenza.
 // * In modalita' di prova (test_run) non invia nulla e risponde solo con il riepilogo.
+// * Con {"diag": true} restituisce la configurazione SMTP in uso, senza la password.
+// * L'invio usa nodemailer: la libreria denomailer non completava l'autenticazione
+//   con Gmail (errore 530) e non gestisce STARTTLS in questo runtime.
 //
 // Variabili richieste (Supabase -> Edge Functions -> Secrets):
-//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE (facoltativa),
-//   NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET (consigliata).
+//   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM, SMTP_SECURE,
+//   NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET.
+// Nota: i provider di posta personale (Yahoo, ad esempio) possono rifiutare gli invii
+// dai server cloud con errore 554. Gmail con password per le app funziona.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import nodemailer from "npm:nodemailer@6.9.14";
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -168,6 +173,34 @@ serve(async (req) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
+  const SMTP_HOST = Deno.env.get("SMTP_HOST")?.trim();
+  const SMTP_PORT = Number(Deno.env.get("SMTP_PORT") ?? 465);
+  const SMTP_USER = Deno.env.get("SMTP_USER")?.trim();
+  const SMTP_PASS = (Deno.env.get("SMTP_PASS") ?? "").replace(/\s+/g, "");
+  const SMTP_FROM = Deno.env.get("SMTP_FROM")?.trim();
+  const SMTP_SECURE_ENV = Deno.env.get("SMTP_SECURE");
+  const SMTP_SECURE = SMTP_SECURE_ENV !== undefined
+    ? SMTP_SECURE_ENV.toLowerCase() === "true"
+    : SMTP_PORT === 465;
+
+  // Diagnostica: riporta come e' configurato l'invio, senza rivelare la password.
+  if (payload.diag === true) {
+    const mask = (value?: string) => {
+      if (!value) return null;
+      const [name, domain] = value.split("@");
+      return domain ? `${name.slice(0, 3)}***@${domain}` : `${value.slice(0, 3)}***`;
+    };
+    return json({
+      host: SMTP_HOST ?? null,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      user: mask(SMTP_USER),
+      from: mask(SMTP_FROM),
+      lunghezza_password: SMTP_PASS.length,
+      firma_verificata: Boolean(secret),
+    });
+  }
+
   const message = buildMessage(payload);
   if (!message) {
     return json({ ok: true, skipped: "nessun contenuto da inviare", type: payload.type ?? null });
@@ -180,37 +213,33 @@ serve(async (req) => {
     return json({ ok: true, test_run: true, type: payload.type, to: message.to, subject: message.subject });
   }
 
-  const SMTP_HOST = Deno.env.get("SMTP_HOST")?.trim();
-  const SMTP_PORT = Number(Deno.env.get("SMTP_PORT") ?? 587);
-  const SMTP_USER = Deno.env.get("SMTP_USER")?.trim();
-  const SMTP_PASS = Deno.env.get("SMTP_PASS")?.trim();
-  const SMTP_FROM = Deno.env.get("SMTP_FROM")?.trim();
-  const SMTP_SECURE_ENV = Deno.env.get("SMTP_SECURE");
-  const SMTP_SECURE = SMTP_SECURE_ENV !== undefined
-    ? SMTP_SECURE_ENV.toLowerCase() === "true"
-    : SMTP_PORT === 465;
-
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !SMTP_FROM || Number.isNaN(SMTP_PORT)) {
     return json({ error: "Missing SMTP configuration" }, 500);
   }
 
-  const client = new SMTPClient({
-    connection: { hostname: SMTP_HOST, port: SMTP_PORT, tls: SMTP_SECURE },
-    auth: { username: SMTP_USER, password: SMTP_PASS },
-  });
-
   try {
-    await client.send({
-      from: SMTP_FROM,
-      to: message.to,
-      subject: message.subject,
-      content: `${message.body}\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)`,
+    const transporter = nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
-    return json({ ok: true, type: payload.type, destinatari: message.to.length });
+
+    const info = await transporter.sendMail({
+      from: SMTP_FROM,
+      to: message.to.join(", "),
+      subject: message.subject,
+      text: `${message.body}\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)`,
+    });
+
+    return json({
+      ok: true,
+      type: payload.type,
+      destinatari: message.to.length,
+      accettati: info?.accepted?.length ?? null,
+    });
   } catch (sendError) {
     console.error("Invio SMTP fallito", sendError);
     return json({ error: "SMTP send failed", details: String(sendError) }, 500);
-  } finally {
-    await client.close();
   }
 });
