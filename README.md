@@ -3,10 +3,16 @@
 Web app per soci e staff del gruppo: uscite, magazzino e prestiti materiali, scadenze DPI, biblioteca,
 scuola di speleologia, anagrafica soci e report. Si usa dal browser e si può installare sul telefono.
 
+> **Copyright (c) 2026 Stratos Diakatos · tutti i diritti riservati.**
+> Software non open source: il Gruppo Speleologico Urbino ne ha l'uso perpetuo e gratuito per le proprie
+> attività. Ogni altro uso, copia o modifica richiede l'autorizzazione scritta dell'autore.
+> Vedi [LICENSE](LICENSE) e [AUTHORS.md](AUTHORS.md).
+
 - Frontend: React 19 + Vite 7 (JavaScript), React Router
 - Backend: Supabase (Postgres con Row Level Security, Auth, Storage, Edge Functions)
-- Notifiche: job Deno eseguito da GitHub Actions
-- Il **manuale d'uso per i soci** è in `docs/MANUALE_SOCI.md` (versione PDF da distribuire a parte)
+- Notifiche: job Deno eseguito da GitHub Actions, email via Edge Function `notification-email`
+- Il **manuale d'uso per i soci** è in `docs/MANUALE_SOCI.md` (versioni PDF: sintesi e completo)
+- La **documentazione tecnica** è in `docs/TECNICO.md` e `docs/TECNICO_SINTESI.md`
 
 ## Avvio in locale
 
@@ -33,6 +39,7 @@ possono rieseguire senza danni. Da Supabase → SQL Editor incolla ed esegui un 
 | `…090400_magazzino_dpi.sql` | scadenze DPI, impostazioni condivise, rifornimento atomico |
 | `…090500_uscite_rientro_previsto.sql` | orario di rientro previsto delle uscite |
 | `…090600_notifiche_idempotenti.sql` | niente notifiche doppie |
+| `…120000_permessi_uscite_e_foto.sql` | eliminazione uscite riservata ad admin e presidente; archivio foto chiuso agli estranei |
 
 Dopo la prima migrazione verifica che esista almeno un profilo `admin` o `presidente` approvato (le istruzioni
 sono in fondo al file): il ruolo ora arriva **solo** dalla tabella `profiles`.
@@ -65,8 +72,8 @@ src/
   utils/        logica pura e testata (permessi, DPI, esportazioni CSV/PDF/XLSX, dati scuola)
 supabase/
   migrations/   schema e sicurezza del database
-  functions/    Edge Functions (notifiche, email di approvazione)
-docs/           note operative e manuale soci
+  functions/    Edge Functions (notification-cron, notification-email, send-approval-email)
+docs/           note operative, manuale soci e documentazione tecnica
 ```
 
 ## Prossimi passi possibili
