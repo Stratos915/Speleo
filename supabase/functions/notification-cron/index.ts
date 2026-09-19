@@ -6,6 +6,7 @@
 //   2. USCITA_RIENTRO   uscite ancora aperte oltre il rientro previsto + tolleranza
 //   3. DPI_ISPEZIONE    materiali con ispezione scaduta o entro 30 giorni
 //   4. DPI_FINE_VITA    materiali con fine vita superata o entro 90 giorni
+//   5. MOVIMENTO        consegne e rientri di materiale, riepilogo al magazziniere
 //
 // Ogni avviso viene registrato in notification_log con (kind, ref_id) univoco:
 // eseguire il job più volte non manda doppioni.
@@ -337,6 +338,70 @@ async function checkDpi(supabase: SupabaseClient, config: Config, runId: string,
 }
 
 // ---------------------------------------------------------------------------
+// 5. Movimenti di magazzino: consegne e rientri registrati di recente
+// ---------------------------------------------------------------------------
+async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "MOVIMENTO";
+  // Finestra ampia: se un'esecuzione salta, i movimenti vengono comunque
+  // segnalati. I doppioni sono impediti dall'indice su (kind, ref_id).
+  const since = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("loans")
+    .select("id, equipment_id, quantity, missing_quantity, status, borrower_name, delivered_at, returned_at, notes, equipment:equipment_id(name)")
+    .or(`delivered_at.gte.${since},returned_at.gte.${since}`);
+  if (error) throw error;
+
+  const eventi: any[] = [];
+  for (const loan of data ?? []) {
+    const nome = (loan as any).equipment?.name ?? `materiale ${loan.equipment_id}`;
+    if (loan.delivered_at && loan.delivered_at >= since) {
+      eventi.push({
+        refId: `${loan.id}:out:${loan.delivered_at}`,
+        loanId: loan.id,
+        tipo: "consegna",
+        materiale: nome,
+        quantita: loan.quantity,
+        socio: loan.borrower_name,
+        quando: loan.delivered_at,
+        note: loan.notes ?? null,
+      });
+    }
+    if (loan.returned_at && loan.returned_at >= since) {
+      eventi.push({
+        refId: `${loan.id}:in:${loan.returned_at}`,
+        loanId: loan.id,
+        tipo: "rientro",
+        materiale: nome,
+        quantita: loan.quantity,
+        mancanti: loan.missing_quantity ?? 0,
+        socio: loan.borrower_name,
+        quando: loan.returned_at,
+      });
+    }
+  }
+
+  const fresh: any[] = [];
+  for (const evento of eventi) {
+    if (await claim(supabase, runId, { kind, refId: evento.refId, meta: { tipo: evento.tipo } }, evento.loanId)) {
+      fresh.push(evento);
+    }
+  }
+  if (!fresh.length) return { total: eventi.length, new: 0 };
+
+  fresh.sort((a, b) => String(a.quando).localeCompare(String(b.quando)));
+
+  const result = await sendWebhook(config, {
+    type: "movimenti_prestiti",
+    count: fresh.length,
+    items: config.testMode ? fresh.slice(0, 1) : fresh,
+    recipients: { magazziniere: config.recipients.magazziniere, admin: config.recipients.admin },
+    meta: { runId, kind },
+  });
+  await finalize(supabase, config, kind, fresh.map((evento) => evento.refId), result);
+  return { total: eventi.length, new: fresh.length };
+}
+
+// ---------------------------------------------------------------------------
 async function runCron(req: Request) {
   const runId = crypto.randomUUID();
   const started = Date.now();
@@ -378,6 +443,7 @@ async function runCron(req: Request) {
       ["prestiti", () => checkOverdueLoans(supabase, config, runId, isoDay(now))],
       ["uscite_rientro", () => checkUsciteRientro(supabase, config, runId, now)],
       ["dpi", () => checkDpi(supabase, config, runId, now)],
+      ["movimenti", () => checkMovimenti(supabase, config, runId, now)],
     ] as const) {
       try {
         checks[name] = await fn();
