@@ -19,7 +19,7 @@ const Uscite = lazy(() => import('./pages/Uscite.jsx'));
 const UscitaDettaglio = lazy(() => import('./pages/UscitaDettaglio.jsx'));
 const UscitaNuova = lazy(() => import('./pages/UscitaNuova.jsx'));
 const Magazzino = lazy(() => import('./pages/Magazzino.jsx'));
-const Corso = lazy(() => import('./pages/Corso.jsx'));
+const Scuola = lazy(() => import('./pages/Scuola.jsx'));
 const Biblioteca = lazy(() => import('./pages/Biblioteca.jsx'));
 const Report = lazy(() => import('./pages/Report.jsx'));
 const Members = lazy(() => import('./pages/Members.jsx'));
@@ -129,7 +129,7 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute page="scuola">
             <Lazy>
-              <Corso />
+              <Scuola />
             </Lazy>
           </ProtectedRoute>
         ),
