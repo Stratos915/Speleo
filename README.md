@@ -3,7 +3,7 @@
 Web app per soci e staff del gruppo: uscite, magazzino e prestiti materiali, scadenze DPI, biblioteca,
 scuola di speleologia, anagrafica soci e report. Si usa dal browser e si può installare sul telefono.
 
-> **Copyright (c) 2026 Stratos Diakatos · tutti i diritti riservati.**
+> **Copyright (c) 2026 Efstratios Diakatos Arvanitis · tutti i diritti riservati.**
 > Software non open source: il Gruppo Speleologico Urbino ne ha l'uso perpetuo e gratuito per le proprie
 > attività. Ogni altro uso, copia o modifica richiede l'autorizzazione scritta dell'autore.
 > Vedi [LICENSE](LICENSE) e [AUTHORS.md](AUTHORS.md).
@@ -61,6 +61,11 @@ funzioni `security definer`): nascondere un pulsante non basta, ogni regola impo
 
 Le icone dell'app installabile sono in `scripts/icone/*.b64` e vengono ricreate in `public/icons` prima di
 `dev` e `build`.
+
+## Contribuire
+
+Il ramo `main` è protetto: le modifiche passano da una pull request approvata dall'autore
+(vedi `.github/CODEOWNERS`).
 
 ## Struttura
 
