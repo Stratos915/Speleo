@@ -2,8 +2,9 @@
 
 ## Autore
 
-**Stratos Diakatos** — ideazione, sviluppo, architettura del database,
-documentazione e manuali.
+**Efstratios Diakatos Arvanitis** — noto come Stratos, account GitHub
+[@Stratos915](https://github.com/Stratos915).
+Ideazione, sviluppo, architettura del database, documentazione e manuali.
 Contatto: stratosdiakatos@yahoo.it
 
 ## Titolarita'
@@ -20,8 +21,10 @@ dell'autore. Questo non incide sulla titolarita' dell'opera.
 ## Come contribuire
 
 Le modifiche passano da una pull request verso `main` e richiedono
-l'approvazione dell'autore. Chi contribuisce accetta che il proprio apporto
-sia utilizzabile all'interno del progetto alle condizioni del file `LICENSE`.
+l'approvazione dell'autore, come previsto dal file `.github/CODEOWNERS` e
+dalla regola di protezione del ramo. Chi contribuisce accetta che il proprio
+apporto sia utilizzabile all'interno del progetto alle condizioni del file
+`LICENSE`.
 
 ## Cronologia
 
