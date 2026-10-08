@@ -94,6 +94,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 08 · permessi_uscite_e_foto | Rimozione della policy che consentiva a tutti di eliminare le uscite; regole dell'archivio foto riservate ai profili approvati |
 | 09 · avvisi_nuove_uscite | Tabelle `notifica_preferenze` (email/push per socio), `push_subscriptions` (un dispositivo per riga, scritture solo via `push_registra`/`push_rimuovi`) e `app_private_config` (chiavi VAPID e modalità di prova, leggibile solo dal job) |
 | 10 · avvisi_uscite_modificate | Tabella `uscite_modifiche` (leggibile solo dal job) e trigger `uscite_annota_modifica` su UPDATE/DELETE di `uscite`: annota i cambi di titolo, data, ora, luogo e tipo e le cancellazioni. Il trigger non blocca mai il salvataggio: un errore diventa solo un warning nel log |
+| 11 · avvisi_soci_pg_cron | Estensione `pg_net`, token casuale `cron_soci_token` in `app_private_config` e job pg_cron `avvisi-soci` ogni 10 minuti che chiama la Edge Function `notification-cron?gruppo=soci` |
 
 ### Come funziona ora un prestito
 
@@ -137,7 +138,12 @@ Sono stati aggiunti 21 test automatici sulle parti pure: permessi per ruolo, cal
 
 ## Notifiche automatiche
 
-Il job `supabase/functions/notification-cron/index.ts` viene eseguito da GitHub Actions ogni 30 minuti e svolge quattro controlli, ognuno indipendente: un errore su uno non blocca gli altri.
+Il job `supabase/functions/notification-cron/index.ts` svolge sette controlli, ognuno indipendente: un errore su uno non blocca gli altri. Parte in due modi:
+
+- **GitHub Actions** (`--run-once`): tutti i controlli, pianificato ogni 30 minuti. In pratica GitHub lo avvia con molto ritardo (l'8 ottobre 2026 risultavano 3 esecuzioni in 24 ore), quindi va bene per i promemoria dello staff ma non per gli avvisi ai soci.
+- **Supabase** (migrazione 11): la stessa funzione pubblicata come Edge Function `notification-cron` (verify_jwt disattivato) e chiamata da pg_cron ogni 10 minuti con `?gruppo=soci`. Esegue solo NUOVA_USCITA, USCITA_CAMBIATA e PRESTITO_SOCIO. Accetta la chiamata solo con l'intestazione `x-avvisi-token` uguale a `cron_soci_token`; senza `NOTIFICATION_EMAIL_WEBHOOK` usa la funzione email dello stesso progetto.
+
+I due percorsi possono sovrapporsi: l'indice univoco su `(kind, ref_id)` impedisce i doppioni. Esiti delle chiamate di pg_cron: `select status_code, left(content, 300), created from net._http_response order by created desc limit 5;`
 
 | Tipo | Quando scatta | Destinatari |
 |---|---|---|
