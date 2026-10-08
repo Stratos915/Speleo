@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import usePermissions from '../hooks/usePermissions.js';
 import { ElencoUscite, UscitaRiga } from './ElencoUscite.jsx';
 import { WEEKDAYS_IT, buildMonthGrid, groupUsciteByDay, prossimeEPassate, toIsoDate } from '../utils/calendario.js';
@@ -16,6 +16,7 @@ function formatGiorno(key) {
 export default function CalendarioUscite({ uscite = [], loading = false }) {
   const { canEditSection } = usePermissions();
   const canCreate = canEditSection('uscita');
+  const navigate = useNavigate();
 
   const todayKey = toIsoDate(new Date());
   const [cursor, setCursor] = useState(() => {
@@ -47,7 +48,16 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
     setSelectedKey(todayKey);
   }
 
+  function nuovaUscita(key) {
+    navigate(`/uscite/new?data=${key}`);
+  }
+
   function selectDay(cell) {
+    // Secondo tocco sul giorno già selezionato: apre «Nuova uscita» con la data compilata.
+    if (cell.key === selectedKey && canCreate) {
+      nuovaUscita(cell.key);
+      return;
+    }
     setSelectedKey(cell.key);
     if (!cell.inMonth) {
       setCursor({ year: cell.date.getFullYear(), month: cell.date.getMonth() });
@@ -96,9 +106,16 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
               className={classes.join(' ')}
               onClick={() => selectDay(cell)}
               aria-pressed={cell.key === selectedKey}
-              aria-label={`${formatGiorno(cell.key)}${dayUscite.length ? `, ${dayUscite.length} uscite` : ''}`}
+              aria-label={`${formatGiorno(cell.key)}${dayUscite.length ? `, ${dayUscite.length} uscite` : ''}${
+                canCreate && cell.key === selectedKey ? ', tocca di nuovo per creare un\'uscita' : ''
+              }`}
             >
               <span className="cal-day-num">{cell.date.getDate()}</span>
+              {canCreate && cell.key === selectedKey && (
+                <span className="cal-add" aria-hidden="true">
+                  + Nuova
+                </span>
+              )}
               {dayUscite.slice(0, 2).map((uscita) => (
                 <span
                   key={uscita.id}
@@ -125,6 +142,11 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
           </ul>
         ) : (
           <p className="cal-empty">Nessuna uscita in questo giorno.</p>
+        )}
+        {canCreate && (
+          <button type="button" className="pill-button" onClick={() => nuovaUscita(selectedKey)}>
+            + Crea un&apos;uscita in questa data
+          </button>
         )}
       </section>
 
