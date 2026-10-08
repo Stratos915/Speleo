@@ -92,6 +92,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 06 · uscite_rientro_previsto | Colonne `rientro_previsto`, `status`, `closed_at` e indice sulle uscite aperte |
 | 07 · notifiche_idempotenti | Campo `ref_id` con indice univoco su (kind, ref_id); `loan_id` reso facoltativo |
 | 08 · permessi_uscite_e_foto | Rimozione della policy che consentiva a tutti di eliminare le uscite; regole dell'archivio foto riservate ai profili approvati |
+| 09 · avvisi_nuove_uscite | Tabelle `notifica_preferenze` (email/push per socio), `push_subscriptions` (un dispositivo per riga, scritture solo via `push_registra`/`push_rimuovi`) e `app_private_config` (chiavi VAPID e modalità di prova, leggibile solo dal job) |
 
 ### Come funziona ora un prestito
 
@@ -143,6 +144,18 @@ Il job `supabase/functions/notification-cron/index.ts` viene eseguito da GitHub 
 | USCITA_RIENTRO | Uscita aperta oltre il rientro previsto più la tolleranza (60 minuti) | Presidente, amministratore, responsabile |
 | DPI_ISPEZIONE | Ispezione scaduta o entro 30 giorni | Magazziniere, amministratore, presidente |
 | DPI_FINE_VITA | Fine vita superata o entro 90 giorni | Magazziniere, amministratore, presidente |
+| NUOVA_USCITA | Uscita creata nelle ultime 6 ore con data da oggi in avanti | Tutti i soci approvati: email in copia nascosta e notifica push sui dispositivi iscritti, secondo le preferenze di ciascuno |
+
+### Avvisi nuove uscite
+
+- **Preferenze**: senza riga in `notifica_preferenze` il socio riceve tutto; dal riquadro «Avvisi nuove uscite» della Dashboard può togliere l'email e attivare o disattivare le notifiche sul singolo dispositivo.
+- **Email**: un solo messaggio con i soci in copia nascosta (gruppi da 50), così nessuno vede gli indirizzi degli altri.
+- **Push**: standard Web Push con chiavi VAPID. La chiave pubblica è in `src/services/avvisi.js`; quella privata è solo in `app_private_config` (chiavi `vapid_public`, `vapid_private`, `vapid_subject`). Le iscrizioni revocate dal browser (404/410) vengono cancellate in automatico. Su iPhone funziona solo con l'app aggiunta alla schermata Home (iOS 16.4 o successivo).
+- **Modalità di prova**: se in `app_private_config` c'è la chiave `avvisi_uscite_solo_a`, email e push vanno solo al profilo con quell'indirizzo. Per passare a tutti i soci basta cancellarla:
+
+```
+delete from public.app_private_config where key = 'avvisi_uscite_solo_a';
+```
 
 ### Idempotenza
 
