@@ -67,7 +67,7 @@ La pagina Uscite mostra le attività in programma. Puoi cercare per titolo o luo
 
 ### Calendario in Dashboard
 
-In Dashboard, accanto a Materiali, Soci e Uscite, c'è la casella «Calendario» con il mese corrente e il numero di uscite del mese; sotto trovi l'elenco delle prossime uscite. Toccando la casella si apre il calendario: le frecce cambiano mese, «Oggi» torna al mese corrente e toccando un giorno vedi le uscite di quella data. Le uscite sono in arancione (in grigio quelle passate o chiuse); toccandone una si apre la sua scheda nella sezione Uscite. Chi può creare uscite trova anche il pulsante «Nuova uscita», che apre la stessa pagina della sezione Uscite.
+In Dashboard, accanto a Materiali, Soci e Uscite, c'è la casella «Calendario» con il mese corrente e il numero di uscite del mese; sotto trovi l'elenco delle prossime uscite. Toccando la casella si apre il calendario: le frecce cambiano mese, «Oggi» torna al mese corrente e toccando un giorno vedi le uscite di quella data. Le uscite sono in arancione (in grigio quelle passate o chiuse); toccandone una si apre la sua scheda nella sezione Uscite. Chi può creare uscite trova anche il pulsante «Nuova uscita», che apre la stessa pagina della sezione Uscite; toccando una seconda volta il giorno selezionato (oppure «Crea un'uscita in questa data») la pagina si apre con la data già compilata.
 
 
 ### Creare un'uscita
