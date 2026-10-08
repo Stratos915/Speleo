@@ -41,6 +41,49 @@
   gap: 0.5rem;
 }
 
+/* Ruolo, nome ed «Esci» in alto; sotto il pulsante degli avvisi */
+.top-bar__account {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.4rem;
+}
+
+.header-avvisi {
+  position: relative;
+}
+
+.header-avvisi__toggle {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.header-avvisi__toggle:hover,
+.header-avvisi__toggle[aria-expanded='true'] {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.header-avvisi__pannello {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  right: 0;
+  z-index: 50;
+  width: min(22rem, calc(100vw - 1.5rem));
+  background: #fff;
+  color: var(--color-text, #1f2933);
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.22);
+  padding: 1rem;
+  text-align: left;
+}
+
 .bottom-nav {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
@@ -119,4 +162,33 @@
 
 .input-with-icon input:focus {
   outline: none;
+}
+
+/* Telefono: l'email lunga non deve spingere «Esci» e «Avvisi» fuori schermo */
+@media (max-width: 640px) {
+  .top-bar {
+    gap: 0.5rem;
+  }
+
+  .top-bar__account {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .top-bar__user {
+    min-width: 0;
+    max-width: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    row-gap: 0.35rem;
+  }
+
+  .top-bar__email {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8rem;
+  }
 }

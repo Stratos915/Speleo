@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
 import RoleBadge from './RoleBadge.jsx';
+import HeaderAvvisi from './HeaderAvvisi.jsx';
 import logo from '../assets/logo-gsu.png';
 
 export default function Header() {
@@ -22,12 +23,15 @@ export default function Header() {
         </div>
       </div>
       {isAuthenticated && (
-        <div className="top-bar__user">
-          <RoleBadge />
-          <span>{user?.email}</span>
-          <button className="logout-button" onClick={handleLogout}>
-            Esci
-          </button>
+        <div className="top-bar__account">
+          <div className="top-bar__user">
+            <RoleBadge />
+            <span className="top-bar__email">{user?.email}</span>
+            <button className="logout-button" onClick={handleLogout}>
+              Esci
+            </button>
+          </div>
+          <HeaderAvvisi />
         </div>
       )}
     </header>

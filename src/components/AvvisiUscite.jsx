@@ -10,10 +10,12 @@ import {
   salvaPreferenze,
 } from '../services/avvisi.js';
 
-// Riquadro «Avvisi nuove uscite» della Dashboard: email sì/no e notifiche
-// su questo dispositivo. Se la migrazione 09 non c'è ancora, non compare.
+// Preferenze degli avvisi: email sì/no e notifiche su questo dispositivo.
+// Si apre dal pulsante «🔔 Avvisi» nell'intestazione (variante "pannello").
+// Valgono per nuove uscite, uscite modificate o annullate e promemoria prestiti.
+// Se la migrazione 09 non c'è ancora, il pannello lo dice e non mostra comandi.
 
-export default function AvvisiUscite() {
+export default function AvvisiUscite({ variante = 'card' }) {
   const { user } = useAuth();
   const [pronto, setPronto] = useState(false);
   const [disponibile, setDisponibile] = useState(true);
@@ -55,7 +57,7 @@ export default function AvvisiUscite() {
     try {
       await salvaPreferenze(user.id, { email: valore });
       setEmail(valore);
-      setMessaggio(valore ? 'Riceverai un\'email per ogni nuova uscita.' : 'Email disattivate.');
+      setMessaggio(valore ? 'Riceverai gli avvisi anche per email.' : 'Email disattivate.');
     } catch (saveError) {
       setErrore(saveError.message ?? 'Impossibile salvare.');
     } finally {
@@ -84,12 +86,31 @@ export default function AvvisiUscite() {
     }
   }
 
-  if (!pronto || !disponibile) return null;
+  const Contenitore = variante === 'pannello' ? 'div' : 'article';
+  const classe = variante === 'pannello' ? 'avvisi avvisi--pannello' : 'card avvisi';
+
+  if (!pronto) {
+    return variante === 'pannello' ? (
+      <div className={classe}>
+        <p className="avvisi-nota">Caricamento…</p>
+      </div>
+    ) : null;
+  }
+  if (!disponibile) {
+    return variante === 'pannello' ? (
+      <div className={classe}>
+        <p className="avvisi-nota">Gli avvisi non sono ancora disponibili.</p>
+      </div>
+    ) : null;
+  }
 
   return (
-    <article className="card avvisi">
-      <h3>🔔 Avvisi nuove uscite</h3>
-      <p className="avvisi-nota">Quando viene aggiunta un&apos;uscita al calendario ti avvisiamo entro mezz&apos;ora.</p>
+    <Contenitore className={classe}>
+      <h3>🔔 Avvisi</h3>
+      <p className="avvisi-nota">
+        Ti avvisiamo entro mezz&apos;ora quando un&apos;uscita viene aggiunta, modificata o annullata, e il giorno
+        prima della riconsegna di un materiale che hai in prestito.
+      </p>
 
       <label className="avvisi-riga">
         <input type="checkbox" checked={email} disabled={lavoro} onChange={(event) => cambiaEmail(event.target.checked)} />
@@ -115,6 +136,6 @@ export default function AvvisiUscite() {
 
       {messaggio && <p className="avvisi-ok">{messaggio}</p>}
       {errore && <p className="avvisi-errore">{errore}</p>}
-    </article>
+    </Contenitore>
   );
 }

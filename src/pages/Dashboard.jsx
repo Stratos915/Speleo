@@ -7,7 +7,6 @@ import { getMembers } from '../services/members';
 import { getUscite } from '../services/uscite';
 import AlertList from '../components/AlertList.jsx';
 import { ElencoUscite } from '../components/ElencoUscite.jsx';
-import AvvisiUscite from '../components/AvvisiUscite.jsx';
 import useAlerts from '../hooks/useAlerts.js';
 import { dedupeMembers } from '../utils/members.js';
 import { dayKey, prossimeEPassate, toIsoDate } from '../utils/calendario.js';
@@ -151,7 +150,6 @@ export default function Dashboard() {
           />
         </article>
       )}
-      <AvvisiUscite />
       <article className="card">
         <h2>Indicatori rapidi</h2>
         <div className="page-grid" style={{ gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
