@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
 import usePermissions from '../hooks/usePermissions.js';
 import UscitaForm from '../components/UscitaForm.jsx';
+import AdesioneUscita from '../components/AdesioneUscita.jsx';
 import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
@@ -461,6 +462,8 @@ export default function UscitaDettaglio() {
           <dd>{uscita.note || 'Nessuna nota inserita.'}</dd>
         </dl>
       </article>
+
+      <AdesioneUscita uscitaId={uscita.id} closed={isClosed} />
 
       {canEditUscite && (
         <article className="card">
