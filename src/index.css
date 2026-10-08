@@ -492,6 +492,17 @@ form {
   text-decoration: underline;
 }
 
+.cal-add {
+  align-self: flex-start;
+  margin-top: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--color-primary);
+  color: #fff;
+}
+
 /* Dentro una card l'elenco non ha bisogno della riga di separazione */
 .card > .cal-agenda:first-child {
   border-top: none;
@@ -546,7 +557,8 @@ form {
   }
 
   .cal-event-label,
-  .cal-more {
+  .cal-more,
+  .cal-add {
     display: none;
   }
 

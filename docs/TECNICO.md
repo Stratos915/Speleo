@@ -235,6 +235,23 @@ Nel database esisteva un'attività pianificata che ogni mattina alle 8 avrebbe d
 | SMTP_USER, SMTP_PASS, SMTP_FROM | Indirizzo Gmail, password per le app, stesso indirizzo come mittente |
 | NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET | Segreto della firma, identico a quello su GitHub |
 
+### Email di accesso (Supabase Auth)
+
+Le email di autenticazione (recupero password, conferme) **non** passano dalla funzione `notification-email`: le invia Supabase Auth con un SMTP configurato a parte, in Authentication → Emails → SMTP Settings.
+
+| Campo | Valore |
+|---|---|
+| Host, Port | `smtp.gmail.com`, `465` |
+| Username, Sender email | Stesso indirizzo Gmail delle notifiche |
+| Password | Password per le app Gmail dedicata, nome «Supabase Auth» |
+
+> **Il caso dell'8 ottobre 2026**<br>
+> Il recupero password falliva per tutti con `535 5.7.0 (#AUTH005) Too many bad auth attempts`: questo SMTP era rimasto su Yahoo, che respinge gli invii dai server cloud (lo stesso problema già risolto a settembre per le notifiche). Passato a Gmail con una password per le app nuova, il recupero è tornato a funzionare. Se un giorno si cambia casella, vanno aggiornati **entrambi**: i segreti delle funzioni e questa impostazione.
+
+### Indirizzi di ritorno dell'accesso
+
+In Authentication → URL Configuration → Redirect URLs devono comparire il sito (`https://speleoapp.netlify.app/**`) e le anteprime di Netlify (`https://*--speleoapp.netlify.app/**`). Senza la seconda riga, chi accede con Google da un'anteprima viene riportato sul sito ufficiale e non vede le modifiche in prova.
+
 > **⚠️ Mittente provvisorio**<br>
 > Le email partono da un indirizzo Gmail personale. Per le comunicazioni ufficiali conviene passare a una casella del gruppo: basta aggiornare `SMTP_USER`, `SMTP_PASS` e `SMTP_FROM`, senza toccare il codice.
 
