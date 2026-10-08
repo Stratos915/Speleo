@@ -44,3 +44,20 @@ export function groupUsciteByDay(uscite) {
 }
 
 export const WEEKDAYS_IT = ['Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom'];
+
+/**
+ * Divide le uscite in prossime (da oggi in avanti, in ordine di data)
+ * e passate (le più recenti per prime), al massimo `max` per gruppo.
+ */
+export function prossimeEPassate(uscite, todayKey, max = 4) {
+  const ordinate = [...(uscite ?? [])]
+    .filter((u) => dayKey(u.data))
+    .sort((a, b) => `${dayKey(a.data)} ${a.ora ?? ''}`.localeCompare(`${dayKey(b.data)} ${b.ora ?? ''}`));
+  return {
+    prossime: ordinate.filter((u) => dayKey(u.data) >= todayKey).slice(0, max),
+    passate: ordinate
+      .filter((u) => dayKey(u.data) < todayKey)
+      .reverse()
+      .slice(0, max),
+  };
+}

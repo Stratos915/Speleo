@@ -1,43 +1,16 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import usePermissions from '../hooks/usePermissions.js';
-import { WEEKDAYS_IT, buildMonthGrid, dayKey, groupUsciteByDay, toIsoDate } from '../utils/calendario.js';
+import { ElencoUscite, UscitaRiga } from './ElencoUscite.jsx';
+import { WEEKDAYS_IT, buildMonthGrid, groupUsciteByDay, prossimeEPassate, toIsoDate } from '../utils/calendario.js';
 
-// Calendario delle uscite per la Dashboard.
+// Calendario completo delle uscite (pagina /calendario).
 // Sola lettura: mostra le uscite esistenti e rimanda alle pagine della
 // sezione Uscite (scheda dell'uscita e «Nuova uscita»), senza modificarle.
 
-const ELENCO_MAX = 4;
-
-function formatOra(value) {
-  if (!value) return '';
-  return String(value).split('+')[0].slice(0, 5);
-}
-
-function formatGiorno(key, options = { weekday: 'long', day: 'numeric', month: 'long' }) {
+function formatGiorno(key) {
   const [y, m, d] = key.split('-').map(Number);
-  return new Date(y, m - 1, d).toLocaleDateString('it-IT', options);
-}
-
-function UscitaRiga({ uscita, showDate = false }) {
-  const key = dayKey(uscita.data);
-  const closed = uscita.status === 'chiusa';
-  return (
-    <li>
-      <Link to={`/uscite/${uscita.id}`} className="cal-item">
-        <span className="cal-item-time">
-          {showDate && key ? formatGiorno(key, { day: 'numeric', month: 'short' }) : formatOra(uscita.ora) || '—'}
-        </span>
-        <span className="cal-item-body">
-          <strong>{uscita.titolo || 'Uscita'}</strong>
-          <span className="cal-item-meta">
-            {[showDate ? formatOra(uscita.ora) : null, uscita.luogo, uscita.tipo].filter(Boolean).join(' · ')}
-          </span>
-        </span>
-        <span className={`cal-badge${closed ? ' cal-badge--closed' : ''}`}>{closed ? 'Chiusa' : 'Apri'}</span>
-      </Link>
-    </li>
-  );
+  return new Date(y, m - 1, d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
 }
 
 export default function CalendarioUscite({ uscite = [], loading = false }) {
@@ -53,23 +26,8 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
 
   const grid = useMemo(() => buildMonthGrid(cursor.year, cursor.month), [cursor]);
   const byDay = useMemo(() => groupUsciteByDay(uscite), [uscite]);
+  const { prossime, passate } = useMemo(() => prossimeEPassate(uscite, todayKey), [uscite, todayKey]);
   const selectedUscite = byDay.get(selectedKey) ?? [];
-
-  // Prossime (da oggi in avanti) e passate (le più recenti per prime).
-  const { prossime, passate } = useMemo(() => {
-    const ordinate = [...uscite]
-      .filter((u) => dayKey(u.data))
-      .sort((a, b) =>
-        `${dayKey(a.data)} ${a.ora ?? ''}`.localeCompare(`${dayKey(b.data)} ${b.ora ?? ''}`),
-      );
-    return {
-      prossime: ordinate.filter((u) => dayKey(u.data) >= todayKey).slice(0, ELENCO_MAX),
-      passate: ordinate
-        .filter((u) => dayKey(u.data) < todayKey)
-        .reverse()
-        .slice(0, ELENCO_MAX),
-    };
-  }, [uscite, todayKey]);
 
   const monthLabel = new Date(cursor.year, cursor.month, 1).toLocaleDateString('it-IT', {
     month: 'long',
@@ -172,33 +130,12 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
 
       {!loading && (
         <div className="cal-columns">
-          <section className="cal-agenda">
-            <h3>Prossime uscite</h3>
-            {prossime.length ? (
-              <ul className="cal-list">
-                {prossime.map((uscita) => (
-                  <UscitaRiga key={uscita.id} uscita={uscita} showDate />
-                ))}
-              </ul>
-            ) : (
-              <p className="cal-empty">Nessuna uscita in programma.</p>
-            )}
-          </section>
-          <section className="cal-agenda">
-            <h3>Uscite passate</h3>
-            {passate.length ? (
-              <ul className="cal-list">
-                {passate.map((uscita) => (
-                  <UscitaRiga key={uscita.id} uscita={uscita} showDate />
-                ))}
-              </ul>
-            ) : (
-              <p className="cal-empty">Nessuna uscita passata.</p>
-            )}
+          <ElencoUscite titolo="Prossime uscite" uscite={prossime} vuoto="Nessuna uscita in programma." />
+          <ElencoUscite titolo="Uscite passate" uscite={passate} vuoto="Nessuna uscita passata.">
             <Link to="/uscite" className="cal-all">
               Tutte le uscite →
             </Link>
-          </section>
+          </ElencoUscite>
         </div>
       )}
     </article>

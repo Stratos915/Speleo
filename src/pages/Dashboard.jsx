@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
 import { supabase } from '../lib/supabaseClient';
 import { getEquipment } from '../services/equipment';
 import { getMembers } from '../services/members';
 import { getUscite } from '../services/uscite';
 import AlertList from '../components/AlertList.jsx';
-import CalendarioUscite from '../components/CalendarioUscite.jsx';
+import { ElencoUscite } from '../components/ElencoUscite.jsx';
 import useAlerts from '../hooks/useAlerts.js';
 import { dedupeMembers } from '../utils/members.js';
+import { dayKey, prossimeEPassate, toIsoDate } from '../utils/calendario.js';
 
 function countManualParticipants(value) {
   if (!value) return 0;
@@ -134,12 +135,21 @@ export default function Dashboard() {
         navigate={navigate}
         onDismiss={dismissAlert}
       />
-      <CalendarioUscite uscite={calendarioUscite} loading={statsLoading} />
       <div className="page-grid" style={{ gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
         <DashboardCard title="Materiali" value={stats.equipment} loading={statsLoading} />
         <DashboardCard title="Soci" value={stats.members} loading={statsLoading} />
         <DashboardCard title="Uscite" value={stats.uscite} loading={statsLoading} />
+        <CalendarioCard uscite={calendarioUscite} loading={statsLoading} />
       </div>
+      {!statsLoading && (
+        <article className="card">
+          <ElencoUscite
+            titolo="Prossime uscite"
+            uscite={prossimeEPassate(calendarioUscite, toIsoDate(new Date())).prossime}
+            vuoto="Nessuna uscita in programma."
+          />
+        </article>
+      )}
       <article className="card">
         <h2>Indicatori rapidi</h2>
         <div className="page-grid" style={{ gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
@@ -204,6 +214,23 @@ function DashboardCard({ title, value, loading }) {
       <p style={{ margin: 0, color: 'var(--color-muted)' }}>{title}</p>
       <h2 style={{ margin: '0.25rem 0 0' }}>{loading ? '...' : value}</h2>
     </article>
+  );
+}
+
+// Casella «Calendario»: stessa misura delle altre, apre la pagina del calendario.
+function CalendarioCard({ uscite, loading }) {
+  const now = new Date();
+  const meseKey = toIsoDate(now).slice(0, 7);
+  const delMese = uscite.filter((uscita) => dayKey(uscita.data)?.startsWith(meseKey)).length;
+  const mese = now.toLocaleDateString('it-IT', { month: 'long' });
+  return (
+    <Link to="/calendario" className="dash-cal-card" aria-label="Apri il calendario delle uscite">
+      <p style={{ margin: 0, color: 'var(--color-muted)' }}>Calendario</p>
+      <h2 style={{ margin: '0.25rem 0 0', textTransform: 'capitalize' }}>{mese}</h2>
+      <small className="dash-cal-card-meta">
+        {loading ? '...' : `${delMese} ${delMese === 1 ? 'uscita' : 'uscite'} questo mese`} · Apri →
+      </small>
+    </Link>
   );
 }
 
