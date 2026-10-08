@@ -57,3 +57,40 @@ self.addEventListener('fetch', (event) => {
     );
   }
 });
+
+// ---------------------------------------------------------------------------
+// Notifiche push (avvisi nuove uscite). Le invia il job notification-cron.
+// ---------------------------------------------------------------------------
+self.addEventListener('push', (event) => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  const title = data.title || 'GSU · Gestionale';
+  event.waitUntil(
+    self.registration.showNotification(title, {
+      body: data.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      tag: data.tag || undefined,
+      data: { url: data.url || '/calendario' },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || '/calendario', self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const aperta = clients.find((client) => client.url.startsWith(self.location.origin));
+      if (aperta) {
+        aperta.focus();
+        return aperta.navigate(url);
+      }
+      return self.clients.openWindow(url);
+    }),
+  );
+});

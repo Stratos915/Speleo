@@ -144,6 +144,18 @@ La Biblioteca contiene il catalogo dei libri del gruppo, con autore, argomento, 
 
 Gli avvisi compaiono in alto nelle pagine e, se la segreteria ha configurato l'invio, arrivano anche per email. Riguardano prestiti non riconsegnati entro la data, uscite rimaste aperte oltre il rientro previsto e materiali con ispezione o fine vita in scadenza. Ogni avviso arriva una sola volta; puoi chiuderlo quando lo hai letto.
 
+### Avvisi per le nuove uscite
+
+Quando viene aggiunta un'uscita al calendario, entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono o sul computer. Toccando la notifica si apre la scheda dell'uscita.
+
+Le scelte sono nel riquadro «Avvisi nuove uscite» della Dashboard:
+
+- «Ricevi un'email»: togli la spunta se non vuoi le email.
+- «Attiva notifiche su questo dispositivo»: va fatto su ogni telefono o computer dove vuoi riceverle; il browser ti chiederà il permesso.
+
+> **Su iPhone**<br>
+> Le notifiche arrivano solo se l'app è stata aggiunta alla schermata Home (vedi «Installare l'app sul telefono») e la apri da lì. Serve iOS 16.4 o successivo.
+
 
 ## Per lo staff
 

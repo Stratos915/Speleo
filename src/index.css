@@ -534,6 +534,46 @@ form {
   font-weight: 600;
 }
 
+/* Riquadro «Avvisi nuove uscite» della Dashboard */
+.avvisi {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.avvisi h3 {
+  margin: 0;
+}
+
+.avvisi-nota {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--color-muted);
+}
+
+.avvisi-riga {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.avvisi-riga input[type='checkbox'] {
+  width: 1.15rem;
+  height: 1.15rem;
+  accent-color: var(--color-primary);
+}
+
+.avvisi-ok {
+  margin: 0;
+  color: var(--color-primary-dark);
+  font-weight: 600;
+}
+
+.avvisi-errore {
+  margin: 0;
+  color: var(--color-accent);
+}
+
 /* Su schermi stretti i titoli lasciano il posto a un pallino */
 @media (max-width: 640px) {
   .cal-day {

@@ -2,7 +2,8 @@
 //
 // * Non richiede JWT: l'autenticita' e' garantita dalla firma HMAC-SHA256 del corpo
 //   (header x-speleo-signature), con il segreto NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET.
-// * Gestisce i tre tipi di avviso: loans_due, uscite_rientro_superato, dpi_in_scadenza.
+// * Tipi gestiti: loans_due, uscite_rientro_superato, movimenti_prestiti, dpi_in_scadenza,
+//   nuova_uscita (avviso a tutti i soci, in copia nascosta).
 // * In modalita' di prova (test_run) non invia nulla e risponde solo con il riepilogo.
 // * Con {"diag": true} restituisce la configurazione SMTP in uso, senza la password.
 // * L'invio usa nodemailer: la libreria denomailer non completava l'autenticazione
@@ -15,6 +16,9 @@
 // dai server cloud con errore 554. Gmail con password per le app funziona.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import nodemailer from "npm:nodemailer@6.9.14";
+
+// Destinatari in copia nascosta per singolo messaggio (limite prudente per Gmail).
+const BCC_BATCH = 50;
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -70,6 +74,26 @@ function formatDayIt(value: unknown) {
   });
 }
 
+function formatWeekdayIt(value: unknown) {
+  const text = String(value ?? "");
+  if (!text) return "data non indicata";
+  const date = new Date(`${text.slice(0, 10)}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString("it-IT", {
+    timeZone: "Europe/Rome",
+    weekday: "long",
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  });
+}
+
+function formatOra(value: unknown) {
+  const text = String(value ?? "");
+  const match = /^(\d{2}):(\d{2})/.exec(text);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
 function collectEmails(values: unknown[]): string[] {
   const out = new Set<string>();
   for (const value of values.flat(2)) {
@@ -79,7 +103,7 @@ function collectEmails(values: unknown[]): string[] {
   return [...out];
 }
 
-type Message = { subject: string; body: string; to: string[] };
+type Message = { subject: string; body: string; to: string[]; bcc?: string[] };
 
 function buildMessage(payload: Record<string, any>): Message | null {
   const recipients = payload.recipients ?? {};
@@ -129,6 +153,34 @@ function buildMessage(payload: Record<string, any>): Message | null {
     };
   }
 
+  if (payload.type === "movimenti_prestiti") {
+    const items: any[] = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) return null;
+    const righe = items.map((item) => {
+      const quando = formatDateIt(item.quando);
+      if (item.tipo === "rientro") {
+        const mancanti = Number(item.mancanti ?? 0);
+        const coda = mancanti > 0 ? ` — ATTENZIONE: ${mancanti} pezzi mancanti` : "";
+        return `- RIENTRO  ${item.materiale} x${item.quantita} da ${item.socio ?? "socio"} (${quando})${coda}`;
+      }
+      const note = item.note ? ` — ${item.note}` : "";
+      return `- USCITA   ${item.materiale} x${item.quantita} a ${item.socio ?? "socio"} (${quando})${note}`;
+    });
+    const consegne = items.filter((item) => item.tipo !== "rientro").length;
+    const rientri = items.length - consegne;
+    return {
+      subject: `GSU · Movimenti magazzino: ${consegne} in uscita, ${rientri} in rientro`,
+      to: collectEmails([magazziniere, admin]),
+      body: [
+        "Movimenti di materiale registrati nell'ultimo controllo:",
+        "",
+        ...righe,
+        "",
+        "Il dettaglio completo e' in Prestiti → Storico prestiti.",
+      ].join("\n"),
+    };
+  }
+
   if (payload.type === "dpi_in_scadenza") {
     const items: any[] = Array.isArray(payload.items) ? payload.items : [];
     if (!items.length) return null;
@@ -148,7 +200,51 @@ function buildMessage(payload: Record<string, any>): Message | null {
     };
   }
 
+  // Avviso a tutti i soci: gli indirizzi vanno in copia nascosta, nessuno vede gli altri.
+  if (payload.type === "nuova_uscita") {
+    const uscite: any[] = Array.isArray(payload.uscite) ? payload.uscite : [];
+    if (!uscite.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const blocchi = uscite.map((uscita) => {
+      const ora = formatOra(uscita.ora);
+      return [
+        `• ${uscita.titolo ?? "Uscita"}`,
+        `  Quando: ${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}`,
+        `  Dove: ${uscita.luogo || "da definire"}`,
+        uscita.tipo ? `  Tipo: ${uscita.tipo}` : null,
+        uscita.responsabile_nome ? `  Responsabile: ${uscita.responsabile_nome}` : null,
+        `  Dettagli: ${appUrl}/uscite/${uscita.id}`,
+      ].filter(Boolean).join("\n");
+    });
+    const primo = uscite[0];
+    return {
+      subject: uscite.length === 1
+        ? `GSU · Nuova uscita: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`
+        : `GSU · ${uscite.length} nuove uscite in calendario`,
+      to: [],
+      bcc: collectEmails([recipients.soci]),
+      body: [
+        uscite.length === 1
+          ? "È stata aggiunta una nuova uscita al calendario del gruppo:"
+          : "Sono state aggiunte nuove uscite al calendario del gruppo:",
+        "",
+        blocchi.join("\n\n"),
+        "",
+        `Calendario completo: ${appUrl}/calendario`,
+        "",
+        "Non vuoi più ricevere questi avvisi? Disattivali dalla Dashboard dell'app,",
+        "nel riquadro «Avvisi nuove uscite».",
+      ].join("\n"),
+    };
+  }
+
   return null;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 serve(async (req) => {
@@ -205,12 +301,20 @@ serve(async (req) => {
   if (!message) {
     return json({ ok: true, skipped: "nessun contenuto da inviare", type: payload.type ?? null });
   }
-  if (!message.to.length) {
+  const bcc = message.bcc ?? [];
+  if (!message.to.length && !bcc.length) {
     console.error("Nessun destinatario configurato");
     return json({ ok: false, error: "Nessun destinatario configurato" }, 200);
   }
   if (payload.test_run === true) {
-    return json({ ok: true, test_run: true, type: payload.type, to: message.to, subject: message.subject });
+    return json({
+      ok: true,
+      test_run: true,
+      type: payload.type,
+      to: message.to,
+      bcc_count: bcc.length,
+      subject: message.subject,
+    });
   }
 
   if (!SMTP_HOST || !SMTP_USER || !SMTP_PASS || !SMTP_FROM || Number.isNaN(SMTP_PORT)) {
@@ -224,19 +328,29 @@ serve(async (req) => {
       secure: SMTP_SECURE,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
+    const text = `${message.body}\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)`;
 
-    const info = await transporter.sendMail({
-      from: SMTP_FROM,
-      to: message.to.join(", "),
-      subject: message.subject,
-      text: `${message.body}\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)`,
-    });
+    // Con la copia nascosta il destinatario visibile e' il mittente stesso;
+    // i soci sono divisi in gruppi per restare nei limiti del provider.
+    const invii = bcc.length ? chunk(bcc, BCC_BATCH).map((gruppo) => ({ to: message.to, bcc: gruppo })) : [{ to: message.to, bcc: [] }];
+    let accettati = 0;
+    for (const invio of invii) {
+      const info = await transporter.sendMail({
+        from: SMTP_FROM,
+        to: invio.to.length ? invio.to.join(", ") : SMTP_FROM,
+        bcc: invio.bcc.length ? invio.bcc.join(", ") : undefined,
+        subject: message.subject,
+        text,
+      });
+      accettati += info?.accepted?.length ?? 0;
+    }
 
     return json({
       ok: true,
       type: payload.type,
-      destinatari: message.to.length,
-      accettati: info?.accepted?.length ?? null,
+      destinatari: message.to.length + bcc.length,
+      messaggi: invii.length,
+      accettati,
     });
   } catch (sendError) {
     console.error("Invio SMTP fallito", sendError);
