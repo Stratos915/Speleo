@@ -7,6 +7,8 @@
 //   3. DPI_ISPEZIONE    materiali con ispezione scaduta o entro 30 giorni
 //   4. DPI_FINE_VITA    materiali con fine vita superata o entro 90 giorni
 //   5. MOVIMENTO        consegne e rientri di materiale, riepilogo al magazziniere
+//   6. NUOVA_USCITA     nuove uscite in calendario: email (copia nascosta) e notifica
+//                       push a tutti i soci approvati, secondo le loro preferenze
 //
 // Ogni avviso viene registrato in notification_log con (kind, ref_id) univoco:
 // eseguire il job più volte non manda doppioni.
@@ -15,6 +17,9 @@ import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supa
 
 const INSPECTION_WARNING_DAYS = 30;
 const END_OF_LIFE_WARNING_DAYS = 90;
+// Uscite create entro queste ore e con data da oggi in avanti generano l'avviso.
+const NUOVA_USCITA_FINESTRA_ORE = 6;
+const APP_URL_DEFAULT = "https://speleoapp.netlify.app";
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -402,6 +407,168 @@ async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: s
 }
 
 // ---------------------------------------------------------------------------
+// 6. Nuove uscite: avviso a tutti i soci
+// ---------------------------------------------------------------------------
+
+/** Valori riservati (chiavi VAPID, modalità di prova). Null se la tabella non esiste ancora. */
+async function loadPrivateConfig(supabase: SupabaseClient) {
+  const { data, error } = await supabase.from("app_private_config").select("key, value");
+  if (error) {
+    // 42P01 dal database, PGRST205 dall'API: la tabella non esiste ancora.
+    if (["42P01", "PGRST205"].includes((error as any).code)) return null;
+    throw error;
+  }
+  return new Map<string, string>((data ?? []).map((row: any) => [row.key, row.value]));
+}
+
+function giornoIt(value: unknown) {
+  const text = String(value ?? "").slice(0, 10);
+  const date = new Date(`${text}T12:00:00Z`);
+  if (Number.isNaN(date.getTime())) return text;
+  return date.toLocaleDateString("it-IT", { timeZone: "Europe/Rome", weekday: "short", day: "numeric", month: "short" });
+}
+
+function oraBreve(value: unknown) {
+  const match = /^(\d{2}):(\d{2})/.exec(String(value ?? ""));
+  return match ? ` alle ${match[1]}:${match[2]}` : "";
+}
+
+async function sendPush(
+  supabase: SupabaseClient,
+  priv: Map<string, string>,
+  userIds: string[],
+  uscite: any[],
+  testMode: boolean,
+) {
+  const publicKey = priv.get("vapid_public");
+  const privateKey = priv.get("vapid_private");
+  if (!publicKey || !privateKey) return { skipped: "chiavi VAPID assenti" };
+  if (!userIds.length) return { inviate: 0 };
+
+  const { data: subs, error } = await supabase
+    .from("push_subscriptions")
+    .select("id, endpoint, p256dh, auth")
+    .in("user_id", userIds);
+  if (error) throw error;
+  if (!subs?.length) return { inviate: 0, dispositivi: 0 };
+  if (testMode) return { skipped: "modalità test", dispositivi: subs.length };
+
+  // Import dinamico: se la libreria non si carica, falliscono solo le push e non il resto del job.
+  const webpush = (await import("npm:web-push@3.6.7")).default;
+  webpush.setVapidDetails(priv.get("vapid_subject") || "mailto:gsurbino@gmail.com", publicKey, privateKey);
+
+  const primo = uscite[0];
+  const payload = JSON.stringify(
+    uscite.length === 1
+      ? {
+        title: `Nuova uscita: ${primo.titolo ?? "uscita"}`,
+        body: `${giornoIt(primo.data)}${oraBreve(primo.ora)}${primo.luogo ? ` · ${primo.luogo}` : ""}`,
+        url: `/uscite/${primo.id}`,
+        tag: `uscita-${primo.id}`,
+      }
+      : {
+        title: `${uscite.length} nuove uscite in calendario`,
+        body: uscite.map((u) => `${giornoIt(u.data)} · ${u.titolo ?? "uscita"}`).join("\n"),
+        url: "/calendario",
+        tag: "nuove-uscite",
+      },
+  );
+
+  let inviate = 0;
+  let rimosse = 0;
+  let errori = 0;
+  for (const sub of subs) {
+    try {
+      await webpush.sendNotification(
+        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+        payload,
+        { TTL: 24 * 60 * 60 },
+      );
+      inviate += 1;
+      await supabase.from("push_subscriptions").update({ last_used_at: new Date().toISOString() }).eq("id", sub.id);
+    } catch (e: any) {
+      // 404/410: il browser ha revocato l'iscrizione, la togliamo.
+      if (e?.statusCode === 404 || e?.statusCode === 410) {
+        rimosse += 1;
+        await supabase.from("push_subscriptions").delete().eq("id", sub.id);
+      } else {
+        errori += 1;
+        log("warn", "Push non consegnata", { status: e?.statusCode ?? null, message: String(e?.body ?? e?.message ?? e) });
+      }
+    }
+  }
+  return { dispositivi: subs.length, inviate, rimosse, errori };
+}
+
+async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "NUOVA_USCITA";
+  const since = new Date(now.getTime() - NUOVA_USCITA_FINESTRA_ORE * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("uscite")
+    .select("id, titolo, luogo, data, ora, tipo, responsabile_nome, status, created_at")
+    .gte("created_at", since)
+    .order("data", { ascending: true });
+  if (error) throw error;
+
+  const oggi = isoDay(now);
+  const candidate = (data ?? []).filter(
+    (uscita: any) => uscita.data && String(uscita.data).slice(0, 10) >= oggi && uscita.status !== "chiusa",
+  );
+  if (!candidate.length) return { total: 0, new: 0 };
+
+  const priv = await loadPrivateConfig(supabase);
+  if (!priv) {
+    log("warn", "app_private_config assente: esegui la migrazione 09 (avvisi_nuove_uscite)", {});
+    return { total: candidate.length, new: 0, skipped: "migrazione 09 mancante" };
+  }
+
+  const fresh: any[] = [];
+  for (const uscita of candidate) {
+    if (await claim(supabase, runId, { kind, refId: uscita.id, meta: { data: uscita.data } })) fresh.push(uscita);
+  }
+  if (!fresh.length) return { total: candidate.length, new: 0 };
+
+  // Destinatari: profili approvati, secondo le preferenze (senza riga = sì a tutto).
+  const [{ data: profili, error: profiliError }, { data: preferenze, error: prefError }] = await Promise.all([
+    supabase.from("profiles").select("id, email").eq("approval_status", "approved"),
+    supabase.from("notifica_preferenze").select("user_id, email, push"),
+  ]);
+  if (profiliError) throw profiliError;
+  if (prefError) throw prefError;
+  const pref = new Map<string, any>((preferenze ?? []).map((row: any) => [row.user_id, row]));
+  const soloA = (priv.get("avvisi_uscite_solo_a") || "").trim().toLowerCase();
+  const destinatari = (profili ?? []).filter(
+    (profilo: any) => !soloA || String(profilo.email ?? "").toLowerCase() === soloA,
+  );
+  const emails = destinatari
+    .filter((profilo: any) => pref.get(profilo.id)?.email !== false && profilo.email)
+    .map((profilo: any) => profilo.email);
+  const pushUserIds = destinatari
+    .filter((profilo: any) => pref.get(profilo.id)?.push !== false)
+    .map((profilo: any) => profilo.id);
+
+  const result = await sendWebhook(config, {
+    type: "nuova_uscita",
+    count: fresh.length,
+    uscite: fresh,
+    app_url: priv.get("app_url") || APP_URL_DEFAULT,
+    recipients: { soci: emails },
+    meta: { runId, kind, solo_a: soloA || null },
+  });
+  await finalize(supabase, config, kind, fresh.map((uscita) => uscita.id), result);
+
+  let push: Record<string, unknown>;
+  try {
+    push = await sendPush(supabase, priv, pushUserIds, fresh, config.testMode);
+  } catch (e) {
+    push = { errore: errObj(e) };
+    log("error", "Invio push fallito", { runId, ...errObj(e) });
+  }
+
+  return { total: candidate.length, new: fresh.length, email: emails.length, push, prova: Boolean(soloA) };
+}
+
+// ---------------------------------------------------------------------------
 async function runCron(req: Request) {
   const runId = crypto.randomUUID();
   const started = Date.now();
@@ -444,6 +611,7 @@ async function runCron(req: Request) {
       ["uscite_rientro", () => checkUsciteRientro(supabase, config, runId, now)],
       ["dpi", () => checkDpi(supabase, config, runId, now)],
       ["movimenti", () => checkMovimenti(supabase, config, runId, now)],
+      ["nuove_uscite", () => checkNuoveUscite(supabase, config, runId, now)],
     ] as const) {
       try {
         checks[name] = await fn();
