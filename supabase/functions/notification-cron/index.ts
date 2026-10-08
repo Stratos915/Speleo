@@ -982,8 +982,11 @@ async function runCron(req: Request, interno = false) {
     }
 
     const config: Config = {
-      // Senza variabile si usa la funzione email dello stesso progetto.
-      webhook: Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK")?.trim() || `${SUPABASE_URL}/functions/v1/notification-email`,
+      // Da Supabase (pg_cron) si usa sempre la funzione email dello stesso progetto:
+      // un vecchio NOTIFICATION_EMAIL_WEBHOOK tra i segreti puntava a un indirizzo
+      // non più valido (404). Da GitHub vale la variabile, se presente.
+      webhook: (interno ? Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK")?.trim() : "") ||
+        `${SUPABASE_URL}/functions/v1/notification-email`,
       secret: Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET")?.trim() || "",
       testMode: (Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE") || "").toLowerCase() === "true",
       recipients: {
