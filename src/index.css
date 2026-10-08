@@ -226,3 +226,348 @@ form {
   box-shadow: 0 12px 24px rgba(242, 115, 103, 0.35);
   z-index: 10;
 }
+
+/* ---------------------------------------------------------------------
+   Calendario uscite (Dashboard)
+   --------------------------------------------------------------------- */
+
+.cal {
+  display: grid;
+  gap: 1rem;
+}
+
+.cal-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.cal-header h2 {
+  margin: 0;
+}
+
+.cal-nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.cal-nav-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  border-radius: 999px;
+  background: rgba(14, 151, 154, 0.1);
+  color: var(--color-primary-dark);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.cal-nav-btn:hover {
+  background: rgba(14, 151, 154, 0.2);
+}
+
+.cal-month {
+  min-width: 9.5rem;
+  text-align: center;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--color-primary-dark);
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.cal-weekday {
+  text-align: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-muted);
+  padding-bottom: 0.25rem;
+}
+
+.cal-day {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 5.25rem;
+  padding: 0.35rem;
+  border-radius: 0.6rem;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid transparent;
+  text-align: left;
+  font-weight: 400;
+  box-shadow: none;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.cal-day:hover {
+  background: rgba(14, 151, 154, 0.08);
+  transform: none;
+  box-shadow: none;
+}
+
+.cal-day--out {
+  opacity: 0.45;
+}
+
+.cal-day--selected {
+  border-color: var(--color-primary);
+  background: #fff;
+}
+
+.cal-day-num {
+  font-size: 0.85rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cal-day--today .cal-day-num {
+  display: inline-grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.cal-event {
+  display: block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  background: rgba(14, 151, 154, 0.16);
+  color: var(--color-primary-dark);
+  border-left: 3px solid var(--color-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cal-event--si {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.cal-event--forse {
+  border-left-color: #e8a33d;
+}
+
+.cal-event--no {
+  border-left-color: var(--color-accent);
+  opacity: 0.7;
+}
+
+.cal-event--closed {
+  background: #eef1f1;
+  color: var(--color-muted);
+  border-left-color: #adb5bd;
+}
+
+.cal-more {
+  font-size: 0.7rem;
+  color: var(--color-muted);
+}
+
+.cal-agenda {
+  /* annulla lo stile generico di <section> (riquadro con ombra) */
+  background: none;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 0.9rem 0 0;
+  display: grid;
+  gap: 0.6rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.9rem;
+  justify-items: start;
+}
+
+.cal-agenda h3 {
+  margin: 0;
+  text-transform: capitalize;
+}
+
+.cal-empty {
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.cal-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.cal-item {
+  display: grid;
+  grid-template-columns: 3.25rem 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  color: inherit;
+  text-decoration: none;
+  background: #fff;
+}
+
+.cal-item:hover {
+  border-color: var(--color-primary);
+}
+
+.cal-item-time {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-primary-dark);
+}
+
+.cal-item-body {
+  display: grid;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.cal-item-meta {
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.cal-badge {
+  padding: 0.3rem 0.7rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  white-space: nowrap;
+  background: rgba(14, 151, 154, 0.1);
+  color: var(--color-primary-dark);
+}
+
+.cal-badge--si {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.cal-badge--forse {
+  background: #fdf1dc;
+  color: #8a5a10;
+}
+
+.cal-badge--no {
+  background: #fde6e3;
+  color: #a33a2f;
+}
+
+/* Su schermi stretti i titoli lasciano il posto a un pallino */
+@media (max-width: 640px) {
+  .cal-day {
+    min-height: 3rem;
+    align-items: center;
+    padding: 0.3rem 0.15rem;
+  }
+
+  /* senza risposta: anello; sì: pieno; forse: ambra; no: rosso; chiusa: grigio */
+  .cal-event {
+    width: 0.5rem;
+    height: 0.5rem;
+    padding: 0;
+    border: 1.5px solid var(--color-primary);
+    border-radius: 999px;
+    background: transparent;
+  }
+
+  .cal-event--si {
+    background: var(--color-primary);
+  }
+
+  .cal-event--forse {
+    background: #e8a33d;
+    border-color: #e8a33d;
+  }
+
+  .cal-event--no {
+    background: var(--color-accent);
+    border-color: var(--color-accent);
+    opacity: 1;
+  }
+
+  .cal-event--closed {
+    background: #adb5bd;
+    border-color: #adb5bd;
+  }
+
+  .cal-event-label,
+  .cal-more {
+    display: none;
+  }
+
+  .cal-item {
+    grid-template-columns: 2.75rem 1fr;
+  }
+
+  .cal-badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   Adesione all'uscita (scheda uscita)
+   --------------------------------------------------------------------- */
+
+.rsvp-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.rsvp-btn {
+  border-radius: 999px;
+  padding: 0.55rem 1.1rem;
+  background: rgba(14, 151, 154, 0.1);
+  color: var(--color-primary-dark);
+  border: 2px solid transparent;
+  font-weight: 600;
+}
+
+.rsvp-btn--active.rsvp-btn--si {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+.rsvp-btn--active.rsvp-btn--forse {
+  background: #fdf1dc;
+  color: #8a5a10;
+  border-color: #e8a33d;
+}
+
+.rsvp-btn--active.rsvp-btn--no {
+  background: #fde6e3;
+  color: #a33a2f;
+  border-color: var(--color-accent);
+}
+
+.rsvp-groups {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.rsvp-groups p {
+  margin: 0;
+}
