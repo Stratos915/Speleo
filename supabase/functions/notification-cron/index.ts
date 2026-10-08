@@ -937,7 +937,20 @@ async function checkPromemoriaPrestiti(supabase: SupabaseClient, config: Config,
 }
 
 // ---------------------------------------------------------------------------
-async function runCron(req: Request) {
+/** Confronto a tempo costante, per non rivelare il token un carattere alla volta. */
+function stessoToken(a: string, b: string) {
+  if (!a || !b || a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+// Controlli per gruppo:
+//   tutti  esecuzione completa (GitHub Actions, ogni 30 minuti quando GitHub ci riesce)
+//   soci   solo gli avvisi ai soci, chiamati da pg_cron su Supabase ogni 10 minuti
+//          (migrazione 11) con il token cron_soci_token di app_private_config.
+// I due percorsi possono girare insieme: l'indice su (kind, ref_id) evita doppioni.
+async function runCron(req: Request, interno = false) {
   const runId = crypto.randomUUID();
   const started = Date.now();
   try {
@@ -948,16 +961,29 @@ async function runCron(req: Request) {
       log("error", "Missing required env", { runId });
       return json({ error: "Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY" }, 500);
     }
-    if (CRON_SECRET) {
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
+    let gruppo: "tutti" | "soci" = "tutti";
+    if (!interno) {
+      // Chiamata dall'esterno: serve il segreto del job (tutti i controlli)
+      // oppure il token di pg_cron (solo gli avvisi ai soci).
       const provided = getBearer(req) || (req.headers.get("x-cron-secret") || "").trim();
-      if (provided !== CRON_SECRET) {
-        log("warn", "Unauthorized (bad cron secret)", { runId });
-        return json({ error: "Unauthorized" }, 401);
+      if (!(CRON_SECRET && stessoToken(provided, CRON_SECRET))) {
+        const priv = await loadPrivateConfig(supabase).catch(() => null);
+        const token = (priv?.get("cron_soci_token") || "").trim();
+        if (!stessoToken((req.headers.get("x-avvisi-token") || "").trim(), token)) {
+          log("warn", "Unauthorized", { runId });
+          return json({ error: "Unauthorized" }, 401);
+        }
+        gruppo = "soci";
+      } else if (new URL(req.url).searchParams.get("gruppo") === "soci") {
+        gruppo = "soci";
       }
     }
 
     const config: Config = {
-      webhook: Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK")?.trim() || "",
+      // Senza variabile si usa la funzione email dello stesso progetto.
+      webhook: Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK")?.trim() || `${SUPABASE_URL}/functions/v1/notification-email`,
       secret: Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET")?.trim() || "",
       testMode: (Deno.env.get("NOTIFICATION_EMAIL_WEBHOOK_TEST_MODE") || "").toLowerCase() === "true",
       recipients: {
@@ -968,13 +994,12 @@ async function runCron(req: Request) {
       toleranceMinutes: Number(Deno.env.get("USCITA_RIENTRO_TOLLERANZA_MINUTI") || "60") || 60,
     };
 
-    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
     const now = new Date();
     const checks: Record<string, unknown> = {};
     const failures: Record<string, unknown> = {};
 
     // Ogni controllo è indipendente: un errore non blocca gli altri.
-    for (const [name, fn] of [
+    const controlli: [string, () => Promise<unknown>][] = [
       ["prestiti", () => checkOverdueLoans(supabase, config, runId, isoDay(now))],
       ["uscite_rientro", () => checkUsciteRientro(supabase, config, runId, now)],
       ["dpi", () => checkDpi(supabase, config, runId, now)],
@@ -983,7 +1008,9 @@ async function runCron(req: Request) {
       // Dopo le nuove uscite: così sa quali annunci sono già partiti.
       ["uscite_cambiate", () => checkUsciteCambiate(supabase, config, runId, now)],
       ["promemoria_prestiti", () => checkPromemoriaPrestiti(supabase, config, runId, now)],
-    ] as const) {
+    ];
+    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti"];
+    for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
         checks[name] = await fn();
       } catch (e) {
@@ -993,8 +1020,8 @@ async function runCron(req: Request) {
     }
 
     const ok = Object.keys(failures).length === 0;
-    log(ok ? "info" : "error", "notification-cron done", { runId, checks, failures, ms: Date.now() - started });
-    return json({ ok, runId, checks, failures, ms: Date.now() - started }, ok ? 200 : 500);
+    log(ok ? "info" : "error", "notification-cron done", { runId, gruppo, checks, failures, ms: Date.now() - started });
+    return json({ ok, runId, gruppo, checks, failures, ms: Date.now() - started }, ok ? 200 : 500);
   } catch (e) {
     log("error", "Unhandled error", { runId, ...errObj(e) });
     return json({ ok: false, error: String(e) }, 500);
@@ -1005,12 +1032,8 @@ async function runCron(req: Request) {
 const RUN_ONCE = Deno.args.includes("--run-once") || (Deno.env.get("RUN_ONCE") || "").toLowerCase() === "true";
 
 if (RUN_ONCE) {
-  const secret = Deno.env.get("NOTIFICATION_CRON_SECRET");
-  const req = new Request("http://localhost/notification-cron", {
-    method: "POST",
-    headers: { "content-type": "application/json", ...(secret ? { "x-cron-secret": secret } : {}) },
-  });
-  const res = await runCron(req);
+  const req = new Request("http://localhost/notification-cron", { method: "POST" });
+  const res = await runCron(req, true);
   console.log("[RUN_ONCE] status:", res.status);
   console.log("[RUN_ONCE] body:", await res.text().catch(() => ""));
   Deno.exit(res.ok ? 0 : 1);
