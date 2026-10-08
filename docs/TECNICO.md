@@ -92,6 +92,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 06 · uscite_rientro_previsto | Colonne `rientro_previsto`, `status`, `closed_at` e indice sulle uscite aperte |
 | 07 · notifiche_idempotenti | Campo `ref_id` con indice univoco su (kind, ref_id); `loan_id` reso facoltativo |
 | 08 · permessi_uscite_e_foto | Rimozione della policy che consentiva a tutti di eliminare le uscite; regole dell'archivio foto riservate ai profili approvati |
+| 09 · partecipazioni_uscite | Tabella `uscite_partecipazioni` (adesione sì / forse / no per account, con nota), policy che consentono a ciascuno di scrivere solo la propria risposta e solo su uscite aperte, funzione `uscita_adesioni` che restituisce nome e risposta senza esporre email o telefono |
 
 ### Come funziona ora un prestito
 

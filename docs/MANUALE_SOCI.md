@@ -65,9 +65,20 @@ Per «staff» si intendono i ruoli consiglio, segretario, tesoriere, magazzinier
 La pagina Uscite mostra le attività in programma. Puoi cercare per titolo o luogo e filtrare tra aperte e chiuse. «Apri scheda» mostra i dettagli: data, ora, luogo (con il link alla mappa), tipo, responsabile, partecipanti, note e materiale collegato.
 
 
+### Calendario e adesioni
+
+In Dashboard trovi il calendario del mese con tutte le uscite. Tocca un giorno per vedere le uscite di quella data, poi tocca un'uscita per aprirne la scheda. Le frecce cambiano mese, «Oggi» torna al mese corrente.
+
+Nella scheda dell'uscita, nel riquadro «Partecipi?», scegli «Partecipo», «Forse» o «Non partecipo». Puoi aggiungere una nota per il responsabile (per esempio i posti liberi in auto). La risposta si cambia in qualsiasi momento; toccando di nuovo la risposta scelta la ritiri. Quando l'uscita viene chiusa le adesioni restano visibili ma non si modificano più.
+
+Sul calendario le uscite a cui hai risposto «Partecipo» sono evidenziate; sul telefono ogni uscita è un pallino: vuoto se non hai ancora risposto, pieno se partecipi, arancione per «forse», rosso per «no», grigio se l'uscita è chiusa.
+
+Le adesioni dicono chi ha intenzione di venire; l'elenco «Partecipanti» della scheda resta quello compilato dal responsabile con chi è venuto davvero.
+
+
 ### Creare un'uscita
 
-1. In Uscite premi «Nuova uscita».
+1. In Uscite premi «Nuova uscita». Dal calendario della Dashboard puoi anche scegliere un giorno e premere «Crea un'uscita in questa data»: la data è già compilata.
 2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, altro).
 3. Indica il responsabile e seleziona i soci partecipanti; gli ospiti esterni si scrivono nel campo apposito.
 4. Se vuoi, indica il rientro previsto (vedi sotto).
