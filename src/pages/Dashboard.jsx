@@ -6,6 +6,7 @@ import { getEquipment } from '../services/equipment';
 import { getMembers } from '../services/members';
 import { getUscite } from '../services/uscite';
 import AlertList from '../components/AlertList.jsx';
+import CalendarioUscite from '../components/CalendarioUscite.jsx';
 import useAlerts from '../hooks/useAlerts.js';
 import { dedupeMembers } from '../utils/members.js';
 
@@ -25,6 +26,7 @@ export default function Dashboard() {
   const [statsLoading, setStatsLoading] = useState(true);
   const [insights, setInsights] = useState({ participants: 0, upcoming: 0, loans: 0 });
   const [trend, setTrend] = useState([]);
+  const [calendarioUscite, setCalendarioUscite] = useState([]);
 
   const loadStats = useCallback(async () => {
     setStatsLoading(true);
@@ -50,6 +52,7 @@ export default function Dashboard() {
 
       try {
         usciteList = await getUscite();
+        setCalendarioUscite(usciteList);
       } catch (usciteError) {
         console.warn('[Dashboard] Impossibile leggere le uscite:', usciteError);
       }
@@ -131,6 +134,7 @@ export default function Dashboard() {
         navigate={navigate}
         onDismiss={dismissAlert}
       />
+      <CalendarioUscite uscite={calendarioUscite} loading={statsLoading} />
       <div className="page-grid" style={{ gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
         <DashboardCard title="Materiali" value={stats.equipment} loading={statsLoading} />
         <DashboardCard title="Soci" value={stats.members} loading={statsLoading} />
