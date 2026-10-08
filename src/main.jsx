@@ -20,6 +20,21 @@ function ensureRecoveryRedirect() {
 
 ensureRecoveryRedirect();
 
+// Dopo un aggiornamento dell'app, una scheda rimasta aperta può chiedere file
+// della versione precedente che non esistono più. In quel caso si ricarica la
+// pagina una sola volta (il controllo sul tempo evita ricariche a ripetizione).
+window.addEventListener('vite:preloadError', (event) => {
+  try {
+    const ultima = Number(sessionStorage.getItem('gsu-ricarica-aggiornamento') || 0);
+    if (Date.now() - ultima < 30000) return;
+    sessionStorage.setItem('gsu-ricarica-aggiornamento', String(Date.now()));
+  } catch {
+    // sessionStorage non disponibile: si ricarica comunque una volta
+  }
+  event.preventDefault();
+  window.location.reload();
+});
+
 if (import.meta.env.PROD && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch((error) => {
