@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMonthGrid, dayKey, groupUsciteByDay, toIsoDate } from '../calendario.js';
+import { buildMonthGrid, dayKey, groupUsciteByDay, prossimeEPassate, toIsoDate } from '../calendario.js';
 
 describe('calendario', () => {
   it('ottobre 2026 parte da lunedì 28 settembre', () => {
@@ -31,5 +31,22 @@ describe('calendario', () => {
     ]);
     expect(map.get('2026-10-12').map((u) => u.id)).toEqual(['a', 'b']);
     expect(map.size).toBe(1);
+  });
+
+  it('separa prossime e passate', () => {
+    const { prossime, passate } = prossimeEPassate(
+      [
+        { id: 'p1', data: '2026-09-01' },
+        { id: 'f2', data: '2026-10-20' },
+        { id: 'oggi', data: '2026-10-08' },
+        { id: 'p2', data: '2026-10-01' },
+        { id: 'f1', data: '2026-10-10' },
+        { id: 'x', data: null },
+      ],
+      '2026-10-08',
+      2,
+    );
+    expect(prossime.map((u) => u.id)).toEqual(['oggi', 'f1']);
+    expect(passate.map((u) => u.id)).toEqual(['p2', 'p1']);
   });
 });

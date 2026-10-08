@@ -15,6 +15,7 @@ import { getPageEditRoles } from './utils/permissions.js';
 
 // Le pagine interne vengono scaricate solo quando servono: l'app si apre più in fretta.
 const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Calendario = lazy(() => import('./pages/Calendario.jsx'));
 const Uscite = lazy(() => import('./pages/Uscite.jsx'));
 const UscitaDettaglio = lazy(() => import('./pages/UscitaDettaglio.jsx'));
 const UscitaNuova = lazy(() => import('./pages/UscitaNuova.jsx'));
@@ -50,6 +51,16 @@ export const router = createBrowserRouter([
           <ProtectedRoute page="dashboard">
             <Lazy>
               <Dashboard />
+            </Lazy>
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'calendario',
+        element: (
+          <ProtectedRoute page="dashboard">
+            <Lazy>
+              <Calendario />
             </Lazy>
           </ProtectedRoute>
         ),
