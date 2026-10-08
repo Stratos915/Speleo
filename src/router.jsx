@@ -11,6 +11,7 @@ import ResetPassword from './pages/ResetPassword.jsx';
 import NotFound from './pages/NotFound.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
 import Lazy from './components/LazyPage.jsx';
+import ErroreApp from './components/ErroreApp.jsx';
 import { getPageEditRoles } from './utils/permissions.js';
 
 // Le pagine interne vengono scaricate solo quando servono: l'app si apre più in fretta.
@@ -44,6 +45,7 @@ export const router = createBrowserRouter([
         <App />
       </ProtectedRoute>
     ),
+    errorElement: <ErroreApp />,
     children: [
       {
         path: 'dashboard',
