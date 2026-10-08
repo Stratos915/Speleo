@@ -65,6 +65,11 @@ Per «staff» si intendono i ruoli consiglio, segretario, tesoriere, magazzinier
 La pagina Uscite mostra le attività in programma. Puoi cercare per titolo o luogo e filtrare tra aperte e chiuse. «Apri scheda» mostra i dettagli: data, ora, luogo (con il link alla mappa), tipo, responsabile, partecipanti, note e materiale collegato.
 
 
+### Calendario in Dashboard
+
+In Dashboard trovi il calendario del mese con le uscite. Tocca un giorno per vedere le uscite di quella data; sotto il calendario ci sono le prossime uscite e le ultime passate. Toccando un'uscita si apre la sua scheda nella sezione Uscite. Le frecce cambiano mese, «Oggi» torna al mese corrente. Chi può creare uscite trova anche il pulsante «Nuova uscita», che apre la stessa pagina della sezione Uscite.
+
+
 ### Creare un'uscita
 
 1. In Uscite premi «Nuova uscita».
