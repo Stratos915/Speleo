@@ -93,6 +93,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 07 · notifiche_idempotenti | Campo `ref_id` con indice univoco su (kind, ref_id); `loan_id` reso facoltativo |
 | 08 · permessi_uscite_e_foto | Rimozione della policy che consentiva a tutti di eliminare le uscite; regole dell'archivio foto riservate ai profili approvati |
 | 09 · avvisi_nuove_uscite | Tabelle `notifica_preferenze` (email/push per socio), `push_subscriptions` (un dispositivo per riga, scritture solo via `push_registra`/`push_rimuovi`) e `app_private_config` (chiavi VAPID e modalità di prova, leggibile solo dal job) |
+| 10 · avvisi_uscite_modificate | Tabella `uscite_modifiche` (leggibile solo dal job) e trigger `uscite_annota_modifica` su UPDATE/DELETE di `uscite`: annota i cambi di titolo, data, ora, luogo e tipo e le cancellazioni. Il trigger non blocca mai il salvataggio: un errore diventa solo un warning nel log |
 
 ### Come funziona ora un prestito
 
@@ -145,13 +146,15 @@ Il job `supabase/functions/notification-cron/index.ts` viene eseguito da GitHub 
 | DPI_ISPEZIONE | Ispezione scaduta o entro 30 giorni | Magazziniere, amministratore, presidente |
 | DPI_FINE_VITA | Fine vita superata o entro 90 giorni | Magazziniere, amministratore, presidente |
 | NUOVA_USCITA | Uscita creata nelle ultime 6 ore con data da oggi in avanti | Tutti i soci approvati: email in copia nascosta e notifica push sui dispositivi iscritti, secondo le preferenze di ciascuno |
+| USCITA_CAMBIATA | Uscita in programma modificata (titolo, data, ora, luogo, tipo) o eliminata. Le modifiche più recenti di 10 minuti aspettano il giro dopo, così più salvataggi di fila diventano un avviso solo | Come NUOVA_USCITA. Saltati: uscite passate o chiuse, uscite il cui annuncio non è ancora partito o è partito dopo la modifica, cambi che tornano al valore di partenza |
+| PRESTITO_SOCIO | Prestito aperto con riconsegna domani (email e push) o già scaduta (solo push: l'email c'è già con OVERDUE). Solo tra le 8 e le 21 ora italiana | Il socio che ha il materiale, trovato per email del prestito o numero di tessera, secondo le sue preferenze |
 
-### Avvisi nuove uscite
+### Avvisi ai soci (uscite e prestiti)
 
-- **Preferenze**: senza riga in `notifica_preferenze` il socio riceve tutto; dal riquadro «Avvisi nuove uscite» della Dashboard può togliere l'email e attivare o disattivare le notifiche sul singolo dispositivo.
-- **Email**: un solo messaggio con i soci in copia nascosta (gruppi da 50), così nessuno vede gli indirizzi degli altri.
+- **Preferenze**: senza riga in `notifica_preferenze` il socio riceve tutto; dal pulsante «🔔 Avvisi» nell'intestazione, sotto ruolo e indirizzo, può togliere l'email e attivare o disattivare le notifiche sul singolo dispositivo.
+- **Email**: per le uscite un solo messaggio con i soci in copia nascosta (gruppi da 50), così nessuno vede gli indirizzi degli altri; il promemoria del prestito è un messaggio personale. Tipi del webhook: `nuova_uscita`, `uscite_cambiate`, `prestito_promemoria`.
 - **Push**: standard Web Push con chiavi VAPID. La chiave pubblica è in `src/services/avvisi.js`; quella privata è solo in `app_private_config` (chiavi `vapid_public`, `vapid_private`, `vapid_subject`). Le iscrizioni revocate dal browser (404/410) vengono cancellate in automatico. Su iPhone funziona solo con l'app aggiunta alla schermata Home (iOS 16.4 o successivo).
-- **Modalità di prova**: se in `app_private_config` c'è la chiave `avvisi_uscite_solo_a`, email e push vanno solo al profilo con quell'indirizzo. Per passare a tutti i soci basta cancellarla:
+- **Modalità di prova**: se in `app_private_config` c'è la chiave `avvisi_uscite_solo_a`, email e push di NUOVA_USCITA, USCITA_CAMBIATA e PRESTITO_SOCIO vanno solo al profilo con quell'indirizzo (i promemoria degli altri soci restano in attesa). Per passare a tutti i soci basta cancellarla:
 
 ```
 delete from public.app_private_config where key = 'avvisi_uscite_solo_a';
@@ -159,7 +162,7 @@ delete from public.app_private_config where key = 'avvisi_uscite_solo_a';
 
 ### Idempotenza
 
-Ogni avviso ha un identificativo formato da tipo e riferimento: per i prestiti l'identificativo del prestito, per le uscite l'unione di uscita e orario di rientro, per i DPI l'unione di materiale e data di scadenza. L'indice univoco su `(kind, ref_id)` impedisce il doppio invio anche se il job gira spesso. Se la data cambia, l'avviso riparte: è il comportamento voluto.
+Ogni avviso ha un identificativo formato da tipo e riferimento: per i prestiti l'identificativo del prestito, per le uscite l'unione di uscita e orario di rientro, per i DPI l'unione di materiale e data di scadenza; per le uscite cambiate l'id della riga in `uscite_modifiche`; per i promemoria prestiti prestito, data di riconsegna e fase (`domani` o `scaduto`). L'indice univoco su `(kind, ref_id)` impedisce il doppio invio anche se il job gira spesso. Se la data cambia, l'avviso riparte: è il comportamento voluto.
 
 ### Catena di invio
 

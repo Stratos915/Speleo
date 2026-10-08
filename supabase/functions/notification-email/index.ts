@@ -3,7 +3,8 @@
 // * Non richiede JWT: l'autenticita' e' garantita dalla firma HMAC-SHA256 del corpo
 //   (header x-speleo-signature), con il segreto NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET.
 // * Tipi gestiti: loans_due, uscite_rientro_superato, movimenti_prestiti, dpi_in_scadenza,
-//   nuova_uscita (avviso a tutti i soci, in copia nascosta).
+//   nuova_uscita e uscite_cambiate (avvisi a tutti i soci, in copia nascosta),
+//   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna).
 // * In modalita' di prova (test_run) non invia nulla e risponde solo con il riepilogo.
 // * Con {"diag": true} restituisce la configurazione SMTP in uso, senza la password.
 // * L'invio usa nodemailer: la libreria denomailer non completava l'autenticazione
@@ -232,8 +233,84 @@ function buildMessage(payload: Record<string, any>): Message | null {
         "",
         `Calendario completo: ${appUrl}/calendario`,
         "",
-        "Non vuoi più ricevere questi avvisi? Disattivali dalla Dashboard dell'app,",
-        "nel riquadro «Avvisi nuove uscite».",
+        "Non vuoi più ricevere questi avvisi? Disattivali dal pulsante «🔔 Avvisi»",
+        "in alto nell'app, sotto il tuo nome.",
+      ].join("\n"),
+    };
+  }
+
+  // Uscite modificate o annullate: a tutti i soci, in copia nascosta.
+  if (payload.type === "uscite_cambiate") {
+    const items: any[] = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const blocchi = items.map((item) => {
+      const ora = formatOra(item.ora);
+      if (item.esito === "annullata") {
+        return [
+          `• ANNULLATA: ${item.titolo ?? "Uscita"}`,
+          `  Era prevista ${formatWeekdayIt(item.data)}${ora ? ` alle ${ora}` : ""}${item.luogo ? ` a ${item.luogo}` : ""}.`,
+        ].join("\n");
+      }
+      const cambi: any[] = Array.isArray(item.cambi) ? item.cambi : [];
+      return [
+        `• MODIFICATA: ${item.titolo ?? "Uscita"}`,
+        ...cambi.map((cambio) => `  ${cambio.etichetta}: ${cambio.prima} → ${cambio.dopo}`),
+        `  Nuovo programma: ${formatWeekdayIt(item.data)}${ora ? ` alle ${ora}` : ""}, ${item.luogo || "luogo da definire"}`,
+        `  Dettagli: ${appUrl}/uscite/${item.id}`,
+      ].join("\n");
+    });
+    const primo = items[0];
+    const annullate = items.filter((item) => item.esito === "annullata").length;
+    let subject: string;
+    if (items.length === 1) {
+      subject = primo.esito === "annullata"
+        ? `GSU · Uscita annullata: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`
+        : `GSU · Uscita modificata: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`;
+    } else {
+      subject = annullate === items.length
+        ? `GSU · ${items.length} uscite annullate`
+        : annullate
+        ? `GSU · Cambi in calendario: ${items.length - annullate} modificate, ${annullate} annullate`
+        : `GSU · ${items.length} uscite modificate`;
+    }
+    return {
+      subject,
+      to: [],
+      bcc: collectEmails([recipients.soci]),
+      body: [
+        items.length === 1 ? "C'è un cambiamento nel calendario del gruppo:" : "Ci sono cambiamenti nel calendario del gruppo:",
+        "",
+        blocchi.join("\n\n"),
+        "",
+        `Calendario completo: ${appUrl}/calendario`,
+        "",
+        "Non vuoi più ricevere questi avvisi? Disattivali dal pulsante «🔔 Avvisi»",
+        "in alto nell'app, sotto il tuo nome.",
+      ].join("\n"),
+    };
+  }
+
+  // Promemoria personale: il giorno prima della riconsegna del materiale.
+  if (payload.type === "prestito_promemoria") {
+    const prestito = payload.prestito ?? {};
+    const destinatario = collectEmails([recipients.socio]);
+    if (!destinatario.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    return {
+      subject: `GSU · Promemoria: riconsegna ${prestito.materiale ?? "materiale"} entro ${formatDayIt(prestito.scadenza)}`,
+      to: destinatario,
+      body: [
+        `Ciao ${prestito.socio ?? ""},`.replace(" ,", ","),
+        "",
+        "ti ricordiamo che domani va riconsegnato il materiale che hai in prestito:",
+        "",
+        `• ${prestito.materiale ?? "materiale"} × ${prestito.quantita ?? 1}`,
+        `  Riconsegna entro: ${formatWeekdayIt(prestito.scadenza)}`,
+        "",
+        "Se ti serve più tempo, avvisa il magazziniere.",
+        "",
+        `App: ${appUrl}`,
       ].join("\n"),
     };
   }

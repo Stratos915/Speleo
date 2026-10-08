@@ -144,11 +144,19 @@ La Biblioteca contiene il catalogo dei libri del gruppo, con autore, argomento, 
 
 Gli avvisi compaiono in alto nelle pagine e, se la segreteria ha configurato l'invio, arrivano anche per email. Riguardano prestiti non riconsegnati entro la data, uscite rimaste aperte oltre il rientro previsto e materiali con ispezione o fine vita in scadenza. Ogni avviso arriva una sola volta; puoi chiuderlo quando lo hai letto.
 
-### Avvisi per le nuove uscite
+### Avvisi su uscite e prestiti
 
-Quando viene aggiunta un'uscita al calendario, entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono o sul computer. Toccando la notifica si apre la scheda dell'uscita.
+Entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono o sul computer quando:
 
-Le scelte sono nel riquadro «Avvisi nuove uscite» della Dashboard:
+- viene aggiunta un'uscita al calendario;
+- un'uscita in programma cambia data, ora, luogo, titolo o tipo (l'avviso dice cosa è cambiato);
+- un'uscita in programma viene annullata.
+
+Se hai del materiale in prestito, il giorno prima della riconsegna ti arriva un promemoria; se la data passa, una notifica te lo ricorda. Questi promemoria partono solo tra le 8 e le 21.
+
+Toccando la notifica si apre la scheda dell'uscita o l'app.
+
+Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo e il tuo indirizzo:
 
 - «Ricevi un'email»: togli la spunta se non vuoi le email.
 - «Attiva notifiche su questo dispositivo»: va fatto su ogni telefono o computer dove vuoi riceverle; il browser ti chiederà il permesso.
