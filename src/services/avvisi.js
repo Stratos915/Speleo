@@ -45,9 +45,45 @@ function chiaveInBytes(base64Url) {
   return Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
 }
 
-async function registrazione() {
+function stessaChiave(attuale, attesa) {
+  if (!attuale) return true; // il browser non la espone: la diamo per buona
+  const a = new Uint8Array(attuale);
+  if (a.length !== attesa.length) return false;
+  return a.every((byte, i) => byte === attesa[i]);
+}
+
+function entro(ms, promessa, messaggio) {
+  return Promise.race([
+    promessa,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(messaggio)), ms)),
+  ]);
+}
+
+/** Registrazione del service worker già attiva (serve per iscriversi alle push). */
+async function registrazioneAttiva() {
   const esistente = await navigator.serviceWorker.getRegistration();
-  return esistente ?? navigator.serviceWorker.register('/sw.js');
+  if (!esistente) await navigator.serviceWorker.register('/sw.js');
+  return entro(
+    15000,
+    navigator.serviceWorker.ready,
+    'Il componente delle notifiche non si è avviato. Ricarica la pagina e riprova.',
+  );
+}
+
+/** Traduce gli errori del browser in un messaggio comprensibile. */
+export function messaggioErrorePush(errore) {
+  const nome = errore?.name ?? '';
+  const testo = String(errore?.message ?? errore ?? '');
+  if (nome === 'NotAllowedError' || /permission|denied/i.test(testo)) {
+    return 'Le notifiche sono bloccate per questo sito: riattivale dalle impostazioni del browser (lucchetto accanto all\'indirizzo → Notifiche → Consenti).';
+  }
+  if (nome === 'AbortError' || /push service|registration failed/i.test(testo)) {
+    return 'Il servizio di notifiche del telefono non ha risposto. Riprova tra poco; se l\'errore resta, su questo dispositivo le notifiche web non sono disponibili (succede per esempio sui telefoni senza servizi Google): usa l\'email.';
+  }
+  if (nome === 'InvalidStateError') {
+    return 'Il browser aveva un\'iscrizione vecchia alle notifiche. Ricarica la pagina e riprova.';
+  }
+  return `Impossibile attivare le notifiche${testo ? ` (${testo})` : ''}.`;
 }
 
 /** Iscrizione di questo dispositivo, se c'è. */
@@ -58,19 +94,34 @@ export async function iscrizioneCorrente() {
 }
 
 export async function attivaPushQui() {
-  const permesso = await Notification.requestPermission();
+  if (!pushSupportato()) throw new Error('Questo browser non supporta le notifiche.');
+  const permesso = Notification.permission === 'granted' ? 'granted' : await Notification.requestPermission();
   if (permesso !== 'granted') {
     throw new Error(
       permesso === 'denied'
-        ? 'Le notifiche sono bloccate per questo sito: riattivale dalle impostazioni del browser.'
+        ? 'Le notifiche sono bloccate per questo sito: riattivale dalle impostazioni del browser (lucchetto accanto all\'indirizzo → Notifiche → Consenti).'
         : 'Permesso non concesso.',
     );
   }
-  const reg = await registrazione();
-  await navigator.serviceWorker.ready;
-  const sub =
-    (await reg.pushManager.getSubscription()) ??
-    (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chiaveInBytes(VAPID_PUBLIC_KEY) }));
+
+  let sub;
+  try {
+    const reg = await registrazioneAttiva();
+    const chiave = chiaveInBytes(VAPID_PUBLIC_KEY);
+    sub = await reg.pushManager.getSubscription();
+    // Un'iscrizione fatta con un'altra chiave non riceverebbe nulla: si rifà.
+    if (sub && !stessaChiave(sub.options?.applicationServerKey, chiave)) {
+      await sub.unsubscribe();
+      sub = null;
+    }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: chiave });
+    }
+  } catch (pushError) {
+    console.warn('[Avvisi] iscrizione push non riuscita:', pushError);
+    throw new Error(messaggioErrorePush(pushError));
+  }
+
   const json = sub.toJSON();
   const { error } = await supabase.rpc('push_registra', {
     p_endpoint: json.endpoint,
@@ -78,7 +129,10 @@ export async function attivaPushQui() {
     p_auth: json.keys?.auth,
     p_user_agent: navigator.userAgent,
   });
-  if (error) throw error;
+  if (error) {
+    console.warn('[Avvisi] registrazione dispositivo non riuscita:', error);
+    throw new Error(`Notifiche attivate sul dispositivo ma non salvate sul server: ${error.message}`);
+  }
 }
 
 export async function disattivaPushQui() {
