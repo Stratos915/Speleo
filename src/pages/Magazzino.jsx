@@ -16,6 +16,8 @@ import { safeLogActivity } from '../services/activityLogs.js';
 import { getSetting, setSetting } from '../services/settings.js';
 import { friendlyDbError } from '../services/loans.js';
 import { getDpiAlerts } from '../utils/dpi.js';
+import './Magazzino.css';
+import { caricaFotoMateriale, rimuoviFotoMateriale, urlFotoMateriale } from '../services/fotoMateriali.js';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -55,6 +57,12 @@ export default function Magazzino() {
   const [inspectionField, setInspectionField] = useState(null);
   const [inspectionsFolderUrl, setInspectionsFolderUrl] = useState('');
   const [dpiFilter, setDpiFilter] = useState(false);
+  // Foto (migrazione 12): file scelto nel modulo, richiesta di rimozione, foto ingrandita
+  const [supportsPhoto, setSupportsPhoto] = useState(false);
+  const [fotoFile, setFotoFile] = useState(null);
+  const [fotoRimossa, setFotoRimossa] = useState(false);
+  const [fotoGrande, setFotoGrande] = useState(null);
+  const [fotoInCaricamento, setFotoInCaricamento] = useState(null);
   const formRef = useRef(null);
   const { role, user } = useAuth();
   const { canEditSection, canUseAction } = usePermissions();
@@ -105,6 +113,7 @@ export default function Magazzino() {
       setSupportsEquipmentNumber(
         data.some((item) => Object.prototype.hasOwnProperty.call(item, 'equipment_number')),
       );
+      setSupportsPhoto(data.some((item) => Object.prototype.hasOwnProperty.call(item, 'foto_path')));
       const {
         quantity: detectedQuantity,
         available: detectedAvailable,
@@ -327,11 +336,15 @@ export default function Magazzino() {
           user,
         );
       }
+      if (supportsPhoto && !isRestock && savedEquipment?.id != null) {
+        await salvaFotoDopoModulo(savedEquipment);
+      }
       setForm(emptyMaterial);
       setEditingId(null);
       setEditingBorrowed(0);
       setSelectedMaterialId('');
       setRestockMode('replace');
+      azzeraFoto();
       loadMaterials();
     } catch (submitError) {
       setError(friendlyDbError(submitError, 'Errore durante il salvataggio.'));
@@ -348,6 +361,7 @@ export default function Magazzino() {
       material[availableField] ?? material.quantity_available ?? material.available_quantity ?? total,
     );
     setEditingId(material.id);
+    azzeraFoto();
     setEditingBorrowed(Math.max(total - available, 0));
     setSelectedMaterialId('');
     setRestockMode('replace');
@@ -369,6 +383,46 @@ export default function Magazzino() {
     setSelectedMaterialId('');
     setRestockMode('replace');
     setForm(emptyMaterial);
+    azzeraFoto();
+  }
+
+  function azzeraFoto() {
+    setFotoFile(null);
+    setFotoRimossa(false);
+  }
+
+  // Dopo il salvataggio del modulo: carica la foto nuova o toglie quella vecchia.
+  async function salvaFotoDopoModulo(saved) {
+    const vecchia = materials.find((item) => String(item.id) === String(saved.id))?.foto_path ?? null;
+    try {
+      if (fotoFile) {
+        const nuova = await caricaFotoMateriale(saved.id, fotoFile);
+        await updateEquipment(saved.id, { foto_path: nuova });
+        if (vecchia) await rimuoviFotoMateriale(vecchia);
+      } else if (fotoRimossa && vecchia) {
+        await updateEquipment(saved.id, { foto_path: null });
+        await rimuoviFotoMateriale(vecchia);
+      }
+    } catch (fotoError) {
+      setError(`Materiale salvato, ma la foto no: ${fotoError.message ?? 'errore sconosciuto'}`);
+    }
+  }
+
+  // Foto aggiunta direttamente dalla scheda del materiale, senza aprire il modulo.
+  async function caricaFotoDaScheda(material, file) {
+    if (!file || !canEditInventory) return;
+    setError('');
+    setFotoInCaricamento(material.id);
+    try {
+      const nuova = await caricaFotoMateriale(material.id, file);
+      await updateEquipment(material.id, { foto_path: nuova });
+      if (material.foto_path) await rimuoviFotoMateriale(material.foto_path);
+      await loadMaterials();
+    } catch (fotoError) {
+      setError(`Foto non caricata: ${fotoError.message ?? 'errore sconosciuto'}`);
+    } finally {
+      setFotoInCaricamento(null);
+    }
   }
 
   async function handleInspectionLinkEdit(material) {
@@ -425,7 +479,9 @@ export default function Magazzino() {
     if (!window.confirm('Vuoi davvero eliminare questo materiale?')) return;
     setError('');
     try {
+      const fotoDaTogliere = materials.find((item) => item.id === id)?.foto_path;
       await deleteEquipment(id);
+      if (fotoDaTogliere) await rimuoviFotoMateriale(fotoDaTogliere);
       safeLogActivity(
         {
           action: 'delete_equipment',
@@ -468,6 +524,12 @@ export default function Magazzino() {
       {!canEditInventory && (
         <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
           Non hai i permessi per modificare il magazzino. Puoi consultare i materiali ma non aggiornarli.
+        </p>
+      )}
+
+      {error && !(showForm && canEditInventory) && (
+        <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a', margin: 0 }}>
+          {error}
         </p>
       )}
 
@@ -626,6 +688,20 @@ export default function Magazzino() {
                 </small>
               </>
             )}
+            {supportsPhoto && !(selectedMaterialId && !editingId) && (
+              <CampoFoto
+                attuale={fotoRimossa ? null : materials.find((item) => item.id === editingId)?.foto_path ?? null}
+                file={fotoFile}
+                onScegli={(file) => {
+                  setFotoFile(file);
+                  setFotoRimossa(false);
+                }}
+                onTogli={() => {
+                  setFotoFile(null);
+                  setFotoRimossa(true);
+                }}
+              />
+            )}
             <input
               type="number"
               min={0}
@@ -671,10 +747,21 @@ export default function Magazzino() {
             const displayId = material.equipment_number ?? index + 1;
             return (
               <article className="card" key={key}>
-                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <h3 style={{ margin: 0 }}>{material.name}</h3>
-                    <span className="chip">ID #{displayId}</span>
+                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', minWidth: 0 }}>
+                    {supportsPhoto && (
+                      <Miniatura
+                        material={material}
+                        modificabile={canEditInventory}
+                        inCaricamento={fotoInCaricamento === material.id}
+                        onApri={(url) => setFotoGrande({ url, nome: material.name })}
+                        onCarica={(file) => caricaFotoDaScheda(material, file)}
+                      />
+                    )}
+                    <div style={{ minWidth: 0 }}>
+                      <h3 style={{ margin: 0 }}>{material.name}</h3>
+                      <span className="chip">ID #{displayId}</span>
+                    </div>
                   </div>
                   <strong>
                     {available}/{total} pezzi
@@ -797,12 +884,102 @@ export default function Magazzino() {
               setEditingBorrowed(0);
               setSelectedMaterialId('');
               setForm(emptyMaterial);
+              azzeraFoto();
             }}
           >
             {showForm ? 'Chiudi modulo' : 'Nuovo materiale'}
           </button>
         )}
       </div>
+      {fotoGrande && (
+        <div
+          className="foto-grande"
+          role="dialog"
+          aria-label={`Foto di ${fotoGrande.nome}`}
+          onClick={() => setFotoGrande(null)}
+          onKeyDown={(event) => event.key === 'Escape' && setFotoGrande(null)}
+          tabIndex={-1}
+        >
+          <img src={fotoGrande.url} alt={fotoGrande.nome} />
+          <p>{fotoGrande.nome} · tocca per chiudere</p>
+        </div>
+      )}
     </section>
+  );
+}
+
+// Miniatura della scheda: tocca per ingrandire; chi gestisce l'inventario
+// può aggiungere la foto direttamente da qui (sul telefono si apre la fotocamera).
+function Miniatura({ material, modificabile, inCaricamento, onApri, onCarica }) {
+  const url = urlFotoMateriale(material.foto_path);
+  if (url) {
+    return (
+      <button type="button" className="mat-foto" onClick={() => onApri(url)} aria-label={`Ingrandisci la foto di ${material.name}`}>
+        <img src={url} alt="" loading="lazy" />
+      </button>
+    );
+  }
+  if (!modificabile) {
+    return (
+      <span className="mat-foto mat-foto--vuota" aria-hidden="true">
+        🧗
+      </span>
+    );
+  }
+  return (
+    <label className="mat-foto mat-foto--vuota mat-foto--aggiungi" title="Aggiungi una foto">
+      {inCaricamento ? '…' : '📷'}
+      <input
+        type="file"
+        accept="image/*"
+        hidden
+        disabled={inCaricamento}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = '';
+          if (file) onCarica(file);
+        }}
+      />
+    </label>
+  );
+}
+
+// Campo foto del modulo: anteprima della foto scelta o di quella attuale.
+function CampoFoto({ attuale, file, onScegli, onTogli }) {
+  const anteprima = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file]);
+  useEffect(() => () => anteprima && URL.revokeObjectURL(anteprima), [anteprima]);
+  const mostrata = anteprima || urlFotoMateriale(attuale);
+  return (
+    <div style={{ display: 'grid', gap: '0.4rem' }}>
+      <span>Foto (facoltativa)</span>
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+        {mostrata ? (
+          <img src={mostrata} alt="" className="mat-foto" style={{ objectFit: 'cover' }} />
+        ) : (
+          <span className="mat-foto mat-foto--vuota" aria-hidden="true">
+            📷
+          </span>
+        )}
+        <label className="pill-button" style={{ cursor: 'pointer' }}>
+          {mostrata ? 'Cambia foto' : 'Scegli o scatta una foto'}
+          <input
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(event) => {
+              const scelto = event.target.files?.[0];
+              event.target.value = '';
+              if (scelto) onScegli(scelto);
+            }}
+          />
+        </label>
+        {mostrata && (
+          <button type="button" style={{ background: '#adb5bd' }} onClick={onTogli}>
+            Togli foto
+          </button>
+        )}
+      </div>
+      <small style={{ color: 'var(--color-muted)' }}>La foto viene ridotta automaticamente prima del caricamento.</small>
+    </div>
   );
 }
