@@ -1,0 +1,62 @@
+/* Foto dei materiali in inventario */
+.mat-foto {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  border-radius: 12px;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  background: #f1f3f5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: none;
+}
+
+.mat-foto img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.mat-foto--vuota {
+  font-size: 1.6rem;
+  color: var(--color-muted);
+}
+
+.mat-foto--aggiungi {
+  cursor: pointer;
+  border-style: dashed;
+}
+
+.mat-foto--aggiungi:hover {
+  background: #e9ecef;
+}
+
+.foto-grande {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(15, 23, 23, 0.85);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  cursor: zoom-out;
+}
+
+.foto-grande img {
+  max-width: min(92vw, 800px);
+  max-height: 80vh;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.foto-grande p {
+  margin: 0;
+  color: #fff;
+}
