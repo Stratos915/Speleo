@@ -95,6 +95,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 09 · avvisi_nuove_uscite | Tabelle `notifica_preferenze` (email/push per socio), `push_subscriptions` (un dispositivo per riga, scritture solo via `push_registra`/`push_rimuovi`) e `app_private_config` (chiavi VAPID e modalità di prova, leggibile solo dal job) |
 | 10 · avvisi_uscite_modificate | Tabella `uscite_modifiche` (leggibile solo dal job) e trigger `uscite_annota_modifica` su UPDATE/DELETE di `uscite`: annota i cambi di titolo, data, ora, luogo e tipo e le cancellazioni. Il trigger non blocca mai il salvataggio: un errore diventa solo un warning nel log |
 | 11 · avvisi_soci_pg_cron | Estensione `pg_net`, token casuale `cron_soci_token` in `app_private_config` e job pg_cron `avvisi-soci` ogni 10 minuti che chiama la Edge Function `notification-cron?gruppo=soci` |
+| 12 · foto_materiali | Colonna `equipment.foto_path` e archivio pubblico `materiali-foto` (max 2 MB, JPEG/PNG/WebP). Caricano e tolgono foto solo admin, presidente e magazziniere. L'app riduce le foto a 800 px prima del caricamento |
 
 ### Come funziona ora un prestito
 
