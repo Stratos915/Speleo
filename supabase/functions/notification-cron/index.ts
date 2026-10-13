@@ -13,6 +13,8 @@
 //                       o annullate: stesso avviso ai soci (richiede la migrazione 10)
 //   8. PRESTITO_SOCIO   promemoria al socio che ha il materiale: il giorno prima della
 //                       riconsegna (email e push) e, se scade, una notifica push
+//   9. USCITA_PROMEMORIA promemoria a tutti i soci 7 giorni e 3 giorni prima di ogni
+//                       uscita in programma (email e push), solo tra le 8 e le 21
 //
 // Ogni avviso viene registrato in notification_log con (kind, ref_id) univoco:
 // eseguire il job più volte non manda doppioni.
@@ -30,6 +32,8 @@ const MODIFICHE_ATTESA_MINUTI = 10;
 // I promemoria personali partono solo in questa fascia oraria (ora italiana).
 const PROMEMORIA_DALLE = 8;
 const PROMEMORIA_ALLE = 21;
+// Giorni prima dell'uscita in cui arriva il promemoria ai soci.
+const PROMEMORIA_USCITA_GIORNI = [7, 3];
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -936,6 +940,80 @@ async function checkPromemoriaPrestiti(supabase: SupabaseClient, config: Config,
   return { total: data.length, new: inviati, dettagli: risultati, prova: Boolean(soloA) };
 }
 
+
+// ---------------------------------------------------------------------------
+// 9. Promemoria uscite: 7 e 3 giorni prima, a tutti i soci
+// ---------------------------------------------------------------------------
+async function checkPromemoriaUscite(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "USCITA_PROMEMORIA";
+  const ora = oraRoma(now);
+  if (ora < PROMEMORIA_DALLE || ora >= PROMEMORIA_ALLE) return { total: 0, new: 0, skipped: "fuori orario" };
+
+  const giorni = new Map<string, number>(
+    PROMEMORIA_USCITA_GIORNI.map((n) => [giornoRoma(addDays(now, n)), n]),
+  );
+  const { data, error } = await supabase
+    .from("uscite")
+    .select("id, titolo, luogo, data, ora, tipo, responsabile_nome, status, created_at")
+    .in("data", [...giorni.keys()])
+    .order("data", { ascending: true });
+  if (error) throw error;
+  const candidate = (data ?? []).filter((uscita: any) => uscita.status !== "chiusa");
+  if (!candidate.length) return { total: 0, new: 0 };
+
+  const priv = await loadPrivateConfig(supabase);
+  if (!priv) return { total: candidate.length, new: 0, skipped: "migrazione 09 mancante" };
+
+  // Se l'uscita è stata annunciata nelle ultime 24 ore il promemoria sarebbe un doppione.
+  const { data: annunci } = await supabase
+    .from("notification_log")
+    .select("ref_id, created_at")
+    .eq("kind", "NUOVA_USCITA")
+    .in("ref_id", candidate.map((uscita: any) => uscita.id));
+  const annunciataIl = new Map<string, number>(
+    (annunci ?? []).map((row: any) => [row.ref_id, new Date(row.created_at).getTime()]),
+  );
+  const giornoFa = now.getTime() - 24 * 60 * 60 * 1000;
+
+  const fresh: any[] = [];
+  let saltate = 0;
+  for (const uscita of candidate) {
+    const dataUscita = String(uscita.data).slice(0, 10);
+    const tra = giorni.get(dataUscita);
+    if (!tra) continue;
+    const refId = `${uscita.id}:${dataUscita}:${tra}`;
+    if (!(await claim(supabase, runId, { kind, refId, meta: { giorni: tra } }))) continue;
+    if ((annunciataIl.get(uscita.id) ?? 0) > giornoFa) {
+      await markLog(supabase, kind, [refId], "SKIPPED", "Annunciata da meno di 24 ore");
+      saltate += 1;
+      continue;
+    }
+    fresh.push({ ...uscita, refId, tra });
+  }
+  if (!fresh.length) return { total: candidate.length, new: 0, saltate };
+
+  const { soloA, emails, pushUserIds } = await destinatariSoci(supabase, priv);
+  const result = await sendWebhook(config, {
+    type: "uscita_promemoria",
+    count: fresh.length,
+    uscite: fresh.map(({ refId: _refId, ...uscita }) => uscita),
+    app_url: priv.get("app_url") || APP_URL_DEFAULT,
+    recipients: { soci: emails },
+    meta: { runId, kind, solo_a: soloA || null },
+  });
+  await finalize(supabase, config, kind, fresh.map((uscita) => uscita.refId), result);
+
+  const payloads: PushPayload[] = fresh.map((uscita) => ({
+    title: `Tra ${uscita.tra} giorni: ${uscita.titolo ?? "uscita"}`,
+    body: `${giornoIt(uscita.data)}${oraBreve(uscita.ora)}${uscita.luogo ? ` · ${uscita.luogo}` : ""}`,
+    url: `/uscite/${uscita.id}`,
+    tag: `uscita-${uscita.id}`,
+  }));
+  const push = await sendPushSicuro(supabase, priv, pushUserIds, payloads, config.testMode, runId);
+
+  return { total: candidate.length, new: fresh.length, saltate, email: emails.length, push, prova: Boolean(soloA) };
+}
+
 // ---------------------------------------------------------------------------
 /** Confronto a tempo costante, per non rivelare il token un carattere alla volta. */
 function stessoToken(a: string, b: string) {
@@ -1011,8 +1089,9 @@ async function runCron(req: Request, interno = false) {
       // Dopo le nuove uscite: così sa quali annunci sono già partiti.
       ["uscite_cambiate", () => checkUsciteCambiate(supabase, config, runId, now)],
       ["promemoria_prestiti", () => checkPromemoriaPrestiti(supabase, config, runId, now)],
+      ["promemoria_uscite", () => checkPromemoriaUscite(supabase, config, runId, now)],
     ];
-    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti"];
+    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite"];
     for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
         checks[name] = await fn();
