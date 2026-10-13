@@ -102,7 +102,7 @@ Per chiudere un'uscita tutto il materiale prestato per quell'uscita deve essere 
 
 ### Consultare l'inventario
 
-In Inventario trovi tutto il materiale con la disponibilità nella forma disponibili/totali (per esempio «7/10 pezzi»). Puoi cercare per nome, descrizione o codice.
+In Inventario trovi tutto il materiale con la disponibilità nella forma disponibili/totali (per esempio «7/10 pezzi»). Puoi cercare per nome, descrizione o codice. Accanto al nome compare la foto del materiale, se c'è: toccala per ingrandirla.
 
 Alcuni materiali mostrano un avviso colorato sulle scadenze dei dispositivi di protezione (DPI):
 
@@ -175,6 +175,7 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 - Modifica della quantità totale: i pezzi in prestito restano conteggiati, l'app lo ricorda nel modulo.
 - Scadenze: la casella «Mostra solo i materiali con ispezione o fine vita in scadenza» filtra l'elenco.
 - Ispezioni: collega a ogni materiale il link della scheda su Drive; il pulsante «Ispezioni» apre la cartella comune, ora condivisa con tutto lo staff.
+- Foto: tocca il riquadro 📷 accanto al nome per aggiungere una foto (dal telefono si apre la fotocamera), oppure usa «Modifica» per cambiarla o toglierla. L'app la riduce da sola prima di caricarla.
 
 
 ### Direttore della scuola
