@@ -4,7 +4,8 @@
 //   (header x-speleo-signature), con il segreto NOTIFICATION_EMAIL_WEBHOOK_SHARED_SECRET.
 // * Tipi gestiti: loans_due, uscite_rientro_superato, movimenti_prestiti, dpi_in_scadenza,
 //   nuova_uscita e uscite_cambiate (avvisi a tutti i soci, in copia nascosta),
-//   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna).
+//   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna),
+//   uscita_promemoria (a tutti i soci, 7 e 3 giorni prima dell'uscita).
 // * In modalita' di prova (test_run) non invia nulla e risponde solo con il riepilogo.
 // * Con {"diag": true} restituisce la configurazione SMTP in uso, senza la password.
 // * L'invio usa nodemailer: la libreria denomailer non completava l'autenticazione
@@ -280,6 +281,41 @@ function buildMessage(payload: Record<string, any>): Message | null {
       bcc: collectEmails([recipients.soci]),
       body: [
         items.length === 1 ? "C'è un cambiamento nel calendario del gruppo:" : "Ci sono cambiamenti nel calendario del gruppo:",
+        "",
+        blocchi.join("\n\n"),
+        "",
+        `Calendario completo: ${appUrl}/calendario`,
+        "",
+        "Non vuoi più ricevere questi avvisi? Disattivali dal pulsante «🔔 Avvisi»",
+        "in alto nell'app, sotto il tuo nome.",
+      ].join("\n"),
+    };
+  }
+
+  // Promemoria delle uscite in programma: 7 e 3 giorni prima, a tutti i soci.
+  if (payload.type === "uscita_promemoria") {
+    const uscite: any[] = Array.isArray(payload.uscite) ? payload.uscite : [];
+    if (!uscite.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const blocchi = uscite.map((uscita) => {
+      const ora = formatOra(uscita.ora);
+      return [
+        `• ${uscita.titolo ?? "Uscita"} — tra ${uscita.tra} giorni`,
+        `  Quando: ${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}`,
+        `  Dove: ${uscita.luogo || "da definire"}`,
+        uscita.responsabile_nome ? `  Responsabile: ${uscita.responsabile_nome}` : null,
+        `  Dettagli: ${appUrl}/uscite/${uscita.id}`,
+      ].filter(Boolean).join("\n");
+    });
+    const primo = uscite[0];
+    return {
+      subject: uscite.length === 1
+        ? `GSU · Tra ${primo.tra} giorni: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`
+        : `GSU · Promemoria: ${uscite.length} uscite in arrivo`,
+      to: [],
+      bcc: collectEmails([recipients.soci]),
+      body: [
+        uscite.length === 1 ? "Promemoria per l'uscita in programma:" : "Promemoria per le uscite in programma:",
         "",
         blocchi.join("\n\n"),
         "",
