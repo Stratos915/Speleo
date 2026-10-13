@@ -150,7 +150,8 @@ Entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono 
 
 - viene aggiunta un'uscita al calendario;
 - un'uscita in programma cambia data, ora, luogo, titolo o tipo (l'avviso dice cosa è cambiato);
-- un'uscita in programma viene annullata.
+- un'uscita in programma viene annullata;
+- mancano 7 giorni e poi 3 giorni a un'uscita in programma (promemoria, tra le 8 e le 21).
 
 Se hai del materiale in prestito, il giorno prima della riconsegna ti arriva un promemoria; se la data passa, una notifica te lo ricorda. Questi promemoria partono solo tra le 8 e le 21.
 
