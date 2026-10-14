@@ -7,6 +7,7 @@ import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
 import { dedupeMembers } from '../utils/members.js';
 import { getAllRoles } from '../utils/permissions.js';
+import AccountRegistrati from '../components/AccountRegistrati.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 import { loadScuolaData } from '../services/scuola.js';
 import {
@@ -569,6 +570,31 @@ export default function Report() {
       }
     },
     [loadPendingProfiles, pendingProfiles, loadApprovalHistory, user],
+  );
+
+  // Richiesta da eliminare del tutto (account doppio, sconosciuto, di prova).
+  const handleDeletePending = useCallback(
+    async (profile) => {
+      const etichetta = profile.email ?? 'questo account';
+      if (!window.confirm(`Eliminare l'account ${etichetta}?\n\nLa richiesta sparisce e la persona non potrà accedere. L'operazione non si può annullare.`)) return;
+      setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: true }));
+      setApprovalsError('');
+      try {
+        const { error: deleteError } = await supabase.rpc('elimina_account', { p_user_id: profile.id });
+        if (deleteError) throw deleteError;
+        await loadPendingProfiles();
+        await loadApprovalHistory();
+      } catch (deleteError) {
+        setApprovalsError(
+          deleteError?.code === 'PGRST202'
+            ? 'Funzione non ancora attiva: va eseguita la migrazione 13 (elimina_account) su Supabase.'
+            : deleteError.message ?? 'Impossibile eliminare l\'account.',
+        );
+      } finally {
+        setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: false }));
+      }
+    },
+    [loadPendingProfiles, loadApprovalHistory],
   );
 
   const handleRoleChange = useCallback(
@@ -1340,6 +1366,14 @@ export default function Report() {
                         >
                           Rifiuta
                         </button>
+                        <button
+                          type="button"
+                          style={{ background: '#e03131' }}
+                          onClick={() => handleDeletePending(profile)}
+                          disabled={approvalsUpdating[profile.id]}
+                        >
+                          Elimina
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1347,6 +1381,7 @@ export default function Report() {
               ) : (
                 <p>Nessuna richiesta in attesa.</p>
               )}
+              <AccountRegistrati currentUserId={user?.id} onEliminato={loadApprovalHistory} />
               <div style={{ marginTop: '1rem' }}>
                 <strong>Storico approvazioni</strong>
                 {historyError && <p style={{ color: '#c92a2a' }}>{historyError}</p>}

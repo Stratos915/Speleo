@@ -152,6 +152,8 @@ Entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono 
 - un'uscita in programma cambia data, ora, luogo, titolo o tipo (l'avviso dice cosa è cambiato);
 - un'uscita in programma viene annullata.
 
+Inoltre ricevi un promemoria 7 giorni e 3 giorni prima di ogni uscita in programma, la mattina dalle 8.
+
 Se hai del materiale in prestito, il giorno prima della riconsegna ti arriva un promemoria; se la data passa, una notifica te lo ricorda. Questi promemoria partono solo tra le 8 e le 21.
 
 Toccando la notifica si apre la scheda dell'uscita o l'app.
@@ -190,6 +192,7 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 ### Presidente e amministratori
 
 - Approvazioni: in Report trovi le richieste di accesso in attesa; scegli il ruolo e approva o rifiuta. Ogni decisione resta nello storico.
+- Account non più necessari: in Report, sotto le richieste, «Account registrati» elenca chi può accedere; «Elimina» toglie l'accesso (va confermato e non si annulla). La scheda del socio in Soci, i prestiti e le uscite restano. Anche una richiesta in attesa sconosciuta o doppia si può eliminare. Il tuo account non si può eliminare da qui.
 - Ruoli: solo presidente e amministratori possono cambiarli. Dai a ciascuno il ruolo minimo che gli serve.
 - Statistiche di accesso: visibili solo a voi, perché contengono dati personali.
 - Esportazioni: gli elenchi si scaricano in CSV, XLSX o PDF con carta intestata. Conserva i file con i dati dei soci solo per il tempo necessario.
