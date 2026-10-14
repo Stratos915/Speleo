@@ -166,6 +166,27 @@ async function notifyInApp(supabase: SupabaseClient, rows: Record<string, unknow
   if (error) log("warn", "Notifiche in app non create", errObj(error));
 }
 
+/**
+ * Riga di anagrafica → profilo dell'app della stessa persona (migrazione 16).
+ * L'anagrafica ha una riga per anno e spesso solo una ha l'email: la funzione
+ * trova il profilo anche partendo da una riga senza email. Mappa vuota se la
+ * migrazione 16 non c'è.
+ */
+async function profiliDeiSoci(supabase: SupabaseClient, memberIds: string[]) {
+  const mappa = new Map<string, string>();
+  const ids = [...new Set(memberIds.filter(Boolean).map(String))];
+  if (!ids.length) return mappa;
+  const { data, error } = await supabase.rpc("profili_dei_soci", { p_member_ids: ids, p_user_ids: [] });
+  if (error) {
+    log("warn", "profili_dei_soci non disponibile (migrazione 16)", errObj(error));
+    return mappa;
+  }
+  for (const riga of data ?? []) {
+    if (riga.member_id && riga.user_id) mappa.set(String(riga.member_id), String(riga.user_id));
+  }
+  return mappa;
+}
+
 // ---------------------------------------------------------------------------
 // 1. Prestiti scaduti
 // ---------------------------------------------------------------------------
@@ -247,6 +268,17 @@ async function checkUsciteRientro(supabase: SupabaseClient, config: Config, runI
   if (memberIds.length) {
     const { data: profiles } = await supabase.from("profiles").select("id, email, member_id").in("member_id", memberIds);
     (profiles ?? []).forEach((profile: any) => responsabili.set(String(profile.member_id), profile));
+    // Responsabili con il profilo collegato a un'altra riga di anagrafica (altro anno) o solo per email.
+    const mancanti = memberIds.filter((id: string) => !responsabili.has(String(id)));
+    const legami = await profiliDeiSoci(supabase, mancanti);
+    if (legami.size) {
+      const { data: altri } = await supabase.from("profiles").select("id, email").in("id", [...new Set(legami.values())]);
+      const perId = new Map<string, any>((altri ?? []).map((p: any) => [String(p.id), p]));
+      for (const [memberId, userId] of legami) {
+        const profilo = perId.get(userId);
+        if (profilo) responsabili.set(memberId, profilo);
+      }
+    }
   }
 
   const enriched = fresh.map((uscita) => ({
@@ -1285,6 +1317,7 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
   if (aderentiError) throw aderentiError;
   if (prefError) throw prefError;
 
+  const legamiResp = await profiliDeiSoci(supabase, respIds as string[]);
   const usciteMap = new Map<string, any>((uscite ?? []).map((u: any) => [u.id, u]));
   const profiliMap = new Map<string, any>((profili ?? []).map((p: any) => [p.id, p]));
   const sociRespMap = new Map<string, any>((sociResp ?? []).map((m: any) => [m.id, m]));
@@ -1302,6 +1335,8 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
     if (!uscita?.responsabile_id) return null;
     const socio = sociRespMap.get(uscita.responsabile_id);
     const approvati = [...profiliMap.values()].filter((p: any) => p.approval_status === "approved");
+    const collegato = profiliMap.get(legamiResp.get(String(uscita.responsabile_id)) ?? "");
+    if (collegato?.approval_status === "approved") return collegato;
     return approvati.find((p: any) => p.member_id === uscita.responsabile_id) ||
       (socio?.email && approvati.find((p: any) => String(p.email ?? "").toLowerCase() === String(socio.email).toLowerCase())) ||
       null;
