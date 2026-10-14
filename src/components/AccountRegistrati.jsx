@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { etichettaRuolo, ruoliDelProfilo } from '../utils/permissions.js';
 
 const STATI = { approved: 'approvato', rejected: 'rifiutato', pending: 'in attesa' };
 
@@ -39,7 +40,7 @@ export default function AccountRegistrati({ currentUserId, onEliminato }) {
     try {
       const { data, error } = await supabase
         .from('profiles')
-        .select('id,email,role,approval_status,created_at,first_name,last_name')
+        .select('*')
         .neq('approval_status', 'pending')
         .order('email', { ascending: true });
       if (error) throw error;
@@ -125,7 +126,7 @@ export default function AccountRegistrati({ currentUserId, onEliminato }) {
                 <div style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
                   <strong>{profilo.email ?? 'Email non disponibile'}</strong>
                   <p style={{ margin: '0.15rem 0 0', color: 'var(--color-muted)' }}>
-                    {[nomeCompleto(profilo), profilo.role, STATI[profilo.approval_status] ?? profilo.approval_status, `dal ${dataBreve(profilo.created_at)}`]
+                    {[nomeCompleto(profilo), ruoliDelProfilo(profilo.role, profilo.ruoli_extra).map(etichettaRuolo).join(' + '), STATI[profilo.approval_status] ?? profilo.approval_status, `dal ${dataBreve(profilo.created_at)}`]
                       .filter(Boolean)
                       .join(' · ')}
                   </p>

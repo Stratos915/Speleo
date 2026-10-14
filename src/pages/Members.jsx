@@ -12,6 +12,7 @@ import {
 import { supabase } from '../lib/supabaseClient';
 import { dedupeMembers } from '../utils/members.js';
 import { getAllRoles } from '../utils/permissions.js';
+import SceltaRuoli from '../components/SceltaRuoli.jsx';
 
 const YEAR_START = 2025;
 const YEAR_END = 2050;
@@ -585,7 +586,7 @@ export default function Members() {
       try {
         const { data, error: profilesError } = await supabase
           .from('profiles')
-          .select('id,email,role,first_name,last_name,phone,member_id');
+          .select('*');
         if (profilesError) throw profilesError;
         if (!ignore) {
           const map = new Map();
@@ -1290,21 +1291,23 @@ export default function Members() {
     }
   }
 
-  async function handleRoleChange(memberEmail, nextRole) {
+  async function handleRoleChange(memberEmail, scelta) {
     if (!memberEmail) return;
     setRolesError('');
     setRoleUpdating((prev) => ({ ...prev, [memberEmail]: true }));
     try {
+      const patch = { role: scelta.role };
+      if (Array.isArray(scelta.extra)) patch.ruoli_extra = scelta.extra;
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ role: nextRole })
+        .update(patch)
         .eq('email', memberEmail);
       if (updateError) throw updateError;
       setProfilesByEmail((prev) => {
         const next = new Map(prev);
         const key = memberEmail.toLowerCase();
         const existing = next.get(key) ?? { email: memberEmail };
-        next.set(key, { ...existing, role: nextRole });
+        next.set(key, { ...existing, ...patch });
         return next;
       });
     } catch (roleError) {
@@ -2083,20 +2086,13 @@ export default function Members() {
                   )}
                   {canManageRoles && supportsEmail && member.email && (
                     <div style={{ marginTop: '0.5rem' }}>
-                      <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                        Ruolo app
-                        <select
-                          value={profilesByEmail.get(member.email.toLowerCase())?.role ?? 'socio'}
-                          onChange={(event) => handleRoleChange(member.email, event.target.value)}
-                          disabled={rolesLoading || roleUpdating[member.email]}
-                        >
-                          {rolesList.map((roleOption) => (
-                            <option key={roleOption} value={roleOption}>
-                              {roleOption}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      <SceltaRuoli
+                        ruoli={rolesList}
+                        role={profilesByEmail.get(member.email.toLowerCase())?.role ?? 'socio'}
+                        extra={profilesByEmail.get(member.email.toLowerCase())?.ruoli_extra}
+                        onChange={(scelta) => handleRoleChange(member.email, scelta)}
+                        disabled={rolesLoading || roleUpdating[member.email]}
+                      />
                       {!profilesByEmail.get(member.email.toLowerCase()) && (
                         <small style={{ color: 'var(--color-muted)' }}>
                           Nessun profilo auth per questa email.

@@ -64,11 +64,11 @@ export default function Magazzino() {
   const [fotoGrande, setFotoGrande] = useState(null);
   const [fotoInCaricamento, setFotoInCaricamento] = useState(null);
   const formRef = useRef(null);
-  const { role, user } = useAuth();
+  const { roles, user } = useAuth();
   const { canEditSection, canUseAction } = usePermissions();
   const canEditInventory = canEditSection('inventory');
   const canLoanInventory = canUseAction('magazzino', 'loan');
-  const canManageInspections = ['admin', 'presidente', 'magazziniere'].includes(role);
+  const canManageInspections = ['admin', 'presidente', 'magazziniere'].some((ruolo) => roles.includes(ruolo));
   const { adminAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
 
