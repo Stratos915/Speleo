@@ -4,6 +4,7 @@ import { RouterProvider } from 'react-router-dom';
 import { router } from './router';
 import AuthProvider from './context/AuthContext.jsx';
 import './index.css';
+import './components/Adesioni.css';
 
 function ensureRecoveryRedirect() {
   if (typeof window === 'undefined') return;
