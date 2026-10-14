@@ -18,9 +18,9 @@ Non tutti vedono le stesse cose: ogni socio ha un ruolo, e il ruolo decide quali
 ### Entrare nell'app
 
 1. Apri l'indirizzo dell'app che ti ha comunicato la segreteria.
-2. Accedi con email e password oppure con il pulsante «Accedi con Google».
-3. Al primo accesso compila nome, cognome, email e numero di telefono e invia la richiesta.
-4. Attendi l'approvazione: la schermata «Accesso in attesa» resta finché il presidente o un amministratore non conferma che sei un socio. Quando succede ricevi un'email.
+2. Prima volta? Tocca **«Registrati»**: scrivi nome, cognome, email, telefono e una password (almeno 8 caratteri). Se ti arriva un'email di conferma, apri il link.
+3. In alternativa entra con il pulsante «Accedi con Google» e, al primo accesso, compila nome, cognome e telefono.
+4. Attendi l'approvazione: la schermata «Accesso in attesa» resta finché l'amministratore non conferma che sei un socio. Quando succede ricevi un'email.
 5. Se ti è stato creato un account con email, al primo ingresso l'app ti chiede di scegliere una password personale.
 
 > **Password dimenticata?**<br>
@@ -52,7 +52,7 @@ Il menu in alto (sul telefono in basso) porta alle sezioni. Vedi solo quelle per
 | Biblioteca | Catalogo dei libri e prestiti | Tutti |
 | Scuola | Corsi, corsisti, registro istruttori, dispense | Staff (modifica: direttore scuola) |
 | Soci | Anagrafica, quote, ruoli | Staff (modifica: segreteria e tesoriere) |
-| Report | Elenchi scaricabili, approvazioni, statistiche | Staff (approvazioni e statistiche: presidente) |
+| Report | Elenchi scaricabili, approvazioni, statistiche | Staff (approvazioni: amministratore) |
 
 Per «staff» si intendono i ruoli consiglio, segretario, tesoriere, magazziniere, direttore della scuola, presidente e amministratore.
 
@@ -191,9 +191,9 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 
 ### Presidente e amministratori
 
-- Approvazioni: in Report trovi le richieste di accesso in attesa; scegli il ruolo e approva o rifiuta. Ogni decisione resta nello storico.
+- Approvazioni (le fa l'amministratore): in Report trovi le richieste di accesso in attesa; scegli il ruolo e approva o rifiuta. Ogni decisione resta nello storico.
 - Account non più necessari: in Report, sotto le richieste, «Account registrati» elenca chi può accedere; «Elimina» toglie l'accesso (va confermato e non si annulla). La scheda del socio in Soci, i prestiti e le uscite restano. Anche una richiesta in attesa sconosciuta o doppia si può eliminare. Il tuo account non si può eliminare da qui.
-- Ruoli: solo presidente e amministratori possono cambiarli. Dai a ciascuno il ruolo minimo che gli serve.
+- Ruoli: solo presidente e amministratori possono cambiarli, dal menu «Ruolo app» in Soci o dalle richieste in Report. Sotto il menu, «È anche:» aggiunge un secondo ruolo (per esempio Segretario + Socio, così può anche creare uscite e prendere materiale). Dai a ciascuno il ruolo minimo che gli serve.
 - Statistiche di accesso: visibili solo a voi, perché contengono dati personali.
 - Esportazioni: gli elenchi si scaricano in CSV, XLSX o PDF con carta intestata. Conserva i file con i dati dei soci solo per il tempo necessario.
 
@@ -210,7 +210,7 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 
 | Problema | Soluzione |
 |---|---|
-| Resto sulla schermata «Accesso in attesa» | La richiesta non è ancora stata approvata. Contatta il presidente o la segreteria. |
+| Resto sulla schermata «Accesso in attesa» | La richiesta non è ancora stata approvata. Contatta l'amministratore (stratosdiakatos@yahoo.it). |
 | Non vedo la sezione Scuola, Soci o Report | Sono riservate allo staff. Se ti serve, chiedi al presidente di rivedere il tuo ruolo. |
 | «Disponibili solo N pezzi» | Qualcuno ha preso il materiale poco prima di te. Riduci la quantità o scegli un altro materiale. |
 | Non riesco a chiudere l'uscita | Ci sono prestiti ancora aperti per quell'uscita: riconsegnali prima. |
