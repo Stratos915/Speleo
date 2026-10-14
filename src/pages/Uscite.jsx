@@ -10,7 +10,7 @@ import UscitaForm from '../components/UscitaForm.jsx';
 import { supabase } from '../lib/supabaseClient';
 import { safeLogActivity } from '../services/activityLogs.js';
 import { dedupeMembers } from '../utils/members.js';
-import { TIPI_USCITA, etichettaTipo } from '../utils/tipiUscita.js';
+import { TIPI_USCITA, etichettaTipo, usaMateriale } from '../utils/tipiUscita.js';
 
 const TIPO_OPTIONS = [{ value: '', label: 'Tutte' }, ...TIPI_USCITA];
 
@@ -358,7 +358,7 @@ export default function Uscite() {
               )}
               <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <Link to={`/uscite/${uscita.id}`}>Apri scheda</Link>
-                {canEditUscite && (
+                {canEditUscite && usaMateriale(uscita.tipo) && (
                   <button
                     type="button"
                     onClick={() => goToPrestito(uscita)}
