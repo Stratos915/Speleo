@@ -14,7 +14,15 @@
 //   8. PRESTITO_SOCIO   promemoria al socio che ha il materiale: il giorno prima della
 //                       riconsegna (email e push) e, se scade, una notifica push
 //   9. PROMEMORIA_USCITA promemoria a tutti i soci 7 e 3 giorni prima di ogni uscita
-//                       in programma (email in copia nascosta e push), dalle 8 di mattina
+//                       in programma (email e push), dalle 8 di mattina. Con le adesioni
+//                       (migrazione 15) salta chi ha risposto «no» e chiede la risposta
+//                       a chi non l'ha ancora data
+//  10. ADESIONE         al responsabile dell'uscita: chi si aggiunge («Partecipo») o
+//                       chi non partecipa più (migrazione 15)
+//
+// Adesioni (migrazione 15): gli avvisi di nuova uscita e i promemoria portano i pulsanti
+// «Partecipo · Forse · No» (push) e tre link personali (email), firmati con il segreto
+// adesioni_segreto di app_private_config.
 //
 // Ogni avviso viene registrato in notification_log con (kind, ref_id) univoco:
 // eseguire il job più volte non manda doppioni.
@@ -35,6 +43,9 @@ const PROMEMORIA_ALLE = 21;
 // Promemoria delle uscite: quanti giorni prima. Un'uscita creata da meno di un giorno
 // non ha il promemoria (l'avviso «nuova uscita» è appena partito).
 const PROMEMORIA_USCITA_GIORNI = [7, 3];
+// Avvisi al responsabile sulle adesioni: solo in questa fascia oraria (ora italiana).
+const ADESIONI_DALLE = 7;
+const ADESIONI_ALLE = 23;
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -448,7 +459,79 @@ function oraBreve(value: unknown) {
   return match ? ` alle ${match[1]}:${match[2]}` : "";
 }
 
-type PushPayload = { title: string; body: string; url: string; tag: string };
+type PushPayload = {
+  title: string;
+  body: string;
+  url: string;
+  tag: string;
+  adesione?: { token: string; endpoint?: string; apikey?: string };
+};
+
+// ---------------------------------------------------------------------------
+// Adesioni: link personali firmati (stesso calcolo di uscita_rispondi_token)
+// ---------------------------------------------------------------------------
+async function hmacHex(secret: string, message: string) {
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, [
+    "sign",
+  ]);
+  const firma = new Uint8Array(await crypto.subtle.sign("HMAC", key, enc.encode(message)));
+  return [...firma].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+type Adesioni = {
+  segreto: string;
+  endpoint: string;
+  apikey: string;
+  appUrl: string;
+  /** risposte esistenti: `${uscita}:${utente}` → risposta */
+  risposte: Map<string, string>;
+};
+
+/** Null se la migrazione 15 non è stata eseguita. */
+async function caricaAdesioni(supabase: SupabaseClient, priv: Map<string, string>, usciteIds: string[]) {
+  const segreto = priv.get("adesioni_segreto");
+  if (!segreto) return null;
+  const risposte = new Map<string, string>();
+  if (usciteIds.length) {
+    const { data, error } = await supabase
+      .from("uscite_adesioni")
+      .select("uscita_id, user_id, risposta")
+      .in("uscita_id", usciteIds);
+    if (error) {
+      log("warn", "Adesioni non leggibili", errObj(error));
+      return null;
+    }
+    for (const row of data ?? []) risposte.set(`${row.uscita_id}:${row.user_id}`, row.risposta);
+  }
+  const url = Deno.env.get("SUPABASE_URL")?.trim() || "";
+  const apikey = Deno.env.get("SUPABASE_ANON_KEY")?.trim() || priv.get("anon_key") || "";
+  return {
+    segreto,
+    endpoint: url && apikey ? `${url}/rest/v1/rpc/uscita_rispondi_token` : "",
+    apikey,
+    appUrl: (priv.get("app_url") || APP_URL_DEFAULT).replace(/\/+$/, ""),
+    risposte,
+  } as Adesioni;
+}
+
+async function tokenAdesione(adesioni: Adesioni, uscitaId: string, userId: string) {
+  return `${uscitaId}.${userId}.${await hmacHex(adesioni.segreto, `${uscitaId}.${userId}`)}`;
+}
+
+async function linkAdesione(adesioni: Adesioni, uscitaId: string, userId: string) {
+  const token = await tokenAdesione(adesioni, uscitaId, userId);
+  const base = `${adesioni.appUrl}/adesione?t=${encodeURIComponent(token)}`;
+  return `Partecipo: ${base}&r=si\n  Forse: ${base}&r=forse\n  No: ${base}&r=no`;
+}
+
+async function pushConAdesione(adesioni: Adesioni, payload: PushPayload, uscitaId: string, userId: string) {
+  const token = await tokenAdesione(adesioni, uscitaId, userId);
+  return {
+    ...payload,
+    adesione: adesioni.endpoint ? { token, endpoint: adesioni.endpoint, apikey: adesioni.apikey } : { token },
+  };
+}
 
 async function sendPush(
   supabase: SupabaseClient,
@@ -539,6 +622,12 @@ async function destinatariSoci(supabase: SupabaseClient, priv: Map<string, strin
     soloA,
     profili: profili ?? [],
     pref,
+    destinatari: destinatari.map((profilo: any) => ({
+      id: profilo.id as string,
+      email: (profilo.email ?? "") as string,
+      vuoleEmail: pref.get(profilo.id)?.email !== false && Boolean(profilo.email),
+      vuolePush: pref.get(profilo.id)?.push !== false,
+    })),
     emails: destinatari
       .filter((profilo: any) => pref.get(profilo.id)?.email !== false && profilo.email)
       .map((profilo: any) => profilo.email as string),
@@ -553,7 +642,7 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
   const since = new Date(now.getTime() - NUOVA_USCITA_FINESTRA_ORE * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("uscite")
-    .select("id, titolo, luogo, data, ora, tipo, responsabile_nome, status, created_at")
+    .select("*")
     .gte("created_at", since)
     .order("data", { ascending: true });
   if (error) throw error;
@@ -576,7 +665,20 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
   }
   if (!fresh.length) return { total: candidate.length, new: 0 };
 
-  const { soloA, emails, pushUserIds } = await destinatariSoci(supabase, priv);
+  const { soloA, emails, pushUserIds, destinatari } = await destinatariSoci(supabase, priv);
+  const adesioni = await caricaAdesioni(supabase, priv, fresh.map((uscita) => uscita.id));
+
+  // Con le adesioni ogni socio riceve la sua email, con i link personali per rispondere.
+  const personali = adesioni
+    ? await Promise.all(
+      destinatari.filter((d: any) => d.vuoleEmail).map(async (d: any) => ({
+        email: d.email,
+        testo: (await Promise.all(fresh.map(async (uscita) =>
+          `Parteciperai a «${uscita.titolo ?? "uscita"}»? Tocca una risposta:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
+        ))).join("\n\n"),
+      })),
+    )
+    : null;
 
   const result = await sendWebhook(config, {
     type: "nuova_uscita",
@@ -584,6 +686,7 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
     uscite: fresh,
     app_url: priv.get("app_url") || APP_URL_DEFAULT,
     recipients: { soci: emails },
+    ...(personali ? { personali } : {}),
     meta: { runId, kind, solo_a: soloA || null },
   });
   await finalize(supabase, config, kind, fresh.map((uscita) => uscita.id), result);
@@ -602,9 +705,34 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
       url: "/calendario",
       tag: "nuove-uscite",
     };
-  const push = await sendPushSicuro(supabase, priv, pushUserIds, [payload], config.testMode, runId);
+  let push: unknown;
+  if (adesioni) {
+    // Una notifica per uscita, con i pulsanti per rispondere.
+    const esiti: unknown[] = [];
+    for (const userId of pushUserIds) {
+      const payloads = await Promise.all(fresh.map((uscita) =>
+        pushConAdesione(adesioni, {
+          title: `Nuova uscita: ${uscita.titolo ?? "uscita"}`,
+          body: `${giornoIt(uscita.data)}${oraBreve(uscita.ora)}${uscita.luogo ? ` · ${uscita.luogo}` : ""}\nParteciperai?`,
+          url: `/uscite/${uscita.id}`,
+          tag: `uscita-${uscita.id}`,
+        }, uscita.id, userId)
+      ));
+      esiti.push(await sendPushSicuro(supabase, priv, [userId], payloads, config.testMode, runId));
+    }
+    push = { soci: pushUserIds.length, esiti };
+  } else {
+    push = await sendPushSicuro(supabase, priv, pushUserIds, [payload], config.testMode, runId);
+  }
 
-  return { total: candidate.length, new: fresh.length, email: emails.length, push, prova: Boolean(soloA) };
+  return {
+    total: candidate.length,
+    new: fresh.length,
+    email: emails.length,
+    push,
+    adesioni: Boolean(adesioni),
+    prova: Boolean(soloA),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -618,8 +746,20 @@ const CAMPI_USCITA: { campo: string; etichetta: string }[] = [
   { campo: "tipo", etichetta: "Tipo" },
 ];
 
+const TIPI_USCITA: Record<string, string> = {
+  sociale: "Sociale",
+  corso: "Corso",
+  allenamento: "Allenamento",
+  formazione: "Formazione",
+  esplorazione: "Esplorazione",
+  serata_sede: "Serata in sede",
+  altro_evento: "Altro evento",
+  altro: "Altro",
+};
+
 function valoreCampo(campo: string, value: unknown) {
   if (value === null || value === undefined || value === "") return "—";
+  if (campo === "tipo") return TIPI_USCITA[String(value).toLowerCase()] ?? String(value);
   if (campo === "data") return giornoIt(value);
   if (campo === "ora") return oraBreve(value).replace(" alle ", "") || String(value);
   return String(value);
@@ -985,27 +1125,254 @@ async function checkPromemoriaUscite(supabase: SupabaseClient, config: Config, r
   }
   if (!fresh.length) return { total: candidate.length, new: 0 };
 
-  const { soloA, emails, pushUserIds } = await destinatariSoci(supabase, priv);
-  const result = await sendWebhook(config, {
-    type: "uscite_promemoria",
-    count: fresh.length,
-    uscite: fresh.map(({ refId: _ref, ...uscita }) => uscita),
-    app_url: priv.get("app_url") || APP_URL_DEFAULT,
-    recipients: { soci: emails },
-    meta: { runId, kind, solo_a: soloA || null },
-  });
-  await finalize(supabase, config, kind, fresh.map((uscita) => uscita.refId), result);
-
+  const { soloA, emails, pushUserIds, destinatari } = await destinatariSoci(supabase, priv);
+  const adesioni = await caricaAdesioni(supabase, priv, fresh.map((uscita) => uscita.id));
+  const usciteEmail = fresh.map(({ refId: _ref, ...uscita }) => uscita);
   const tra = (giorni: number) => `tra ${giorni} giorni`;
-  const payloads: PushPayload[] = fresh.map((uscita) => ({
+  const basePush = (uscita: any): PushPayload => ({
     title: `${uscita.titolo ?? "Uscita"} ${tra(uscita.giorni)}`,
     body: `${giornoIt(uscita.data)}${oraBreve(uscita.ora)}${uscita.luogo ? ` · ${uscita.luogo}` : ""}`,
     url: `/uscite/${uscita.id}`,
     tag: `promemoria-${uscita.id}`,
-  }));
-  const push = await sendPushSicuro(supabase, priv, pushUserIds, payloads, config.testMode, runId);
+  });
 
-  return { total: candidate.length, new: fresh.length, email: emails.length, push, prova: Boolean(soloA) };
+  if (!adesioni) {
+    const result = await sendWebhook(config, {
+      type: "uscite_promemoria",
+      count: fresh.length,
+      uscite: usciteEmail,
+      app_url: priv.get("app_url") || APP_URL_DEFAULT,
+      recipients: { soci: emails },
+      meta: { runId, kind, solo_a: soloA || null },
+    });
+    await finalize(supabase, config, kind, fresh.map((uscita) => uscita.refId), result);
+    const push = await sendPushSicuro(supabase, priv, pushUserIds, fresh.map(basePush), config.testMode, runId);
+    return { total: candidate.length, new: fresh.length, email: emails.length, push, prova: Boolean(soloA) };
+  }
+
+  // Con le adesioni: niente promemoria a chi ha risposto «no»; a chi non ha
+  // risposto si chiede di farlo (link nell'email, pulsanti nella notifica).
+  const risposta = (uscitaId: string, userId: string) => adesioni.risposte.get(`${uscitaId}:${userId}`) ?? null;
+  const RISPOSTA_TESTO: Record<string, string> = { si: "Partecipo", forse: "Forse" };
+  const personali: { email: string; uscite: string[]; testo: string }[] = [];
+  for (const d of destinatari.filter((d: any) => d.vuoleEmail)) {
+    const sue = fresh.filter((uscita) => risposta(uscita.id, d.id) !== "no");
+    if (!sue.length) continue;
+    const righe = await Promise.all(sue.map(async (uscita) => {
+      const r = risposta(uscita.id, d.id);
+      return r
+        ? `«${uscita.titolo ?? "uscita"}»: hai risposto «${RISPOSTA_TESTO[r] ?? r}». Per cambiare:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
+        : `«${uscita.titolo ?? "uscita"}»: non hai ancora risposto. Parteciperai?\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`;
+    }));
+    personali.push({ email: d.email, uscite: sue.map((uscita) => uscita.id), testo: righe.join("\n\n") });
+  }
+
+  let result = { configured: Boolean(config.webhook), ok: true, status: null as number | null };
+  // Un messaggio per ogni gruppo di uscite uguale (di solito una sola uscita).
+  const perGruppo = new Map<string, typeof personali>();
+  for (const p of personali) {
+    const chiave = p.uscite.join(",");
+    perGruppo.set(chiave, [...(perGruppo.get(chiave) ?? []), p]);
+  }
+  for (const [chiave, gruppo] of perGruppo) {
+    const ids = new Set(chiave.split(","));
+    const esito = await sendWebhook(config, {
+      type: "uscite_promemoria",
+      count: ids.size,
+      uscite: usciteEmail.filter((uscita: any) => ids.has(uscita.id)),
+      app_url: priv.get("app_url") || APP_URL_DEFAULT,
+      recipients: { soci: gruppo.map((p) => p.email) },
+      personali: gruppo.map(({ email, testo }) => ({ email, testo })),
+      meta: { runId, kind, solo_a: soloA || null },
+    });
+    if (!esito.ok) result = esito;
+    else if (result.ok) result = esito;
+  }
+  await finalize(supabase, config, kind, fresh.map((uscita) => uscita.refId), result);
+
+  let notifiche = 0;
+  const esiti: unknown[] = [];
+  for (const userId of pushUserIds) {
+    const payloads: PushPayload[] = [];
+    for (const uscita of fresh) {
+      const r = risposta(uscita.id, userId);
+      if (r === "no") continue;
+      if (r) {
+        payloads.push({ ...basePush(uscita), body: `${basePush(uscita).body}\nHai risposto: ${RISPOSTA_TESTO[r] ?? r}` });
+      } else {
+        payloads.push(
+          await pushConAdesione(adesioni, { ...basePush(uscita), body: `${basePush(uscita).body}\nNon hai ancora risposto: parteciperai?` }, uscita.id, userId),
+        );
+      }
+    }
+    if (!payloads.length) continue;
+    notifiche += payloads.length;
+    esiti.push(await sendPushSicuro(supabase, priv, [userId], payloads, config.testMode, runId));
+  }
+
+  return {
+    total: candidate.length,
+    new: fresh.length,
+    email: personali.length,
+    push: { notifiche, esiti },
+    adesioni: true,
+    prova: Boolean(soloA),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 10. Adesioni: avviso al responsabile quando qualcuno si aggiunge o si ritira
+// ---------------------------------------------------------------------------
+async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "ADESIONE";
+  const ora = oraRoma(now);
+  if (ora < ADESIONI_DALLE || ora >= ADESIONI_ALLE) return { total: 0, new: 0, skipped: "fuori orario" };
+
+  const since = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
+  const { data: righe, error } = await supabase
+    .from("uscite_adesioni")
+    .select("uscita_id, user_id, risposta, risposta_precedente, updated_at")
+    .gte("updated_at", since)
+    .order("updated_at", { ascending: true });
+  if (error) {
+    if (["42P01", "PGRST205"].includes((error as any).code)) return { total: 0, new: 0, skipped: "migrazione 15 mancante" };
+    throw error;
+  }
+  // Interessano chi ora dice sì e chi prima diceva sì e ha cambiato idea.
+  const eventi = (righe ?? [])
+    .filter((riga: any) => riga.risposta === "si" || riga.risposta_precedente === "si")
+    .map((riga: any) => ({ ...riga, refId: `${riga.uscita_id}:${riga.user_id}:${riga.updated_at}` }));
+  if (!eventi.length) return { total: 0, new: 0 };
+
+  const { data: fatti, error: fattiError } = await supabase
+    .from("notification_log")
+    .select("ref_id")
+    .eq("kind", kind)
+    .in("ref_id", eventi.map((evento: any) => evento.refId));
+  if (fattiError) throw fattiError;
+  const giaFatti = new Set((fatti ?? []).map((row: any) => row.ref_id));
+  const nuovi = eventi.filter((evento: any) => !giaFatti.has(evento.refId));
+  if (!nuovi.length) return { total: eventi.length, new: 0 };
+
+  const priv = await loadPrivateConfig(supabase);
+  if (!priv) return { total: nuovi.length, new: 0, skipped: "migrazione 09 mancante" };
+  const soloA = (priv.get("avvisi_uscite_solo_a") || "").trim().toLowerCase();
+
+  const usciteIds = [...new Set(nuovi.map((evento: any) => evento.uscita_id))];
+  const userIds = [...new Set(nuovi.map((evento: any) => evento.user_id))];
+  const [{ data: uscite, error: usciteError }, { data: profili, error: profiliError }, { data: tutteSi, error: siError }] =
+    await Promise.all([
+      supabase.from("uscite").select("id, titolo, data, ora, luogo, status, responsabile_id").in("id", usciteIds),
+      supabase.from("profiles").select("id, email, first_name, last_name, member_id, approval_status"),
+      supabase.from("uscite_adesioni").select("uscita_id").eq("risposta", "si").in("uscita_id", usciteIds),
+    ]);
+  if (usciteError) throw usciteError;
+  if (profiliError) throw profiliError;
+  if (siError) throw siError;
+  const respIds = [...new Set((uscite ?? []).map((u: any) => u.responsabile_id).filter(Boolean))];
+  const [{ data: sociResp, error: sociError }, { data: sociAderenti, error: aderentiError }, { data: preferenze, error: prefError }] =
+    await Promise.all([
+      respIds.length
+        ? supabase.from("members").select("id, email, full_name").in("id", respIds)
+        : Promise.resolve({ data: [], error: null }),
+      supabase.from("members").select("id, full_name").in(
+        "id",
+        (profili ?? []).filter((p: any) => userIds.includes(p.id) && p.member_id).map((p: any) => p.member_id).concat(["00000000-0000-0000-0000-000000000000"]),
+      ),
+      supabase.from("notifica_preferenze").select("user_id, email, push"),
+    ]);
+  if (sociError) throw sociError;
+  if (aderentiError) throw aderentiError;
+  if (prefError) throw prefError;
+
+  const usciteMap = new Map<string, any>((uscite ?? []).map((u: any) => [u.id, u]));
+  const profiliMap = new Map<string, any>((profili ?? []).map((p: any) => [p.id, p]));
+  const sociRespMap = new Map<string, any>((sociResp ?? []).map((m: any) => [m.id, m]));
+  const nomiSoci = new Map<string, string>((sociAderenti ?? []).map((m: any) => [m.id, m.full_name]));
+  const pref = new Map<string, any>((preferenze ?? []).map((row: any) => [row.user_id, row]));
+  const contaSi = new Map<string, number>();
+  for (const row of tutteSi ?? []) contaSi.set(row.uscita_id, (contaSi.get(row.uscita_id) ?? 0) + 1);
+
+  const nome = (userId: string) => {
+    const p = profiliMap.get(userId);
+    const completo = `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim();
+    return completo || (p?.member_id && nomiSoci.get(p.member_id)) || String(p?.email ?? "Un socio").split("@")[0];
+  };
+  const profiloResponsabile = (uscita: any) => {
+    if (!uscita?.responsabile_id) return null;
+    const socio = sociRespMap.get(uscita.responsabile_id);
+    const approvati = [...profiliMap.values()].filter((p: any) => p.approval_status === "approved");
+    return approvati.find((p: any) => p.member_id === uscita.responsabile_id) ||
+      (socio?.email && approvati.find((p: any) => String(p.email ?? "").toLowerCase() === String(socio.email).toLowerCase())) ||
+      null;
+  };
+
+  const perUscita = new Map<string, any[]>();
+  for (const evento of nuovi) perUscita.set(evento.uscita_id, [...(perUscita.get(evento.uscita_id) ?? []), evento]);
+
+  let avvisati = 0;
+  const dettagli: Record<string, unknown>[] = [];
+  for (const [uscitaId, lista] of perUscita) {
+    const uscita = usciteMap.get(uscitaId);
+    const responsabile = profiloResponsabile(uscita);
+    const daRegistrare = lista.map((evento) => evento.refId);
+    // Senza responsabile con account, uscita chiusa o in modalità di prova per un altro: solo registrato.
+    const salta = !uscita || uscita.status === "chiusa" || !responsabile ||
+      (soloA && String(responsabile.email ?? "").toLowerCase() !== soloA);
+    // L'ultimo stato di ogni socio (se ha cambiato più volte) e mai il responsabile stesso.
+    const ultimo = new Map<string, any>();
+    for (const evento of lista) ultimo.set(evento.user_id, evento);
+    const entrati = [...ultimo.values()].filter((e) => e.risposta === "si" && e.user_id !== responsabile?.id);
+    const usciti = [...ultimo.values()].filter((e) => e.risposta !== "si" && e.user_id !== responsabile?.id);
+
+    let nuoviClaim = true;
+    for (const refId of daRegistrare) {
+      if (!(await claim(supabase, runId, { kind, refId, meta: { uscita_id: uscitaId } }))) nuoviClaim = false;
+    }
+    if (!nuoviClaim) continue;
+    if (salta || (!entrati.length && !usciti.length)) {
+      await markLog(supabase, kind, daRegistrare, "SKIPPED", salta ? "Nessun responsabile da avvisare" : "Nessun cambiamento");
+      continue;
+    }
+
+    const totale = contaSi.get(uscitaId) ?? 0;
+    const titolo = uscita.titolo ?? "uscita";
+    const frasi = [
+      entrati.length ? `${entrati.map((e) => nome(e.user_id)).join(", ")} ${entrati.length === 1 ? "partecipa" : "partecipano"}` : null,
+      usciti.length ? `${usciti.map((e) => nome(e.user_id)).join(", ")} non ${usciti.length === 1 ? "partecipa" : "partecipano"} più` : null,
+    ].filter(Boolean).join(" · ");
+    const corpo = `${frasi}. Ora ${totale === 1 ? "partecipa 1 socio" : `partecipano ${totale} soci`}.`;
+
+    const vuoleEmail = pref.get(responsabile.id)?.email !== false && Boolean(responsabile.email);
+    const vuolePush = pref.get(responsabile.id)?.push !== false;
+    let esito = { configured: true, ok: true, status: null as number | null };
+    if (vuoleEmail) {
+      esito = await sendWebhook(config, {
+        type: "adesioni_responsabile",
+        app_url: priv.get("app_url") || APP_URL_DEFAULT,
+        uscita: { id: uscitaId, titolo, data: uscita.data, ora: uscita.ora, luogo: uscita.luogo },
+        entrati: entrati.map((e) => nome(e.user_id)),
+        usciti: usciti.map((e) => nome(e.user_id)),
+        totale,
+        recipients: { socio: responsabile.email },
+        meta: { runId, kind },
+      });
+      await finalize(supabase, config, kind, daRegistrare, esito);
+    } else {
+      await markLog(supabase, kind, daRegistrare, config.testMode ? "SKIPPED" : "SENT", "Solo notifica push");
+    }
+    const push = vuolePush
+      ? await sendPushSicuro(supabase, priv, [responsabile.id], [{
+        title: `Adesioni: ${titolo}`,
+        body: corpo,
+        url: `/uscite/${uscitaId}`,
+        tag: `adesioni-${uscitaId}`,
+      }], config.testMode, runId)
+      : { skipped: "push disattivate" };
+    avvisati += 1;
+    dettagli.push({ uscita: uscitaId, entrati: entrati.length, usciti: usciti.length, email: vuoleEmail, push });
+  }
+  return { total: nuovi.length, new: avvisati, dettagli, prova: Boolean(soloA) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1084,8 +1451,9 @@ async function runCron(req: Request, interno = false) {
       ["uscite_cambiate", () => checkUsciteCambiate(supabase, config, runId, now)],
       ["promemoria_prestiti", () => checkPromemoriaPrestiti(supabase, config, runId, now)],
       ["promemoria_uscite", () => checkPromemoriaUscite(supabase, config, runId, now)],
+      ["adesioni", () => checkAdesioni(supabase, config, runId, now)],
     ];
-    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite"];
+    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite", "adesioni"];
     for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
         checks[name] = await fn();
