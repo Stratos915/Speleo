@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canEditSection, canUseAction, canViewPage, getNavigationVisibility, getPageEditRoles } from '../permissions.js';
+import { ruoliDelProfilo } from '../permissions.js';
 
 describe('permessi per ruolo', () => {
   it('il socio non vede report, soci e scuola', () => {
@@ -33,5 +34,19 @@ describe('permessi per ruolo', () => {
 
   it('le rotte di creazione uscita accettano il socio', () => {
     expect(getPageEditRoles('uscite')).toContain('socio');
+  });
+});
+
+describe('doppio ruolo', () => {
+  it('segretario da solo non crea uscite, segretario + socio sì', () => {
+    expect(canEditSection('segretario', 'uscita')).toBe(false);
+    expect(canEditSection(['segretario', 'socio'], 'uscita')).toBe(true);
+    expect(canEditSection(['segretario', 'socio'], 'soci')).toBe(true);
+    expect(canUseAction(['tesoriere', 'socio'], 'magazzino', 'loan')).toBe(true);
+  });
+
+  it('ruoliDelProfilo unisce principale e ruoli in più senza doppioni', () => {
+    expect(ruoliDelProfilo('segretario', ['socio', 'socio'])).toEqual(['segretario', 'socio']);
+    expect(ruoliDelProfilo(null, undefined)).toEqual(['socio']);
   });
 });

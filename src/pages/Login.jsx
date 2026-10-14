@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuth from '../context/useAuth.js';
 import logo from '../assets/logo-gsu.png';
 import { supabase } from '../lib/supabaseClient';
+import Registrazione from '../components/Registrazione.jsx';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,6 +14,7 @@ export default function Login() {
   const [googleLoading, setGoogleLoading] = useState(false);
   const [resetInfo, setResetInfo] = useState('');
   const [resetting, setResetting] = useState(false);
+  const [registrazione, setRegistrazione] = useState(false);
   const navigate = useNavigate();
   const { isAuthenticated, role, loading, login, approvalStatus } = useAuth();
 
@@ -96,6 +98,10 @@ export default function Login() {
         <img src={logo} alt="Logo Speleo" className="brand-logo" />
         <h1>Accesso Speleo</h1>
         <p style={{ marginTop: '-0.5rem', color: 'var(--color-muted)' }}>Portale operativo Gruppo Speleologico</p>
+        {registrazione ? (
+          <Registrazione onAnnulla={() => setRegistrazione(false)} />
+        ) : (
+        <>
         <form
           onSubmit={handleSubmit}
           style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.5rem' }}
@@ -117,6 +123,7 @@ export default function Login() {
           <label style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', fontSize: '0.9rem' }}>
             <input
               type="checkbox"
+              style={{ width: 'auto' }}
               checked={showPassword}
               onChange={(event) => setShowPassword(event.target.checked)}
             />
@@ -126,6 +133,19 @@ export default function Login() {
             {submitting ? 'Accesso...' : 'Entra'}
           </button>
         </form>
+        <button
+          type="button"
+          className="pulsante-registrati"
+          onClick={() => {
+            setError('');
+            setResetInfo('');
+            setRegistrazione(true);
+          }}
+          disabled={submitting}
+        >
+          <span>Registrati</span>
+          <small>Nuovo socio? Crea il tuo account</small>
+        </button>
         <div style={{ margin: '1.5rem 0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
           <span style={{ flex: 1, height: 1, background: 'rgba(0,0,0,0.1)' }} />
           <span style={{ color: 'var(--color-muted)', fontSize: '0.85rem' }}>oppure</span>
@@ -167,6 +187,8 @@ export default function Login() {
           {resetting ? 'Invio in corso...' : 'Password dimenticata?'}
         </button>
         {resetInfo && <p style={{ color: 'var(--color-muted)', marginTop: '0.5rem' }}>{resetInfo}</p>}
+        </>
+        )}
         <div
           style={{
             marginTop: '1.25rem',
