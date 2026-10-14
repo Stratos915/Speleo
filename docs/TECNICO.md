@@ -96,6 +96,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 10 · avvisi_uscite_modificate | Tabella `uscite_modifiche` (leggibile solo dal job) e trigger `uscite_annota_modifica` su UPDATE/DELETE di `uscite`: annota i cambi di titolo, data, ora, luogo e tipo e le cancellazioni. Il trigger non blocca mai il salvataggio: un errore diventa solo un warning nel log |
 | 11 · avvisi_soci_pg_cron | Estensione `pg_net`, token casuale `cron_soci_token` in `app_private_config` e job pg_cron `avvisi-soci` ogni 10 minuti che chiama la Edge Function `notification-cron?gruppo=soci` |
 | 12 · foto_materiali | Colonna `equipment.foto_path` e archivio pubblico `materiali-foto` (max 2 MB, JPEG/PNG/WebP). Caricano e tolgono foto solo admin, presidente e magazziniere. L'app riduce le foto a 800 px prima del caricamento |
+| 13 · elimina_account | Funzione `elimina_account(uuid)` (security definer): solo admin e presidente approvati, mai il proprio account. Cancella l'utente di accesso e a cascata profilo, preferenze e dispositivi push; toglie prima le righe di `notifications`. Anagrafica `members`, prestiti e uscite restano. Annota l'azione `delete` in `approval_audit` |
 
 ### Come funziona ora un prestito
 
@@ -142,7 +143,7 @@ Sono stati aggiunti 21 test automatici sulle parti pure: permessi per ruolo, cal
 Il job `supabase/functions/notification-cron/index.ts` svolge otto controlli, ognuno indipendente: un errore su uno non blocca gli altri. Parte in due modi:
 
 - **GitHub Actions** (`--run-once`): tutti i controlli, pianificato ogni 30 minuti. In pratica GitHub lo avvia con molto ritardo (l'8 ottobre 2026 risultavano 3 esecuzioni in 24 ore), quindi va bene per i promemoria dello staff ma non per gli avvisi ai soci.
-- **Supabase** (migrazione 11): la stessa funzione pubblicata come Edge Function `notification-cron` (verify_jwt disattivato) e chiamata da pg_cron ogni 10 minuti con `?gruppo=soci`. Esegue solo NUOVA_USCITA, USCITA_CAMBIATA, PRESTITO_SOCIO e USCITA_PROMEMORIA. Accetta la chiamata solo con l'intestazione `x-avvisi-token` uguale a `cron_soci_token`; senza `NOTIFICATION_EMAIL_WEBHOOK` usa la funzione email dello stesso progetto.
+- **Supabase** (migrazione 11): la stessa funzione pubblicata come Edge Function `notification-cron` (verify_jwt disattivato) e chiamata da pg_cron ogni 10 minuti con `?gruppo=soci`. Esegue solo NUOVA_USCITA, USCITA_CAMBIATA, PRESTITO_SOCIO e PROMEMORIA_USCITA. Accetta la chiamata solo con l'intestazione `x-avvisi-token` uguale a `cron_soci_token`; senza `NOTIFICATION_EMAIL_WEBHOOK` usa la funzione email dello stesso progetto.
 
 I due percorsi possono sovrapporsi: l'indice univoco su `(kind, ref_id)` impedisce i doppioni. Esiti delle chiamate di pg_cron: `select status_code, left(content, 300), created from net._http_response order by created desc limit 5;`
 
@@ -155,12 +156,12 @@ I due percorsi possono sovrapporsi: l'indice univoco su `(kind, ref_id)` impedis
 | NUOVA_USCITA | Uscita creata nelle ultime 6 ore con data da oggi in avanti | Tutti i soci approvati: email in copia nascosta e notifica push sui dispositivi iscritti, secondo le preferenze di ciascuno |
 | USCITA_CAMBIATA | Uscita in programma modificata (titolo, data, ora, luogo, tipo) o eliminata. Le modifiche più recenti di 10 minuti aspettano il giro dopo, così più salvataggi di fila diventano un avviso solo | Come NUOVA_USCITA. Saltati: uscite passate o chiuse, uscite il cui annuncio non è ancora partito o è partito dopo la modifica, cambi che tornano al valore di partenza |
 | PRESTITO_SOCIO | Prestito aperto con riconsegna domani (email e push) o già scaduta (solo push: l'email c'è già con OVERDUE). Solo tra le 8 e le 21 ora italiana | Il socio che ha il materiale, trovato per email del prestito o numero di tessera, secondo le sue preferenze |
-| USCITA_PROMEMORIA | Uscita in programma (non chiusa) tra 7 giorni e tra 3 giorni (ora italiana), solo tra le 8 e le 21. Saltato se l'uscita è stata annunciata nelle ultime 24 ore; se la data cambia il promemoria riparte | Come NUOVA_USCITA |
+| PROMEMORIA_USCITA | Uscita in programma tra esattamente 7 o 3 giorni (ora italiana), non chiusa e creata da più di 24 ore. Solo tra le 8 e le 21: parte al primo giro dopo le 8. Riferimento `uscita:data:7g` o `:3g`, quindi un'uscita spostata riceve di nuovo i promemoria | Tutti i soci approvati: email in copia nascosta (tipo `uscite_promemoria`) e push, secondo le preferenze |
 
 ### Avvisi ai soci (uscite e prestiti)
 
 - **Preferenze**: senza riga in `notifica_preferenze` il socio riceve tutto; dal pulsante «🔔 Avvisi» nell'intestazione, sotto ruolo e indirizzo, può togliere l'email e attivare o disattivare le notifiche sul singolo dispositivo.
-- **Email**: per le uscite un solo messaggio con i soci in copia nascosta (gruppi da 50), così nessuno vede gli indirizzi degli altri; il promemoria del prestito è un messaggio personale. Tipi del webhook: `nuova_uscita`, `uscite_cambiate`, `prestito_promemoria`, `uscita_promemoria`.
+- **Email**: per le uscite un solo messaggio con i soci in copia nascosta (gruppi da 50), così nessuno vede gli indirizzi degli altri; il promemoria del prestito è un messaggio personale. Tipi del webhook: `nuova_uscita`, `uscite_cambiate`, `prestito_promemoria`, `uscite_promemoria`.
 - **Push**: standard Web Push con chiavi VAPID. La chiave pubblica è in `src/services/avvisi.js`; quella privata è solo in `app_private_config` (chiavi `vapid_public`, `vapid_private`, `vapid_subject`). Le iscrizioni revocate dal browser (404/410) vengono cancellate in automatico. Su iPhone funziona solo con l'app aggiunta alla schermata Home (iOS 16.4 o successivo).
 - **Modalità di prova**: se in `app_private_config` c'è la chiave `avvisi_uscite_solo_a`, email e push di NUOVA_USCITA, USCITA_CAMBIATA e PRESTITO_SOCIO vanno solo al profilo con quell'indirizzo (i promemoria degli altri soci restano in attesa). Per passare a tutti i soci basta cancellarla:
 
