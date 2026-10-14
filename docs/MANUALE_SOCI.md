@@ -73,7 +73,7 @@ In Dashboard, accanto a Materiali, Soci e Uscite, c'è la casella «Calendario»
 ### Creare un'uscita
 
 1. In Uscite premi «Nuova uscita».
-2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, serata in sede, altro evento, altro). Con «Altro evento» scrivi anche una breve descrizione.
+2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, serata in sede, altro evento, altro). Con «Altro evento» scrivi anche una breve descrizione. Per la «Serata in sede» non compare la parte del materiale.
 3. Indica il responsabile e seleziona i soci partecipanti; gli ospiti esterni si scrivono nel campo apposito.
 4. Se vuoi, indica il rientro previsto (vedi sotto).
 5. Premi «Salva uscita».
@@ -91,7 +91,7 @@ La risposta si può cambiare quando vuoi, finché l'uscita è aperta. Nel riquad
 
 Il responsabile dell'uscita riceve un avviso ogni volta che qualcuno si aggiunge o si ritira. Con «Copia nei partecipanti» porta chi ha detto sì nell'elenco ufficiale dei partecipanti.
 
-Il pulsante **«📄 Scarica PDF»**, accanto al titolo «Chi partecipa?», scarica subito l'elenco con i nomi: dati dell'uscita, partecipanti ufficiali (anche esterni) e risposte Partecipo, Forse e No.
+Il pulsante **«📄 Scarica PDF»**, accanto al titolo «Chi partecipa?», scarica subito l'elenco con i nomi: dati dell'uscita, partecipanti ufficiali (anche esterni) e risposte Partecipo, Forse e No. Accanto a ogni nome c'è il ruolo nell'app (Presidente, Segretario, Socio...).
 
 I promemoria 7 e 3 giorni prima non arrivano a chi ha risposto «No»; a chi non ha ancora risposto chiedono di farlo.
 
