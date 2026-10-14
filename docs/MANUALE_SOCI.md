@@ -91,6 +91,8 @@ La risposta si può cambiare quando vuoi, finché l'uscita è aperta. Nel riquad
 
 Il responsabile dell'uscita riceve un avviso ogni volta che qualcuno si aggiunge o si ritira. Con «Copia nei partecipanti» porta chi ha detto sì nell'elenco ufficiale dei partecipanti.
 
+Il pulsante **«📄 Scarica PDF»**, accanto al titolo «Chi partecipa?», scarica subito l'elenco con i nomi: dati dell'uscita, partecipanti ufficiali (anche esterni) e risposte Partecipo, Forse e No.
+
 I promemoria 7 e 3 giorni prima non arrivano a chi ha risposto «No»; a chi non ha ancora risposto chiedono di farlo.
 
 
@@ -210,7 +212,7 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 - Account non più necessari: in Report, sotto le richieste, «Account registrati» elenca chi può accedere; «Elimina» toglie l'accesso (va confermato e non si annulla). La scheda del socio in Soci, i prestiti e le uscite restano. Anche una richiesta in attesa sconosciuta o doppia si può eliminare. Il tuo account non si può eliminare da qui.
 - Ruoli: solo presidente e amministratori possono cambiarli, dal menu «Ruolo app» in Soci o dalle richieste in Report. Sotto il menu, «È anche:» aggiunge un secondo ruolo (per esempio Segretario + Socio, così può anche creare uscite e prendere materiale). Dai a ciascuno il ruolo minimo che gli serve.
 - Statistiche di accesso: visibili solo a voi, perché contengono dati personali.
-- Esportazioni: gli elenchi si scaricano in CSV, XLSX o PDF con carta intestata. Conserva i file con i dati dei soci solo per il tempo necessario.
+- Esportazioni: gli elenchi si scaricano in CSV, XLSX o PDF con carta intestata. Per le uscite scegli l'anno: puoi scaricare l'elenco complessivo oppure, con «Uscita singola», una sola uscita con tutti i partecipanti. Conserva i file con i dati dei soci solo per il tempo necessario.
 
 
 ## Privacy e buone abitudini
