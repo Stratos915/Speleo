@@ -97,6 +97,7 @@ Lo schema si aggiorna con le migrazioni in `supabase/migrations/`, da eseguire i
 | 11 · avvisi_soci_pg_cron | Estensione `pg_net`, token casuale `cron_soci_token` in `app_private_config` e job pg_cron `avvisi-soci` ogni 10 minuti che chiama la Edge Function `notification-cron?gruppo=soci` |
 | 12 · foto_materiali | Colonna `equipment.foto_path` e archivio pubblico `materiali-foto` (max 2 MB, JPEG/PNG/WebP). Caricano e tolgono foto solo admin, presidente e magazziniere. L'app riduce le foto a 800 px prima del caricamento |
 | 13 · elimina_account | Funzione `elimina_account(uuid)` (security definer): solo admin e presidente approvati, mai il proprio account. Cancella l'utente di accesso e a cascata profilo, preferenze e dispositivi push; toglie prima le righe di `notifications`. Anagrafica `members`, prestiti e uscite restano. Annota l'azione `delete` in `approval_audit` |
+| 14 · registrazione_e_doppio_ruolo | `handle_new_user` copia nome, cognome e telefono dai metadati di chi si registra dal pulsante «Registrati» (`self_signup`) e segna la password come già scelta. Colonna `profiles.ruoli_extra` (ruoli in più, mai admin o presidente), funzione `current_user_roles()`, `has_any_role()` che considera tutti i ruoli; le policy che confrontavano `current_user_role() = ANY (…)` passano a `has_any_role(…)`. I ruoli in più li cambiano solo admin e presidente |
 
 ### Come funziona ora un prestito
 
