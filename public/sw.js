@@ -69,19 +69,61 @@ self.addEventListener('push', (event) => {
     data = { body: event.data ? event.data.text() : '' };
   }
   const title = data.title || 'GSU · Gestionale';
-  event.waitUntil(
-    self.registration.showNotification(title, {
-      body: data.body || '',
+  const opzioni = {
+    body: data.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    tag: data.tag || undefined,
+    data: { url: data.url || '/calendario', adesione: data.adesione || null },
+  };
+  // Pulsanti «Partecipo · Forse · No» (Android e computer; su iPhone non compaiono
+  // e il tocco apre la scheda dell'uscita, dove ci sono gli stessi pulsanti).
+  if (data.adesione?.token) {
+    opzioni.actions = [
+      { action: 'si', title: 'Partecipo' },
+      { action: 'forse', title: 'Forse' },
+      { action: 'no', title: 'No' },
+    ];
+  }
+  event.waitUntil(self.registration.showNotification(title, opzioni));
+});
+
+const RISPOSTE_TESTO = { si: 'Partecipo', forse: 'Forse', no: 'Non partecipo' };
+
+// Risposta dal pulsante della notifica: si registra con il link personale firmato.
+async function rispondiDaNotifica(notifica, risposta) {
+  const adesione = notifica.data?.adesione;
+  const riserva = new URL(`/adesione?t=${encodeURIComponent(adesione.token)}&r=${risposta}`, self.location.origin).href;
+  try {
+    const response = await fetch(adesione.endpoint, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        apikey: adesione.apikey,
+        authorization: `Bearer ${adesione.apikey}`,
+      },
+      body: JSON.stringify({ p_token: adesione.token, p_risposta: risposta }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    await self.registration.showNotification('Risposta registrata', {
+      body: `${RISPOSTE_TESTO[risposta]} · ${notifica.title}`,
       icon: '/icons/icon-192.png',
       badge: '/icons/icon-192.png',
-      tag: data.tag || undefined,
-      data: { url: data.url || '/calendario' },
-    }),
-  );
-});
+      tag: notifica.tag || undefined,
+      data: { url: notifica.data?.url || '/calendario' },
+    });
+  } catch {
+    // Senza rete o con un errore: si apre la pagina che registra la risposta.
+    await self.clients.openWindow(riserva);
+  }
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (['si', 'forse', 'no'].includes(event.action) && event.notification.data?.adesione?.token) {
+    event.waitUntil(rispondiDaNotifica(event.notification, event.action));
+    return;
+  }
   const url = new URL(event.notification.data?.url || '/calendario', self.location.origin).href;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {

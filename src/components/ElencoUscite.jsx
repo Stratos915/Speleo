@@ -1,5 +1,13 @@
 import { Link } from 'react-router-dom';
 import { dayKey } from '../utils/calendario.js';
+import { etichettaTipo } from '../utils/tipiUscita.js';
+import useMieAdesioni from '../hooks/useMieAdesioni.js';
+
+const MIA_RISPOSTA = {
+  si: { testo: '✓ Ci sono', classe: 'cal-mia--si' },
+  forse: { testo: 'Forse', classe: 'cal-mia--forse' },
+  no: { testo: 'Non vengo', classe: 'cal-mia--no' },
+};
 
 // Righe di uscita riusate dalla Dashboard e dalla pagina Calendario.
 // Ogni riga porta alla scheda dell'uscita nella sezione Uscite.
@@ -17,6 +25,7 @@ function formatGiornoBreve(key) {
 export function UscitaRiga({ uscita, showDate = false }) {
   const key = dayKey(uscita.data);
   const closed = uscita.status === 'chiusa';
+  const mia = MIA_RISPOSTA[useMieAdesioni().get(uscita.id)];
   return (
     <li>
       <Link to={`/uscite/${uscita.id}`} className="cal-item">
@@ -26,8 +35,11 @@ export function UscitaRiga({ uscita, showDate = false }) {
         <span className="cal-item-body">
           <strong>{uscita.titolo || 'Uscita'}</strong>
           <span className="cal-item-meta">
-            {[showDate ? formatOra(uscita.ora) : null, uscita.luogo, uscita.tipo].filter(Boolean).join(' · ')}
+            {[showDate ? formatOra(uscita.ora) : null, uscita.luogo, etichettaTipo(uscita.tipo, uscita.tipo_descrizione)]
+              .filter(Boolean)
+              .join(' · ')}
           </span>
+          {mia && <span className={`cal-mia ${mia.classe}`}>{mia.testo}</span>}
         </span>
         <span className={`cal-badge${closed ? ' cal-badge--closed' : ''}`}>{closed ? 'Chiusa' : 'Apri'}</span>
       </Link>
