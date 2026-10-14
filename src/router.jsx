@@ -27,6 +27,7 @@ const Report = lazy(() => import('./pages/Report.jsx'));
 const Members = lazy(() => import('./pages/Members.jsx'));
 const PrestitoAvanzato = lazy(() => import('./pages/PrestitoAvanzato.jsx'));
 const StoricoPrestiti = lazy(() => import('./pages/StoricoPrestiti.jsx'));
+const AdesioneLink = lazy(() => import('./pages/AdesioneLink.jsx'));
 
 
 export const router = createBrowserRouter([
@@ -38,6 +39,15 @@ export const router = createBrowserRouter([
   { path: '/terms', element: <Terms /> },
   { path: '/reset', element: <ResetPassword /> },
   { path: '/reset-password', element: <ResetPassword /> },
+  // Link «Partecipo · Forse · No» delle email: pubblico, il link è personale e firmato.
+  {
+    path: '/adesione',
+    element: (
+      <Lazy>
+        <AdesioneLink />
+      </Lazy>
+    ),
+  },
   {
     path: '/',
     element: (

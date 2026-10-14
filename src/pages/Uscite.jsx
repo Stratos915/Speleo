@@ -10,15 +10,9 @@ import UscitaForm from '../components/UscitaForm.jsx';
 import { supabase } from '../lib/supabaseClient';
 import { safeLogActivity } from '../services/activityLogs.js';
 import { dedupeMembers } from '../utils/members.js';
+import { TIPI_USCITA, etichettaTipo } from '../utils/tipiUscita.js';
 
-const TIPO_OPTIONS = [
-  { value: '', label: 'Tutte' },
-  { value: 'sociale', label: 'Sociale' },
-  { value: 'corso', label: 'Corso' },
-  { value: 'allenamento', label: 'Allenamento' },
-  { value: 'esplorazione', label: 'Esplorazione' },
-  { value: 'altro', label: 'Altro' },
-];
+const TIPO_OPTIONS = [{ value: '', label: 'Tutte' }, ...TIPI_USCITA];
 
 function formatDate(value) {
   if (!value) return '-';
@@ -333,7 +327,7 @@ export default function Uscite() {
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                  {uscita.tipo && <span className="chip">{uscita.tipo}</span>}
+                  {uscita.tipo && <span className="chip">{etichettaTipo(uscita.tipo, uscita.tipo_descrizione)}</span>}
                   {isClosed && (
                     <span className="chip" style={{ background: 'rgba(173,181,189,0.3)', color: '#495057' }}>
                       Chiusa

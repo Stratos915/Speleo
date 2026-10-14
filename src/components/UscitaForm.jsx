@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getMembers } from '../services/members';
 import { dedupeMembers, formatMemberLabel, buildMemberTooltip } from '../utils/members.js';
+import { TIPI_USCITA, TIPO_CON_DESCRIZIONE } from '../utils/tipiUscita.js';
 
 const EMPTY_FORM = {
   titolo: '',
@@ -9,6 +10,7 @@ const EMPTY_FORM = {
   data: '',
   ora: '',
   tipo: 'sociale',
+  tipo_descrizione: '',
   responsabile_id: '',
   responsabile_nome: '',
   note: '',
@@ -17,14 +19,7 @@ const EMPTY_FORM = {
   rientro_previsto: '',
 };
 
-const TIPO_OPTIONS = [
-  { value: 'sociale', label: 'Sociale' },
-  { value: 'corso', label: 'Corso' },
-  { value: 'allenamento', label: 'Allenamento' },
-  { value: 'formazione', label: 'Formazione' },
-  { value: 'esplorazione', label: 'Esplorazione' },
-  { value: 'altro', label: 'Altro' },
-];
+const TIPO_OPTIONS = TIPI_USCITA;
 
 function dateForInput(value) {
   if (!value) return '';
@@ -81,6 +76,7 @@ export default function UscitaForm({
     ora: initialValues?.ora ? timetzForInput(initialValues.ora) : '',
     participants_ids: initialValues?.participants_ids?.map(String) ?? [],
     rientro_previsto: datetimeLocalForInput(initialValues?.rientro_previsto),
+    tipo_descrizione: initialValues?.tipo_descrizione ?? '',
   }));
   const [members, setMembers] = useState(membersList ?? []);
   const [membersLoading, setMembersLoading] = useState(!membersList);
@@ -108,6 +104,7 @@ export default function UscitaForm({
       participants_ids: initialValues?.participants_ids?.map(String) ?? [],
       participants_manual: initialValues?.participants_manual ?? '',
       rientro_previsto: datetimeLocalForInput(initialValues?.rientro_previsto),
+      tipo_descrizione: initialValues?.tipo_descrizione ?? '',
     });
     setParticipantsSearch('');
     setSelectedParticipantId('');
@@ -197,6 +194,12 @@ export default function UscitaForm({
       note: form.note?.trim() ? form.note.trim() : null,
       rientro_previsto: datetimeLocalToIso(form.rientro_previsto),
     };
+    // Descrizione solo per «Altro evento» (colonna della migrazione 15); per le uscite
+    // che l'avevano già, un cambio di tipo la svuota.
+    const haDescrizione = Object.prototype.hasOwnProperty.call(initialValues ?? {}, 'tipo_descrizione');
+    if (form.tipo === TIPO_CON_DESCRIZIONE || haDescrizione) {
+      payload.tipo_descrizione = form.tipo === TIPO_CON_DESCRIZIONE ? form.tipo_descrizione?.trim() || null : null;
+    }
     await onSubmit(payload);
   }
 
@@ -283,6 +286,21 @@ export default function UscitaForm({
             </option>
           ))}
         </select>
+        {form.tipo === TIPO_CON_DESCRIZIONE && (
+          <>
+            <label htmlFor="tipo_descrizione" style={{ marginTop: '0.5rem' }}>
+              Descrivi l&apos;evento
+            </label>
+            <input
+              id="tipo_descrizione"
+              value={form.tipo_descrizione}
+              onChange={(event) => handleChange('tipo_descrizione', event.target.value)}
+              placeholder="Es. Pulizia della grotta, cena sociale, proiezione..."
+              maxLength={120}
+              required
+            />
+          </>
+        )}
       </div>
 
       <div className="card">

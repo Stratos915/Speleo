@@ -1,0 +1,49 @@
+/* Adesioni alle uscite («Partecipo · Forse · No»): scheda, pagina del link e calendario. */
+/* Mia risposta all'uscita, nelle righe del calendario */
+.cal-mia {
+  justify-self: start;
+  margin-top: 0.15rem;
+  padding: 0.05rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+.cal-mia--si { background: rgba(43, 138, 62, 0.14); color: #2b8a3e; }
+.cal-mia--forse { background: rgba(250, 176, 5, 0.2); color: #8a5a00; }
+.cal-mia--no { background: #eef1f1; color: var(--color-muted); }
+
+/* Adesioni nella scheda dell'uscita */
+.adesioni-scelta {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+  margin: 0.5rem 0 1rem;
+}
+.adesioni-scelta button {
+  padding: 0.75rem 0.5rem;
+  border-radius: 0.75rem;
+  border: 2px solid var(--color-border);
+  background: #fff;
+  color: var(--color-primary-dark);
+  font-weight: 700;
+  font-size: 1rem;
+}
+.adesioni-scelta button[aria-pressed='true'].si { background: #2b8a3e; border-color: #2b8a3e; color: #fff; }
+.adesioni-scelta button[aria-pressed='true'].forse { background: #f2a900; border-color: #f2a900; color: #2b2100; }
+.adesioni-scelta button[aria-pressed='true'].no { background: #868e96; border-color: #868e96; color: #fff; }
+.adesioni-conteggi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.75rem;
+}
+.adesioni-gruppo { margin: 0 0 0.6rem; }
+.adesioni-gruppo h3 { font-size: 0.95rem; margin: 0 0 0.3rem; }
+.adesioni-nomi { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0; padding: 0; list-style: none; }
+.adesioni-nomi li {
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  background: rgba(14, 151, 154, 0.08);
+  border: 1px solid rgba(14, 151, 154, 0.2);
+  font-size: 0.9rem;
+}

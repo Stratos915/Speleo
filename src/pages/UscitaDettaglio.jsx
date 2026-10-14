@@ -7,6 +7,8 @@ import { getUscitaById, updateUscita } from '../services/uscite';
 import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
 import { returnLoan } from '../services/loans.js';
+import AdesioniUscita from '../components/AdesioniUscita.jsx';
+import { etichettaTipo } from '../utils/tipiUscita.js';
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
@@ -426,7 +428,7 @@ export default function UscitaDettaglio() {
             )}
           </dd>
           <dt>Tipo</dt>
-          <dd>{uscita.tipo || '-'}</dd>
+          <dd>{etichettaTipo(uscita.tipo, uscita.tipo_descrizione) || '-'}</dd>
           <dt>Rientro previsto</dt>
           <dd>
             {uscita.rientro_previsto ? (
@@ -461,6 +463,16 @@ export default function UscitaDettaglio() {
           <dd>{uscita.note || 'Nessuna nota inserita.'}</dd>
         </dl>
       </article>
+
+      <AdesioniUscita
+        uscita={uscita}
+        userId={user?.id}
+        puoModificare={canEditUscite}
+        onCopiaPartecipanti={async (ids) => {
+          const updated = await updateUscita(id, { participants_ids: ids });
+          setUscita(updated);
+        }}
+      />
 
       {canEditUscite && (
         <article className="card">

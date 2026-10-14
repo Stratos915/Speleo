@@ -5,7 +5,11 @@
 // * Tipi gestiti: loans_due, uscite_rientro_superato, movimenti_prestiti, dpi_in_scadenza,
 //   nuova_uscita e uscite_cambiate (avvisi a tutti i soci, in copia nascosta),
 //   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna),
-//   uscite_promemoria (a tutti i soci, 7 e 3 giorni prima di un'uscita).
+//   uscite_promemoria (a tutti i soci, 7 e 3 giorni prima di un'uscita),
+//   adesioni_responsabile (al responsabile: chi si aggiunge o si ritira).
+// * Con "personali": [{ email, testo }] (adesioni, migrazione 15) ogni socio riceve un
+//   messaggio suo, con in fondo il proprio testo (i link per rispondere), al posto
+//   della copia nascosta.
 // * In modalita' di prova (test_run) non invia nulla e risponde solo con il riepilogo.
 // * Con {"diag": true} restituisce la configurazione SMTP in uso, senza la password.
 // * L'invio usa nodemailer: la libreria denomailer non completava l'autenticazione
@@ -94,6 +98,24 @@ function formatOra(value: unknown) {
   const text = String(value ?? "");
   const match = /^(\d{2}):(\d{2})/.exec(text);
   return match ? `${match[1]}:${match[2]}` : "";
+}
+
+// Etichette delle tipologie (come src/utils/tipiUscita.js nell'app).
+const TIPI: Record<string, string> = {
+  sociale: "Sociale",
+  corso: "Corso",
+  allenamento: "Allenamento",
+  formazione: "Formazione",
+  esplorazione: "Esplorazione",
+  serata_sede: "Serata in sede",
+  altro_evento: "Altro evento",
+  altro: "Altro",
+};
+
+function formatTipo(tipo: unknown, descrizione?: unknown) {
+  const base = TIPI[String(tipo ?? "").toLowerCase()] ?? String(tipo ?? "");
+  const testo = String(descrizione ?? "").trim();
+  return tipo === "altro_evento" && testo ? `${base}: ${testo}` : base;
 }
 
 function collectEmails(values: unknown[]): string[] {
@@ -213,7 +235,7 @@ function buildMessage(payload: Record<string, any>): Message | null {
         `• ${uscita.titolo ?? "Uscita"}`,
         `  Quando: ${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}`,
         `  Dove: ${uscita.luogo || "da definire"}`,
-        uscita.tipo ? `  Tipo: ${uscita.tipo}` : null,
+        uscita.tipo ? `  Tipo: ${formatTipo(uscita.tipo, uscita.tipo_descrizione)}` : null,
         uscita.responsabile_nome ? `  Responsabile: ${uscita.responsabile_nome}` : null,
         `  Dettagli: ${appUrl}/uscite/${uscita.id}`,
       ].filter(Boolean).join("\n");
@@ -329,6 +351,35 @@ function buildMessage(payload: Record<string, any>): Message | null {
     };
   }
 
+  // Al responsabile dell'uscita: nuove adesioni o ritiri.
+  if (payload.type === "adesioni_responsabile") {
+    const destinatario = collectEmails([recipients.socio]);
+    const uscita = payload.uscita ?? {};
+    if (!destinatario.length || !uscita.id) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const entrati: string[] = Array.isArray(payload.entrati) ? payload.entrati : [];
+    const usciti: string[] = Array.isArray(payload.usciti) ? payload.usciti : [];
+    const ora = formatOra(uscita.ora);
+    return {
+      subject: entrati.length
+        ? `GSU · ${entrati.length === 1 ? `${entrati[0]} partecipa` : `${entrati.length} nuove adesioni`} a ${uscita.titolo ?? "uscita"}`
+        : `GSU · Adesioni a ${uscita.titolo ?? "uscita"}: ${usciti.length === 1 ? "un ritiro" : `${usciti.length} ritiri`}`,
+      to: destinatario,
+      body: [
+        `Novità sulle adesioni a «${uscita.titolo ?? "uscita"}» (${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}):`,
+        "",
+        ...entrati.map((nome) => `+ ${nome} partecipa`),
+        ...usciti.map((nome) => `- ${nome} non partecipa più`),
+        "",
+        `Ora ${payload.totale === 1 ? "partecipa 1 socio" : `partecipano ${payload.totale ?? 0} soci`}.`,
+        "",
+        `Elenco completo e «Copia nei partecipanti»: ${appUrl}/uscite/${uscita.id}`,
+        "",
+        "Ricevi questo avviso perché sei il responsabile dell'uscita.",
+      ].join("\n"),
+    };
+  }
+
   // Promemoria personale: il giorno prima della riconsegna del materiale.
   if (payload.type === "prestito_promemoria") {
     const prestito = payload.prestito ?? {};
@@ -416,8 +467,11 @@ serve(async (req) => {
   if (!message) {
     return json({ ok: true, skipped: "nessun contenuto da inviare", type: payload.type ?? null });
   }
-  const bcc = message.bcc ?? [];
-  if (!message.to.length && !bcc.length) {
+  const personali: { email: string; testo: string }[] = Array.isArray(payload.personali)
+    ? payload.personali.filter((p: any) => p && typeof p.email === "string" && p.email.includes("@"))
+    : [];
+  const bcc = personali.length ? [] : message.bcc ?? [];
+  if (!message.to.length && !bcc.length && !personali.length) {
     console.error("Nessun destinatario configurato");
     return json({ ok: false, error: "Nessun destinatario configurato" }, 200);
   }
@@ -428,6 +482,7 @@ serve(async (req) => {
       type: payload.type,
       to: message.to,
       bcc_count: bcc.length,
+      personali: personali.length,
       subject: message.subject,
     });
   }
@@ -443,7 +498,29 @@ serve(async (req) => {
       secure: SMTP_SECURE,
       auth: { user: SMTP_USER, pass: SMTP_PASS },
     });
-    const text = `${message.body}\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)`;
+    const firma = "\n\n--\nGestionale del Gruppo Speleologico Urbino (messaggio automatico)";
+    const text = `${message.body}${firma}`;
+
+    // Un messaggio per socio, con i suoi link personali.
+    if (personali.length) {
+      let accettati = 0;
+      let falliti = 0;
+      for (const p of personali) {
+        try {
+          const info = await transporter.sendMail({
+            from: SMTP_FROM,
+            to: p.email,
+            subject: message.subject,
+            text: `${message.body}\n\n${String(p.testo ?? "").trim()}${firma}`,
+          });
+          accettati += info?.accepted?.length ?? 0;
+        } catch (personalError) {
+          falliti += 1;
+          console.error("Invio personale fallito", String(personalError));
+        }
+      }
+      return json({ ok: falliti === 0, type: payload.type, personali: personali.length, accettati, falliti }, falliti === personali.length ? 500 : 200);
+    }
 
     // Con la copia nascosta il destinatario visibile e' il mittente stesso;
     // i soci sono divisi in gruppi per restare nei limiti del provider.
