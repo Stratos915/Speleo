@@ -23,3 +23,12 @@ export function etichettaTipo(tipo, descrizione) {
   const testo = String(descrizione ?? '').trim();
   return tipo === TIPO_CON_DESCRIZIONE && testo ? `${base}: ${testo}` : base;
 }
+
+// Tipologie che non usano materiale del magazzino: niente «Materiale necessario»
+// né «Prestiti collegati» (eventi in sede).
+export const TIPI_SENZA_MATERIALE = ['serata_sede'];
+
+/** False per le tipologie senza materiale (es. «Serata in sede»). */
+export function usaMateriale(tipo) {
+  return !TIPI_SENZA_MATERIALE.includes(String(tipo ?? '').toLowerCase());
+}

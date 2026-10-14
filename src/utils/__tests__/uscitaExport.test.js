@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildUscitaSingola, esterniDaTesto } from '../uscitaExport.js';
+import { buildUscitaSingola, esterniDaTesto, testoRuoli } from '../uscitaExport.js';
 import { escapePdfText, generateTablePdf } from '../exporters.js';
 
 const soci = new Map([
@@ -53,6 +53,23 @@ describe('esportazione di una singola uscita', () => {
     expect(intro).toContain('Risposte: 2 partecipo, 1 forse, 1 no, 8 senza risposta');
     expect(intro[0]).toMatch(/^Quando: .*20.*ottobre 2026 alle 20:30$/);
     expect(nomeFile('pdf')).toBe('uscita-2026-10-20-cena-in-sede-per-parlare-del-raduno.pdf');
+  });
+
+  it('mostra il ruolo nell\'app al posto di «Socio»', () => {
+    const ruoli = {
+      perSocio: new Map([['m1', ['presidente']], ['m2', ['segretario', 'socio']]]),
+      perUtente: new Map([['d', ['admin']]]),
+    };
+    const { rows } = buildUscitaSingola({ uscita, nomeSocio, adesioni, ruoli });
+    const ruolo = Object.fromEntries(rows.map((r) => [r.nome, r.chi]));
+    expect(ruolo['Enrico Maria Sacchi']).toBe('Presidente');
+    expect(ruolo['Marco Alessandrini']).toBe('Segretario + Socio');
+    expect(ruolo['Stratos']).toBe('Amministratore');
+    expect(ruolo['Nicolò Rossi']).toBe('Socio');
+    expect(ruolo['Ospite Uno']).toBe('Esterno');
+    expect(testoRuoli([])).toBe('Socio');
+    const { intro } = buildUscitaSingola({ uscita, nomeSocio, adesioni, ruoli });
+    expect(intro).toContain('Responsabile: Enrico Maria Sacchi (Presidente)');
   });
 
   it('funziona anche senza adesioni', () => {

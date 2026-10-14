@@ -16,3 +16,13 @@ describe('tipologie uscite', () => {
     expect(etichettaTipo(null)).toBe('');
   });
 });
+
+describe('materiale per tipologia', () => {
+  it('la serata in sede non usa materiale', async () => {
+    const { usaMateriale } = await import('../tipiUscita.js');
+    expect(usaMateriale('serata_sede')).toBe(false);
+    expect(usaMateriale('esplorazione')).toBe(true);
+    expect(usaMateriale('altro_evento')).toBe(true);
+    expect(usaMateriale(null)).toBe(true);
+  });
+});

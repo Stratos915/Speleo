@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getMembers } from '../services/members';
 import { dedupeMembers, formatMemberLabel, buildMemberTooltip } from '../utils/members.js';
-import { TIPI_USCITA, TIPO_CON_DESCRIZIONE } from '../utils/tipiUscita.js';
+import { TIPI_USCITA, TIPO_CON_DESCRIZIONE, usaMateriale } from '../utils/tipiUscita.js';
 
 const EMPTY_FORM = {
   titolo: '',
@@ -486,7 +486,7 @@ export default function UscitaForm({
         />
       </div>
 
-      {prestitoParams ? (
+      {!usaMateriale(form.tipo) ? null : prestitoParams ? (
         <div className="card">
           <p style={{ margin: '0 0 0.35rem' }}>Materiale necessario</p>
           <button
