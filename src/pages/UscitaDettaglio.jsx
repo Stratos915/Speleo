@@ -8,7 +8,7 @@ import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
 import { returnLoan } from '../services/loans.js';
 import AdesioniUscita from '../components/AdesioniUscita.jsx';
-import { etichettaTipo } from '../utils/tipiUscita.js';
+import { etichettaTipo, usaMateriale } from '../utils/tipiUscita.js';
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
@@ -349,6 +349,8 @@ export default function UscitaDettaglio() {
 
   const supportsClosedAt = uscita ? Object.prototype.hasOwnProperty.call(uscita, 'closed_at') : false;
   const isClosed = uscita?.status === 'chiusa';
+  // «Serata in sede»: niente materiale, salvo prestiti già collegati da restituire.
+  const conMateriale = usaMateriale(uscita?.tipo) || uscitaLoans.length > 0;
   const mapsLink = useMemo(() => {
     if (!uscita?.luogo) return null;
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(uscita.luogo)}`;
@@ -655,6 +657,7 @@ export default function UscitaDettaglio() {
                 >
                   Modifica uscita
                 </button>
+                {conMateriale && (
                 <button
                   type="button"
                   style={{ background: 'var(--color-primary-dark)' }}
@@ -672,6 +675,7 @@ export default function UscitaDettaglio() {
                 >
                   Materiale necessario per questa uscita
                 </button>
+                )}
                 <button
                   type="button"
                   style={{ background: isClosed ? '#1971c2' : '#2b8a3e' }}
@@ -692,7 +696,7 @@ export default function UscitaDettaglio() {
                     : 'Chiudi uscita'}
                 </button>
               </div>
-              {disableLoanButton && (
+              {conMateriale && disableLoanButton && (
                 <small style={{ color: 'var(--color-muted)' }}>
                   Hai chiuso tutti i prestiti collegati dopo la data dell&apos;uscita, non puoi crearne di nuovi.
                 </small>
@@ -702,6 +706,7 @@ export default function UscitaDettaglio() {
               )}
             </>
           )}
+          {conMateriale && (
           <article className="card">
             <h3>Prestiti collegati</h3>
             {uscitaLoansError && <p style={{ color: 'var(--color-accent)' }}>{uscitaLoansError}</p>}
@@ -770,6 +775,7 @@ export default function UscitaDettaglio() {
               <p>Nessun prestito collegato a questa uscita.</p>
             )}
           </article>
+          )}
         </article>
       )}
     </section>
