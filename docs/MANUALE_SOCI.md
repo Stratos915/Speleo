@@ -73,10 +73,25 @@ In Dashboard, accanto a Materiali, Soci e Uscite, c'è la casella «Calendario»
 ### Creare un'uscita
 
 1. In Uscite premi «Nuova uscita».
-2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, altro).
+2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, serata in sede, altro evento, altro). Con «Altro evento» scrivi anche una breve descrizione.
 3. Indica il responsabile e seleziona i soci partecipanti; gli ospiti esterni si scrivono nel campo apposito.
 4. Se vuoi, indica il rientro previsto (vedi sotto).
 5. Premi «Salva uscita».
+
+
+### Chi partecipa? (Partecipo · Forse · No)
+
+Quando viene creata un'uscita, ognuno può dire se partecipa, come in un sondaggio di WhatsApp:
+
+- dalla **notifica** sul telefono Android o sul computer: sotto l'avviso ci sono i pulsanti «Partecipo», «Forse», «No»;
+- dall'**email**: in fondo ci sono tre link personali; basta toccarne uno, anche senza entrare nell'app;
+- dalla **scheda dell'uscita**: in alto, nel riquadro «Chi partecipa?». Su iPhone la notifica non mostra i pulsanti: toccandola si apre la scheda.
+
+La risposta si può cambiare quando vuoi, finché l'uscita è aperta. Nel riquadro tutti i soci vedono quanti hanno risposto sì, forse e no, con i nomi, e quanti non hanno ancora risposto. La tua risposta compare anche nell'elenco delle prossime uscite in Home.
+
+Il responsabile dell'uscita riceve un avviso ogni volta che qualcuno si aggiunge o si ritira. Con «Copia nei partecipanti» porta chi ha detto sì nell'elenco ufficiale dei partecipanti.
+
+I promemoria 7 e 3 giorni prima non arrivano a chi ha risposto «No»; a chi non ha ancora risposto chiedono di farlo.
 
 
 ### Rientro previsto
@@ -152,7 +167,7 @@ Entro mezz'ora ricevi un'email e, se le hai attivate, una notifica sul telefono 
 - un'uscita in programma cambia data, ora, luogo, titolo o tipo (l'avviso dice cosa è cambiato);
 - un'uscita in programma viene annullata.
 
-Inoltre ricevi un promemoria 7 giorni e 3 giorni prima di ogni uscita in programma, la mattina dalle 8.
+Inoltre ricevi un promemoria 7 giorni e 3 giorni prima di ogni uscita in programma, la mattina dalle 8 (non se hai risposto «No»). Se sei il responsabile di un'uscita, ricevi anche un avviso quando qualcuno si aggiunge o si ritira.
 
 Se hai del materiale in prestito, il giorno prima della riconsegna ti arriva un promemoria; se la data passa, una notifica te lo ricorda. Questi promemoria partono solo tra le 8 e le 21.
 
