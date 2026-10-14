@@ -8,6 +8,7 @@ import { formatMemberLabel } from '../utils/members.js';
 import { dedupeMembers } from '../utils/members.js';
 import { getAllRoles } from '../utils/permissions.js';
 import AccountRegistrati from '../components/AccountRegistrati.jsx';
+import SceltaRuoli from '../components/SceltaRuoli.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 import { loadScuolaData } from '../services/scuola.js';
 import {
@@ -152,6 +153,8 @@ export default function Report() {
   const [approvalsError, setApprovalsError] = useState('');
   const [approvalsUpdating, setApprovalsUpdating] = useState({});
   const [roleAssignments, setRoleAssignments] = useState({});
+  // Ruoli in più scelti per ogni richiesta (undefined: migrazione 14 non ancora eseguita).
+  const [extraAssignments, setExtraAssignments] = useState({});
   const [approvalHistory, setApprovalHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState('');
@@ -342,17 +345,20 @@ export default function Report() {
     try {
       const { data, error: profilesError } = await supabase
         .from('profiles')
-        .select('id,email,role,approval_status,created_at,first_name,last_name,phone,member_id')
+        .select('*')
         .eq('approval_status', 'pending')
         .order('created_at', { ascending: false });
       if (profilesError) throw profilesError;
       const rows = data ?? [];
       setPendingProfiles(rows);
       const nextAssignments = {};
+      const nextExtra = {};
       rows.forEach((row) => {
         nextAssignments[row.id] = row.role ?? 'socio';
+        nextExtra[row.id] = Array.isArray(row.ruoli_extra) ? row.ruoli_extra : undefined;
       });
       setRoleAssignments(nextAssignments);
+      setExtraAssignments(nextExtra);
     } catch (loadError) {
       setApprovalsError(loadError.message ?? 'Impossibile caricare le richieste in attesa.');
     } finally {
@@ -472,6 +478,7 @@ export default function Report() {
       setApprovalsError('');
       try {
         const nextRole = roleAssignments[profileId] ?? 'socio';
+        const nextExtra = extraAssignments[profileId];
         const target = pendingProfiles.find((row) => row.id === profileId);
         const { memberId } = await ensureMemberForProfile(target);
         const { error: updateError } = await supabase
@@ -479,6 +486,7 @@ export default function Report() {
           .update({
             approval_status: 'approved',
             role: nextRole,
+            ...(Array.isArray(nextExtra) ? { ruoli_extra: nextExtra } : {}),
             approved_at: new Date().toISOString(),
             member_id: memberId ?? target?.member_id ?? null,
           })
@@ -493,7 +501,7 @@ export default function Report() {
           from_status: target?.approval_status ?? 'pending',
           to_status: 'approved',
           from_role: target?.role ?? null,
-          to_role: nextRole,
+          to_role: [nextRole, ...(nextExtra ?? [])].join(' + '),
         });
         if (target?.email) {
           try {
@@ -533,7 +541,7 @@ export default function Report() {
         setApprovalsUpdating((prev) => ({ ...prev, [profileId]: false }));
       }
     },
-    [roleAssignments, loadPendingProfiles, pendingProfiles, loadApprovalHistory, user, ensureMemberForProfile],
+    [roleAssignments, extraAssignments, loadPendingProfiles, pendingProfiles, loadApprovalHistory, user, ensureMemberForProfile],
   );
 
   const handleRejectProfile = useCallback(
@@ -600,13 +608,16 @@ export default function Report() {
   const handleRoleChange = useCallback(
     async (profile) => {
       const nextRole = roleAssignments[profile.id] ?? 'socio';
-      if (nextRole === profile.role) return;
+      const nextExtra = extraAssignments[profile.id];
+      const extraUguali =
+        !Array.isArray(nextExtra) || JSON.stringify(nextExtra) === JSON.stringify(profile.ruoli_extra ?? []);
+      if (nextRole === profile.role && extraUguali) return;
       setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: true }));
       setApprovalsError('');
       try {
         const { error: updateError } = await supabase
           .from('profiles')
-          .update({ role: nextRole })
+          .update({ role: nextRole, ...(Array.isArray(nextExtra) ? { ruoli_extra: nextExtra } : {}) })
           .eq('id', profile.id);
         if (updateError) throw updateError;
         await supabase.from('approval_audit').insert({
@@ -618,7 +629,7 @@ export default function Report() {
           from_status: profile.approval_status ?? null,
           to_status: profile.approval_status ?? null,
           from_role: profile.role ?? null,
-          to_role: nextRole,
+          to_role: [nextRole, ...(nextExtra ?? [])].join(' + '),
         });
         await loadPendingProfiles();
         await loadApprovalHistory();
@@ -628,7 +639,7 @@ export default function Report() {
         setApprovalsUpdating((prev) => ({ ...prev, [profile.id]: false }));
       }
     },
-    [roleAssignments, loadPendingProfiles, loadApprovalHistory, user],
+    [roleAssignments, extraAssignments, loadPendingProfiles, loadApprovalHistory, user],
   );
 
   const detectMembershipYear = useCallback((member) => {
@@ -1328,21 +1339,17 @@ export default function Report() {
                         </p>
                       </div>
                       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                          Ruolo
-                          <select
-                            value={roleAssignments[profile.id] ?? 'socio'}
-                            onChange={(event) =>
-                              setRoleAssignments((prev) => ({ ...prev, [profile.id]: event.target.value }))
-                            }
-                          >
-                            {rolesList.map((roleOption) => (
-                              <option key={roleOption} value={roleOption}>
-                                {roleOption}
-                              </option>
-                            ))}
-                          </select>
-                        </label>
+                        <SceltaRuoli
+                          label="Ruolo"
+                          ruoli={rolesList}
+                          role={roleAssignments[profile.id] ?? 'socio'}
+                          extra={extraAssignments[profile.id]}
+                          onChange={(scelta) => {
+                            setRoleAssignments((prev) => ({ ...prev, [profile.id]: scelta.role }));
+                            setExtraAssignments((prev) => ({ ...prev, [profile.id]: scelta.extra }));
+                          }}
+                          disabled={approvalsUpdating[profile.id]}
+                        />
                         <button
                           type="button"
                           style={{ background: '#adb5bd' }}
