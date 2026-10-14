@@ -18,6 +18,8 @@ const PDF_CHAR_WIDTH = 6;
 const PDF_CELL_PADDING = 3;
 const PDF_MIN_COL_CHARS = 6;
 const PDF_MAX_COL_CHARS = 32;
+// Courier 8 pt: 4,8 pt per carattere, circa 110 caratteri nella larghezza utile.
+const PDF_INTRO_MAX_CHARS = 105;
 
 export function formatDate(value) {
   if (!value) return '';
@@ -135,8 +137,35 @@ export async function getLetterheadImage() {
   return letterheadPromise;
 }
 
+// Caratteri WinAnsi fuori da Latin-1 (virgolette tipografiche, trattini, euro...).
+const WIN_ANSI_EXTRA = new Map([
+  ['€', 0x80], ['‚', 0x82], ['ƒ', 0x83], ['„', 0x84], ['…', 0x85], ['†', 0x86], ['‡', 0x87],
+  ['ˆ', 0x88], ['‰', 0x89], ['Š', 0x8a], ['‹', 0x8b], ['Œ', 0x8c], ['Ž', 0x8e], ['‘', 0x91],
+  ['’', 0x92], ['“', 0x93], ['”', 0x94], ['•', 0x95], ['–', 0x96], ['—', 0x97], ['˜', 0x98],
+  ['™', 0x99], ['š', 0x9a], ['›', 0x9b], ['œ', 0x9c], ['ž', 0x9e], ['Ÿ', 0x9f],
+]);
+
+/**
+ * Testo per una stringa PDF con font in codifica WinAnsi: le lettere accentate
+ * diventano codici ottali (\350 = è), così non escono storpiate. I caratteri che
+ * il font non ha diventano «?».
+ */
 export function escapePdfText(value) {
-  return value.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  let out = '';
+  for (const char of String(value ?? '')) {
+    if (char === '\\' || char === '(' || char === ')') {
+      out += `\\${char}`;
+      continue;
+    }
+    const code = char.codePointAt(0);
+    if (code >= 32 && code < 127) {
+      out += char;
+      continue;
+    }
+    const ansi = code >= 160 && code <= 255 ? code : WIN_ANSI_EXTRA.get(char);
+    out += ansi ? `\\${ansi.toString(8).padStart(3, '0')}` : char === '\t' ? ' ' : '?';
+  }
+  return out;
 }
 
 export function splitIntoLines(text, maxChars) {
@@ -201,11 +230,14 @@ export function computeColumnWidths(columns, rows) {
   return { widths, charLimits };
 }
 
-export function generateTablePdf(title, columns, rows, { backgroundImage } = {}) {
+export function generateTablePdf(title, columns, rows, { backgroundImage, intro = [] } = {}) {
   const hasBackground = Boolean(backgroundImage?.data?.length);
   const startY = hasBackground ? 640 : PDF_PAGE_HEIGHT - PDF_MARGIN;
   const bottomY = hasBackground ? 90 : PDF_MARGIN;
   const { widths, charLimits } = computeColumnWidths(columns, rows);
+  // Righe di testo sotto il titolo, solo nella prima pagina (es. i dati di un'uscita).
+  const introLines = intro.flatMap((line) => splitIntoLines(line, PDF_INTRO_MAX_CHARS));
+  const introHeight = introLines.length ? introLines.length * PDF_LINE_HEIGHT + PDF_LINE_HEIGHT : 0;
   const headerLines = columns.map((column, index) => splitIntoLines(column.label, charLimits[index]));
   const headerHeight =
     Math.max(...headerLines.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
@@ -220,7 +252,7 @@ export function generateTablePdf(title, columns, rows, { backgroundImage } = {})
   rowLines.forEach((row) => {
     const rowHeight =
       Math.max(...row.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
-    const headerSpace = firstPage ? headerHeight + PDF_LINE_HEIGHT * 2 : headerHeight;
+    const headerSpace = firstPage ? headerHeight + PDF_LINE_HEIGHT * 2 + introHeight : headerHeight;
     if (cursorY - headerSpace - rowHeight < bottomY) {
       pages.push({ rows: current, firstPage });
       current = [];
@@ -284,6 +316,11 @@ export function generateTablePdf(title, columns, rows, { backgroundImage } = {})
     if (pageData.firstPage) {
       contentLines.push(`BT /F1 ${PDF_TITLE_FONT_SIZE} Tf ${PDF_MARGIN} ${y} Td (${escapePdfText(title)}) Tj ET`);
       y -= PDF_LINE_HEIGHT * 2;
+      introLines.forEach((line) => {
+        contentLines.push(`BT /F1 ${PDF_FONT_SIZE} Tf ${PDF_MARGIN} ${y} Td (${escapePdfText(line)}) Tj ET`);
+        y -= PDF_LINE_HEIGHT;
+      });
+      if (introLines.length) y -= PDF_LINE_HEIGHT;
     }
 
     const drawRow = (row, yTop) => {
@@ -317,7 +354,7 @@ export function generateTablePdf(title, columns, rows, { backgroundImage } = {})
   });
 
   startObject();
-  pushString(`${fontObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>\nendobj\n`);
+  pushString(`${fontObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>\nendobj\n`);
 
   if (hasBackground) {
     startObject();
@@ -364,9 +401,9 @@ export async function downloadPdf(rows, key, columns) {
   triggerDownload(pdfContent, `${key}-speleo-${new Date().toISOString()}.pdf`, 'application/pdf');
 }
 
-export async function downloadPdfTable(title, columns, rows, filename) {
+export async function downloadPdfTable(title, columns, rows, filename, { intro } = {}) {
   const backgroundImage = await getLetterheadImage();
-  const pdfContent = generateTablePdf(title, columns, rows, { backgroundImage });
+  const pdfContent = generateTablePdf(title, columns, rows, { backgroundImage, intro });
   triggerDownload(pdfContent, filename, 'application/pdf');
 }
 

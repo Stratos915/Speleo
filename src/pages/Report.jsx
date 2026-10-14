@@ -11,6 +11,9 @@ import AccountRegistrati from '../components/AccountRegistrati.jsx';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 import { loadScuolaData } from '../services/scuola.js';
+import { getAdesioni } from '../services/adesioni.js';
+import { etichettaTipo } from '../utils/tipiUscita.js';
+import { buildUscitaSingola, scaricaUscitaSingola } from '../utils/uscitaExport.js';
 import {
   buildCsv,
   buildXlsxBlob,
@@ -216,7 +219,10 @@ export default function Report() {
       const logsPromise = canViewActivityLog ? getActivityLogs(500) : Promise.resolve([]);
       const [membersRes, usciteRes, equipmentRes, logsRes] = await Promise.allSettled([
         getMembers(),
-        supabase.from('uscite').select('id, titolo, luogo, data, tipo').order('data', { ascending: false }),
+        supabase
+          .from('uscite')
+          .select('*')
+          .order('data', { ascending: false }),
         getEquipment(),
         logsPromise,
       ]);
@@ -655,6 +661,21 @@ export default function Report() {
 
   const currentMembershipYear = String(new Date().getFullYear());
   const [membersYearFilter, setMembersYearFilter] = useState('all');
+  // Uscite: anno dell'elenco complessivo e uscita singola da esportare.
+  const [usciteAnno, setUsciteAnno] = useState('all');
+  const [uscitaSingolaId, setUscitaSingolaId] = useState('');
+  const [uscitaSingolaBusy, setUscitaSingolaBusy] = useState(false);
+  const usciteAnni = useMemo(
+    () =>
+      [...new Set(uscite.map((item) => String(item.data ?? '').slice(0, 4)).filter((year) => /^\d{4}$/.test(year)))].sort(
+        (a, b) => b.localeCompare(a),
+      ),
+    [uscite],
+  );
+  const usciteDellAnno = useMemo(
+    () => (usciteAnno === 'all' ? uscite : uscite.filter((item) => String(item.data ?? '').startsWith(usciteAnno))),
+    [uscite, usciteAnno],
+  );
   const [scuolaYearFilter, setScuolaYearFilter] = useState('all');
 
   const membersSummary = useMemo(() => {
@@ -875,7 +896,15 @@ export default function Report() {
       setError('Non ci sono dati da esportare per questa sezione.');
       return;
     }
-    if (format === 'pdf') {
+    if (format === 'pdf' && key === 'uscita') {
+      const anno = usciteAnno === 'all' ? '' : ` ${usciteAnno}`;
+      downloadPdfTable(
+        `Uscite${anno} (${rows.length})`,
+        csvColumns.uscita,
+        rows,
+        `uscite${anno ? `-${usciteAnno}` : ''}-${new Date().toISOString().slice(0, 10)}.pdf`,
+      );
+    } else if (format === 'pdf') {
       downloadPdf(rows, key);
     } else if (format === 'xlsx') {
       downloadXlsx(rows, key);
@@ -920,7 +949,7 @@ export default function Report() {
   }
 
   function prepareUsciteForExport() {
-    return uscite.map((item) => {
+    return usciteDellAnno.map((item) => {
       const responsabileMember = item.responsabile_id ? membersMap.get(item.responsabile_id) : null;
       const responsabileLabel =
         (responsabileMember && formatMemberLabel(responsabileMember)) ||
@@ -933,14 +962,38 @@ export default function Report() {
       return {
         titolo: item.titolo,
         luogo: item.luogo,
-        data: item.data ? formatDate(item.data) : '',
-        tipo: item.tipo ?? '',
+        // La data resta in formato AAAA-MM-GG: la formatta l'esportazione.
+        data: item.data ?? '',
+        tipo: etichettaTipo(item.tipo, item.tipo_descrizione),
         responsabile: responsabileLabel,
         participants: participantNames.join(', '),
         participants_manual: item.participants_manual ?? '',
         note: item.note ?? '',
       };
     });
+  }
+
+  async function handleUscitaSingolaExport(format = 'pdf') {
+    setError('');
+    const uscita = uscite.find((item) => String(item.id) === uscitaSingolaId);
+    if (!uscita) {
+      setError("Scegli prima l'uscita da esportare.");
+      return;
+    }
+    setUscitaSingolaBusy(true);
+    try {
+      // Senza la migrazione 15 (o in caso di errore) si esporta solo l'elenco ufficiale.
+      const adesioni = await getAdesioni(uscita.id).catch(() => null);
+      const nomeSocio = (memberId) => {
+        const member = membersMap.get(String(memberId));
+        return member ? formatMemberLabel(member, { includeMembership: false }) : null;
+      };
+      await scaricaUscitaSingola(buildUscitaSingola({ uscita, nomeSocio, adesioni }), format);
+    } catch (exportError) {
+      setError(exportError.message ?? "Impossibile esportare l'uscita.");
+    } finally {
+      setUscitaSingolaBusy(false);
+    }
   }
 
   function handleRegistryExport(format = 'csv') {
@@ -1651,14 +1704,81 @@ export default function Report() {
             </div>
           )}
           <div className="card-list" style={{ marginTop: '0.75rem' }}>
-            <ReportCard
-              title="Uscite"
-              description="Esporta elenco uscite registrate."
-              onCsv={() => handleExport('uscita')}
-              onPdf={() => handleExport('uscita', 'pdf')}
-              onXlsx={() => handleExport('uscita', 'xlsx')}
-              disabled={loading}
-            />
+            <article className="card" style={{ padding: 0 }}>
+              <details open>
+                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '0.9rem 1rem' }}>Uscite</summary>
+                <div style={{ padding: '0 1rem 1rem', display: 'grid', gap: '0.75rem' }}>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxWidth: '260px' }}>
+                    Anno
+                    <select
+                      value={usciteAnno}
+                      onChange={(event) => {
+                        setUsciteAnno(event.target.value);
+                        setUscitaSingolaId('');
+                      }}
+                    >
+                      <option value="all">Tutti gli anni</option>
+                      {usciteAnni.map((year) => (
+                        <option key={year} value={year}>
+                          {year}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <ReportCard
+                    title={usciteAnno === 'all' ? 'Tutte le uscite' : `Uscite del ${usciteAnno}`}
+                    description={`Elenco complessivo: ${usciteDellAnno.length} ${usciteDellAnno.length === 1 ? 'uscita' : 'uscite'} con responsabile e partecipanti.`}
+                    onCsv={() => handleExport('uscita')}
+                    onPdf={() => handleExport('uscita', 'pdf')}
+                    onXlsx={() => handleExport('uscita', 'xlsx')}
+                    disabled={loading}
+                  />
+                  <article className="card">
+                    <h3 style={{ margin: '0 0 0.25rem' }}>Uscita singola</h3>
+                    <p style={{ color: 'var(--color-muted)' }}>
+                      Dati dell&apos;uscita e chi partecipa: elenco ufficiale, esterni e risposte Partecipo · Forse · No.
+                    </p>
+                    <select
+                      value={uscitaSingolaId}
+                      onChange={(event) => setUscitaSingolaId(event.target.value)}
+                      style={{ maxWidth: '100%' }}
+                    >
+                      <option value="">Scegli l&apos;uscita...</option>
+                      {usciteDellAnno.map((item) => (
+                        <option key={item.id} value={String(item.id)}>
+                          {item.data ? formatDate(item.data) : 'senza data'} · {item.titolo ?? 'Uscita'}
+                        </option>
+                      ))}
+                    </select>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleUscitaSingolaExport('csv')}
+                        disabled={loading || uscitaSingolaBusy || !uscitaSingolaId}
+                      >
+                        CSV
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#228be6' }}
+                        onClick={() => handleUscitaSingolaExport('pdf')}
+                        disabled={loading || uscitaSingolaBusy || !uscitaSingolaId}
+                      >
+                        PDF
+                      </button>
+                      <button
+                        type="button"
+                        style={{ background: '#adb5bd' }}
+                        onClick={() => handleUscitaSingolaExport('xlsx')}
+                        disabled={loading || uscitaSingolaBusy || !uscitaSingolaId}
+                      >
+                        XLSX
+                      </button>
+                    </div>
+                  </article>
+                </div>
+              </details>
+            </article>
             <ReportCard
               title="Inventario"
               description="Scarica lo stato del magazzino."

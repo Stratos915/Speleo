@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RISPOSTE, adesioniNonAttive, getAdesioni, rispondiUscita } from '../services/adesioni.js';
+import { getMembers } from '../services/members';
+import { buildUscitaSingola, scaricaUscitaSingola } from '../utils/uscitaExport.js';
 
 // Riquadro «Chi partecipa?» nella scheda dell'uscita: i tre pulsanti per rispondere,
 // i conteggi e i nomi (visibili a tutti i soci). Chi può modificare l'uscita trova
 // anche «Copia nei partecipanti», che porta chi ha detto sì nell'elenco ufficiale.
+// «Scarica PDF» esporta subito l'elenco (partecipanti ufficiali e risposte, con i nomi).
 // Se la migrazione 15 non è stata eseguita il riquadro non compare.
 
 export default function AdesioniUscita({ uscita, userId, puoModificare, onCopiaPartecipanti }) {
@@ -13,6 +16,7 @@ export default function AdesioniUscita({ uscita, userId, puoModificare, onCopiaP
   const [inviando, setInviando] = useState(false);
   const [copiando, setCopiando] = useState(false);
   const [esito, setEsito] = useState('');
+  const [scaricando, setScaricando] = useState(false);
   const chiusa = uscita?.status === 'chiusa';
 
   const carica = useCallback(async () => {
@@ -76,11 +80,35 @@ export default function AdesioniUscita({ uscita, userId, puoModificare, onCopiaP
     }
   }
 
+  async function scaricaPdf() {
+    setScaricando(true);
+    setErrore('');
+    try {
+      // Dati freschi: qualcuno potrebbe aver risposto da poco.
+      const aggiornate = await getAdesioni(uscita.id).catch(() => dati);
+      if (aggiornate) setDati(aggiornate);
+      // Nomi dei partecipanti ufficiali (la scheda socio).
+      const soci = await getMembers().catch(() => []);
+      const nomi = new Map((soci ?? []).map((socio) => [String(socio.id), socio.full_name]));
+      const nomeSocio = (memberId) => nomi.get(String(memberId)) ?? null;
+      await scaricaUscitaSingola(buildUscitaSingola({ uscita, nomeSocio, adesioni: aggiornate }), 'pdf');
+    } catch (pdfError) {
+      setErrore(pdfError.message ?? 'Impossibile creare il PDF.');
+    } finally {
+      setScaricando(false);
+    }
+  }
+
   if (!attive || !uscita) return null;
 
   return (
     <article className="card">
-      <h2>Chi partecipa?</h2>
+      <div className="adesioni-testa">
+        <h2>Chi partecipa?</h2>
+        <button type="button" className="adesioni-pdf" onClick={scaricaPdf} disabled={scaricando || !dati}>
+          {scaricando ? 'Preparazione...' : '📄 Scarica PDF'}
+        </button>
+      </div>
       {chiusa ? (
         <p style={{ color: 'var(--color-muted)', margin: '0 0 0.75rem' }}>L&apos;uscita è chiusa: le risposte non si possono più cambiare.</p>
       ) : (

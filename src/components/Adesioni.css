@@ -47,3 +47,19 @@
   border: 1px solid rgba(14, 151, 154, 0.2);
   font-size: 0.9rem;
 }
+
+/* Titolo «Chi partecipa?» con il pulsante PDF a destra */
+.adesioni-testa {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.adesioni-testa h2 { margin: 0; }
+.adesioni-pdf {
+  background: #228be6;
+  width: fit-content;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.9rem;
+}
