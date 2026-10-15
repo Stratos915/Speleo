@@ -110,6 +110,19 @@ export function getNavigationVisibility(role) {
   }, {});
 }
 
+// Stato delle quote annuali (migrazione 17): lo vedono admin, presidente, consiglio e
+// tesoriere; lo cambiano admin, presidente e tesoriere. Il database applica la stessa regola.
+const QUOTE_VIEW_ROLES = ['admin', 'presidente', 'consiglio', 'tesoriere'];
+const QUOTE_EDIT_ROLES = ['admin', 'presidente', 'tesoriere'];
+
+export function canViewQuote(role) {
+  return hasOne(role, QUOTE_VIEW_ROLES);
+}
+
+export function canEditQuote(role) {
+  return hasOne(role, QUOTE_EDIT_ROLES);
+}
+
 export function getAllRoles() {
   return [...ALL_ROLES];
 }

@@ -50,3 +50,20 @@ describe('doppio ruolo', () => {
     expect(ruoliDelProfilo(null, undefined)).toEqual(['socio']);
   });
 });
+
+describe('stato delle quote', () => {
+  it('lo vedono solo admin, presidente, consiglio e tesoriere', async () => {
+    const { canViewQuote } = await import('../permissions.js');
+    for (const ruolo of ['admin', 'presidente', 'consiglio', 'tesoriere']) expect(canViewQuote(ruolo)).toBe(true);
+    for (const ruolo of ['socio', 'segretario', 'magazziniere', 'direttore_scuola']) expect(canViewQuote(ruolo)).toBe(false);
+    expect(canViewQuote(['segretario', 'tesoriere'])).toBe(true);
+  });
+
+  it('lo cambiano solo admin, presidente e tesoriere', async () => {
+    const { canEditQuote } = await import('../permissions.js');
+    expect(canEditQuote('tesoriere')).toBe(true);
+    expect(canEditQuote('presidente')).toBe(true);
+    expect(canEditQuote('consiglio')).toBe(false);
+    expect(canEditQuote(['segretario', 'socio'])).toBe(false);
+  });
+});
