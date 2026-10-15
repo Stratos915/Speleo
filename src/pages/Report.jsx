@@ -6,7 +6,7 @@ import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
 import { dedupeMembers } from '../utils/members.js';
-import { getAllRoles } from '../utils/permissions.js';
+import { canViewQuote, getAllRoles } from '../utils/permissions.js';
 import AccountRegistrati from '../components/AccountRegistrati.jsx';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
@@ -141,7 +141,12 @@ const downloadPdf = (rows, key) => exportPdf(rows, key, csvColumns[key]);
 const downloadXlsx = (rows, key) => exportXlsx(rows, key, csvColumns[key]);
 
 export default function Report() {
-  const { role, isAuthenticated, user } = useAuth();
+  const { role, roles, isAuthenticated, user } = useAuth();
+  // Stato delle quote: solo admin, presidente, consiglio e tesoriere.
+  const vedeQuote = canViewQuote(roles?.length ? roles : [role]);
+  const colonneSociCompleto = vedeQuote
+    ? csvColumns.soci_full
+    : csvColumns.soci_full.filter((col) => col.key !== 'status_label');
   const canViewActivityLog = role === 'admin' || role === 'presidente';
   const canApproveUsers = role === 'admin' || role === 'presidente';
   // Statistiche di accesso: dati personali, visibili solo ad admin e presidente.
@@ -1046,15 +1051,15 @@ export default function Report() {
     if (format === 'pdf') {
       await downloadPdfTable(
         'Elenco soci completo',
-        csvColumns.soci_full,
+        colonneSociCompleto,
         rows,
         `soci-full${suffix}-${new Date().toISOString()}.pdf`,
       );
     } else if (format === 'xlsx') {
-      const blob = buildXlsxBlob(csvColumns.soci_full, rows);
+      const blob = buildXlsxBlob(colonneSociCompleto, rows);
       triggerDownload(blob, `soci-full${suffix}-${new Date().toISOString()}.xlsx`);
     } else {
-      const csv = buildCsv(rows, csvColumns.soci_full);
+      const csv = buildCsv(rows, colonneSociCompleto);
       triggerDownload(csv, `soci-full${suffix}-${new Date().toISOString()}.csv`, 'text/csv;charset=utf-8;');
     }
   }
@@ -1793,12 +1798,18 @@ export default function Report() {
                 <div className="card-list" style={{ padding: '0 1rem 1rem', marginTop: 0 }}>
                   <ReportCard
                     title="Elenco soci completo"
-                    description="Scarica l'anagrafica dettagliata con anno e stato quota."
+                    description={
+                      vedeQuote
+                        ? "Scarica l'anagrafica dettagliata con anno e stato quota."
+                        : "Scarica l'anagrafica dettagliata con anno."
+                    }
                     onCsv={() => handleMembersFullExport()}
                     onPdf={() => handleMembersFullExport('pdf')}
                     onXlsx={() => handleMembersFullExport('xlsx')}
                     disabled={loading}
                   />
+                  {vedeQuote && (
+                  <>
                   <ReportCard
                     title="Riepilogo soci per anno"
                     description="Totale soci e quote pagate suddivisi per anno."
@@ -1823,6 +1834,8 @@ export default function Report() {
                     onXlsx={() => handleMembersStatusExport('unpaid', 'xlsx')}
                     disabled={loading}
                   />
+                  </>
+                  )}
                 </div>
               </details>
             </article>
