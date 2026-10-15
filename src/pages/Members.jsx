@@ -523,6 +523,14 @@ export default function Members() {
   const [rolesError, setRolesError] = useState('');
   const [roleUpdating, setRoleUpdating] = useState({});
   const rolesList = useMemo(() => getAllRoles(), []);
+  // Stessa regola per il pagamento di magliette e gadget (migrazione 18).
+  const colonneAcquisti = useMemo(
+    () =>
+      vedeQuote
+        ? PURCHASE_EXPORT_COLUMNS
+        : PURCHASE_EXPORT_COLUMNS.filter((col) => col.key !== 'payment_status' && col.key !== 'payment_date'),
+    [vedeQuote],
+  );
 
   const yearOptions = useMemo(() => {
     const maxYear = Math.max(YEAR_END, currentYear + 5);
@@ -1039,10 +1047,11 @@ export default function Members() {
       size: purchaseForm.size || null,
       quantity: Number(purchaseForm.quantity) || 1,
       price: Number.isNaN(priceValue) ? null : priceValue,
-      payment_status: purchaseForm.payment_status,
+      ...(cambiaQuote
+        ? { payment_status: purchaseForm.payment_status, payment_date: purchaseForm.payment_date || null }
+        : {}),
       status: purchaseForm.status,
       purchase_date: purchaseForm.purchase_date || null,
-      payment_date: purchaseForm.payment_date || null,
       delivery_date: purchaseForm.delivery_date || null,
       purchase_year: Number(purchaseForm.purchase_year) || DEFAULT_YEAR,
       notes: purchaseForm.notes?.trim() || null,
@@ -1092,14 +1101,14 @@ export default function Members() {
     if (format === 'pdf') {
       await downloadPdfTable(
         'Acquisti soci',
-        PURCHASE_EXPORT_COLUMNS,
+        colonneAcquisti,
         list,
         `acquisti-soci${label}${suffix}-${new Date().toISOString()}.pdf`,
       );
       return;
     }
     if (format === 'xlsx') {
-      const sheet = buildWorksheetXml(PURCHASE_EXPORT_COLUMNS, list);
+      const sheet = buildWorksheetXml(colonneAcquisti, list);
       const files = [
         { name: '[Content_Types].xml', content: buildContentTypesXml() },
         { name: '_rels/.rels', content: buildRootRelsXml() },
@@ -1111,7 +1120,7 @@ export default function Members() {
       triggerDownload(blob, `acquisti-soci${label}${suffix}-${new Date().toISOString()}.xlsx`);
       return;
     }
-    const csv = buildCsv(list, PURCHASE_EXPORT_COLUMNS);
+    const csv = buildCsv(list, colonneAcquisti);
     triggerDownload(
       csv,
       `acquisti-soci${label}${suffix}-${new Date().toISOString()}.csv`,
@@ -1279,7 +1288,7 @@ export default function Members() {
     setPurchaseError('');
     const nextStatus = purchase.payment_status === 'paid' ? 'unpaid' : 'paid';
     try {
-      await updateMemberPurchase(purchase.id, { payment_status: nextStatus });
+      await updateMemberPurchase(purchase.id, { payment_status: nextStatus, payment_date: purchase.payment_date ?? null });
       safeLogActivity(
         {
           action: 'toggle_member_purchase_payment',
@@ -1528,14 +1537,18 @@ export default function Members() {
                 {purchaseSummary.totalRevenue.toFixed(2)} €
               </p>
             </div>
-            <div>
-              <strong>Pagati</strong>
-              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.paid}</p>
-            </div>
-            <div>
-              <strong>Da saldare</strong>
-              <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.unpaid}</p>
-            </div>
+            {vedeQuote && (
+              <>
+                <div>
+                  <strong>Pagati</strong>
+                  <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.paid}</p>
+                </div>
+                <div>
+                  <strong>Da saldare</strong>
+                  <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>{purchaseSummary.unpaid}</p>
+                </div>
+              </>
+            )}
             <div>
               <strong>Taglie</strong>
               <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
@@ -1606,6 +1619,7 @@ export default function Members() {
                   ))}
                 </select>
               </label>
+              {vedeQuote && (
               <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 Stato pagamento
                 <select value={purchaseStatusFilter} onChange={(event) => setPurchaseStatusFilter(event.target.value)}>
@@ -1617,6 +1631,7 @@ export default function Members() {
                   ))}
                 </select>
               </label>
+              )}
               <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 Stato ordine
                 <select value={purchaseOrderFilter} onChange={(event) => setPurchaseOrderFilter(event.target.value)}>
@@ -1779,6 +1794,7 @@ export default function Members() {
                         onChange={(event) => handlePurchaseChange('purchase_date', event.target.value)}
                       />
                     </label>
+                    {cambiaQuote && (
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       Data pagamento
                       <input
@@ -1787,6 +1803,7 @@ export default function Members() {
                         onChange={(event) => handlePurchaseChange('payment_date', event.target.value)}
                       />
                     </label>
+                    )}
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       Data consegna
                       <input
@@ -1827,6 +1844,7 @@ export default function Members() {
                     </label>
                   </div>
                   <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+                    {cambiaQuote && (
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       Pagamento
                       <select
@@ -1840,6 +1858,7 @@ export default function Members() {
                         ))}
                       </select>
                     </label>
+                    )}
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                       Stato ordine
                       <select
@@ -1951,18 +1970,19 @@ export default function Members() {
                             <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
                               Prezzo: {formatPurchasePrice(purchase.price)} ·
                               Data acquisto {purchase.purchase_date ? formatDate(purchase.purchase_date) : 'N/D'} ·
-                              Pagamento {purchase.payment_date ? formatDate(purchase.payment_date) : 'N/D'} ·
+                              {vedeQuote ? ` Pagamento ${purchase.payment_date ? formatDate(purchase.payment_date) : 'N/D'} · ` : ' '}
                               Consegna {purchase.delivery_date ? formatDate(purchase.delivery_date) : 'N/D'} ·
                               Anno {purchase.purchase_year ?? 'N/D'}
                             </p>
                             <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-                              Pagamento: {PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? 'N/D'} ·
+                              {vedeQuote &&
+                                `Pagamento: ${PAYMENT_STATUS.find((status) => status.value === purchase.payment_status)?.label ?? 'N/D'} · `}
                               Stato ordine: {ORDER_STATUS.find((status) => status.value === purchase.status)?.label ?? 'N/D'}
                             </p>
                             {purchase.notes && (
                               <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>Note: {purchase.notes}</p>
                             )}
-                            {canEditMembers && (
+                            {cambiaQuote && (
                               <div style={{ marginTop: '0.5rem' }}>
                                 <button
                                   type="button"
