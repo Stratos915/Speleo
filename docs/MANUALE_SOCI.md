@@ -51,7 +51,7 @@ Il menu in alto (sul telefono in basso) porta alle sezioni. Vedi solo quelle per
 | Prestiti | Prendere e riconsegnare materiale, storico | Tutti |
 | Biblioteca | Catalogo dei libri e prestiti | Tutti |
 | Scuola | Corsi, corsisti, registro istruttori, dispense | Staff (modifica: direttore scuola) |
-| Soci | Anagrafica, quote, ruoli | Staff (modifica: segreteria e tesoriere) |
+| Soci | Anagrafica, quote, ruoli | Staff (modifica: segreteria e tesoriere; quote visibili solo ad amministratori, presidente, consiglio e tesoriere) |
 | Report | Elenchi scaricabili, approvazioni, statistiche | Staff |
 
 Per «staff» si intendono i ruoli consiglio, segretario, tesoriere, magazziniere, direttore della scuola, presidente e amministratore.
@@ -212,6 +212,7 @@ Le scelte sono nel pulsante «🔔 Avvisi», in alto a destra sotto il tuo ruolo
 - Account non più necessari: in Report, sotto le richieste, «Account registrati» elenca chi può accedere; «Elimina» toglie l'accesso (va confermato e non si annulla). La scheda del socio in Soci, i prestiti e le uscite restano. Anche una richiesta in attesa sconosciuta o doppia si può eliminare. Il tuo account non si può eliminare da qui.
 - Ruoli: solo presidente e amministratori possono cambiarli, dal menu «Ruolo app» in Soci o dalle richieste in Report. Sotto il menu, «È anche:» aggiunge un secondo ruolo (per esempio Segretario + Socio, così può anche creare uscite e prendere materiale). Dai a ciascuno il ruolo minimo che gli serve.
 - Statistiche di accesso: visibili solo a voi, perché contengono dati personali.
+- Quote annuali: lo stato della quota (pagata o da saldare) lo vedono solo amministratori, presidente, consiglio e tesoriere, in Soci e nelle esportazioni di Report; lo cambiano solo amministratori, presidente e tesoriere. Gli altri ruoli dello staff vedono l'anagrafica senza la quota.
 - Esportazioni: gli elenchi si scaricano in CSV, XLSX o PDF con carta intestata. Per le uscite scegli l'anno: puoi scaricare l'elenco complessivo oppure, con «Uscita singola», una sola uscita con tutti i partecipanti. Conserva i file con i dati dei soci solo per il tempo necessario.
 
 
