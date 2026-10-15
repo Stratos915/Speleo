@@ -11,7 +11,7 @@ import {
 } from '../services/memberPurchases';
 import { supabase } from '../lib/supabaseClient';
 import { dedupeMembers } from '../utils/members.js';
-import { getAllRoles } from '../utils/permissions.js';
+import { canEditQuote, canViewQuote, getAllRoles } from '../utils/permissions.js';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
 
 const YEAR_START = 2025;
@@ -511,8 +511,12 @@ export default function Members() {
   const lastScrollPositionRef = useRef(0);
   const [cloningYear, setCloningYear] = useState(null);
   const { user, role } = useAuth();
-  const { canEditSection } = usePermissions();
+  const { canEditSection, roles } = usePermissions();
   const canEditMembers = canEditSection('soci');
+  // Stato delle quote (migrazione 17): lo vedono admin, presidente, consiglio e tesoriere;
+  // lo cambiano admin, presidente e tesoriere.
+  const vedeQuote = canViewQuote(roles);
+  const cambiaQuote = canEditQuote(roles);
   const canManageRoles = role === 'admin' || role === 'presidente';
   const [profilesByEmail, setProfilesByEmail] = useState(new Map());
   const [rolesLoading, setRolesLoading] = useState(false);
@@ -1164,7 +1168,7 @@ export default function Members() {
       full_name: form.full_name.trim(),
       email: supportsEmail ? form.email.trim() || null : undefined,
       phone: supportsPhone ? form.phone.trim() || null : undefined,
-      membership_paid: Boolean(form.membership_paid),
+      ...(cambiaQuote ? { membership_paid: Boolean(form.membership_paid) } : {}),
       old_id: membershipValue,
     };
     if (supportsYear && yearColumn) {
@@ -1406,7 +1410,8 @@ export default function Members() {
           >
             <strong>Anno {activeSummary.year}</strong>
             <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
-              Totale soci: {activeSummary.total} · Quota pagata: {activeSummary.paid} · Da saldare: {activeSummary.unpaid}
+              Totale soci: {activeSummary.total}
+              {vedeQuote && ` · Quota pagata: ${activeSummary.paid} · Da saldare: ${activeSummary.unpaid}`}
             </p>
             <small style={{ color: 'var(--color-muted)' }}>
               Il riepilogo segue automaticamente l&apos;anno selezionato o quello corrente del dispositivo.
@@ -1468,6 +1473,7 @@ export default function Members() {
               )}
           </div>
 
+          {vedeQuote && (
           <div className="pill-group">
             {[
               { value: 'all', label: 'Tutti' },
@@ -1484,6 +1490,7 @@ export default function Members() {
               </button>
             ))}
           </div>
+          )}
         </>
       ) : (
         <>
@@ -2032,6 +2039,7 @@ export default function Members() {
                 {supportsPhone && (
                   <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
                 )}
+                {cambiaQuote && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <input
                     type="checkbox"
@@ -2040,6 +2048,7 @@ export default function Members() {
                   />
                   <span>Quota annuale pagata</span>
                 </div>
+                )}
                 <div style={{ display: 'flex', gap: '0.5rem' }}>
                   <button type="submit" disabled={submitting}>
                     {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
@@ -2100,9 +2109,10 @@ export default function Members() {
                       )}
                     </div>
                   )}
+                  {vedeQuote && (
                   <div style={{ marginTop: '0.75rem' }}>
                     <p style={{ margin: '0 0 0.35rem', fontWeight: 600, color: 'var(--color-muted)' }}>Quota annuale</p>
-                    {canEditMembers ? (
+                    {cambiaQuote ? (
                       <button
                         type="button"
                         onClick={() => toggleMembershipPayment(member)}
@@ -2140,6 +2150,7 @@ export default function Members() {
                       </div>
                     )}
                   </div>
+                  )}
                 </article>
               ))}
               {!filteredMembers.length && <p>Nessun socio trovato.</p>}
