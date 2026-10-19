@@ -18,6 +18,7 @@ import { friendlyDbError } from '../services/loans.js';
 import { getDpiAlerts } from '../utils/dpi.js';
 import './Magazzino.css';
 import { caricaFotoMateriale, rimuoviFotoMateriale, urlFotoMateriale } from '../services/fotoMateriali.js';
+import { tornaAllaScheda } from '../utils/scorrimento.js';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -339,13 +340,19 @@ export default function Magazzino() {
       if (supportsPhoto && !isRestock && savedEquipment?.id != null) {
         await salvaFotoDopoModulo(savedEquipment);
       }
+      const materialeModificato = editingId;
       setForm(emptyMaterial);
       setEditingId(null);
       setEditingBorrowed(0);
       setSelectedMaterialId('');
       setRestockMode('replace');
       azzeraFoto();
-      loadMaterials();
+      await loadMaterials();
+      // Dopo una modifica si chiude il modulo e si torna sulla scheda del materiale.
+      if (materialeModificato) {
+        setShowForm(false);
+        tornaAllaScheda(`materiale-${materialeModificato}`);
+      }
     } catch (submitError) {
       setError(friendlyDbError(submitError, 'Errore durante il salvataggio.'));
     } finally {
@@ -378,6 +385,11 @@ export default function Magazzino() {
   }
 
   function cancelEdit() {
+    // Annullando una modifica si chiude il modulo e si torna sulla scheda del materiale.
+    if (editingId) {
+      setShowForm(false);
+      tornaAllaScheda(`materiale-${editingId}`);
+    }
     setEditingId(null);
     setEditingBorrowed(0);
     setSelectedMaterialId('');
@@ -728,7 +740,8 @@ export default function Magazzino() {
         </div>
       )}
 
-      {loading ? (
+      {/* Il messaggio solo al primo caricamento: negli aggiornamenti l'elenco resta dov'è. */}
+      {loading && !materials.length ? (
         <p>Caricamento magazzino...</p>
       ) : (
         <div className="card-list">
@@ -746,7 +759,7 @@ export default function Magazzino() {
             );
             const displayId = material.equipment_number ?? index + 1;
             return (
-              <article className="card" key={key}>
+              <article className="card" key={key} id={material.id != null ? `materiale-${material.id}` : undefined}>
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
                   <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-start', minWidth: 0 }}>
                     {supportsPhoto && (
@@ -820,6 +833,9 @@ export default function Magazzino() {
                         if (!canEditInventory) return;
                         startEdit(material);
                         setShowForm(true);
+                        window.requestAnimationFrame(() =>
+                          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+                        );
                       }}
                       disabled={!canEditInventory}
                       style={{ opacity: canEditInventory ? 1 : 0.5, cursor: canEditInventory ? 'pointer' : 'not-allowed' }}
