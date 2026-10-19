@@ -31,7 +31,7 @@ export default function UscitaNuova() {
   return (
     <section className="page-grid">
       <header>
-        <h1>Nuova uscita</h1>
+        <h1>Nuova uscita o evento</h1>
         <p>Registra una nuova attività con responsabile e dettagli logistici.</p>
       </header>
 

@@ -10,9 +10,9 @@ import UscitaForm from '../components/UscitaForm.jsx';
 import { supabase } from '../lib/supabaseClient';
 import { safeLogActivity } from '../services/activityLogs.js';
 import { dedupeMembers } from '../utils/members.js';
-import { TIPI_USCITA, etichettaTipo, usaMateriale } from '../utils/tipiUscita.js';
+import { TIPI_USCITA, conArticolo, etichettaTipo, isUscitaEsterna, nomeAttivita, usaMateriale } from '../utils/tipiUscita.js';
 
-const TIPO_OPTIONS = [{ value: '', label: 'Tutte' }, ...TIPI_USCITA];
+const TIPO_OPTIONS = [{ value: '', label: 'Tutti i tipi' }, ...TIPI_USCITA];
 
 function formatDate(value) {
   if (!value) return '-';
@@ -41,6 +41,8 @@ export default function Uscite() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filters, setFilters] = useState({ query: '', tipo: '' });
+  // «Uscite» = attività in esterno, «Eventi» = tutto il resto (serate in sede, formazione…).
+  const [categoria, setCategoria] = useState('all');
   const [showForm, setShowForm] = useState(false);
   const [formError, setFormError] = useState('');
   const [formSubmitting, setFormSubmitting] = useState(false);
@@ -81,7 +83,7 @@ export default function Uscite() {
       }
     } catch (loadError) {
       console.error('[Uscite] Errore caricamento', loadError);
-      setError('Impossibile caricare le uscite, riprova più tardi.');
+      setError('Impossibile caricare uscite ed eventi, riprova più tardi.');
     } finally {
       setLoading(false);
     }
@@ -104,7 +106,8 @@ export default function Uscite() {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Eliminare questa uscita?')) {
+    const tipo = uscite.find((item) => item.id === id)?.tipo;
+    if (!window.confirm(`Eliminare ${isUscitaEsterna(tipo) ? 'questa uscita' : 'questo evento'}?`)) {
       return;
     }
     try {
@@ -119,13 +122,13 @@ export default function Uscite() {
       );
       await loadUscite();
     } catch (deleteError) {
-      setError(deleteError.message ?? 'Errore durante l\'eliminazione dell\'uscita.');
+      setError(deleteError.message ?? 'Errore durante l\'eliminazione.');
     }
   }
 
   async function handleStatusChange(uscita, nextStatus) {
     if (nextStatus === 'chiusa' && role === 'socio' && activeLoansMap.get(uscita.id)) {
-      setError('Per chiudere l\'uscita devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).');
+      setError(`Per chiudere ${conArticolo(uscita.tipo)} devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).`);
       return;
     }
     setStatusChangingId(uscita.id);
@@ -163,10 +166,10 @@ export default function Uscite() {
           await loadUscite();
           return;
         } catch (fallbackError) {
-          setError(fallbackError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+          setError(fallbackError.message ?? 'Impossibile aggiornare lo stato.');
         }
       } else {
-        setError(statusError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+        setError(statusError.message ?? 'Impossibile aggiornare lo stato.');
       }
     } finally {
       setStatusChangingId(null);
@@ -188,7 +191,7 @@ export default function Uscite() {
         },
         user,
       );
-      setFormSuccess('Uscita registrata correttamente.');
+      setFormSuccess(`${nomeAttivita(created.tipo)} ${isUscitaEsterna(created.tipo) ? 'registrata' : 'registrato'} correttamente.`);
       setShowForm(false);
       await loadUscite();
       setFormSubmitting(false);
@@ -197,7 +200,7 @@ export default function Uscite() {
       const message =
         createError.message && createError.message.includes('responsabile')
           ? 'Aggiungi le colonne responsabile_id e responsabile_nome alla tabella "uscite" (vedi README) per salvare il responsabile.'
-          : createError.message ?? 'Impossibile creare l\'uscita.';
+          : createError.message ?? 'Impossibile salvare.';
       setFormError(message);
     }
   }
@@ -228,19 +231,21 @@ export default function Uscite() {
         uscita.titolo?.toLowerCase().includes(filters.query.toLowerCase()) ||
         uscita.luogo?.toLowerCase().includes(filters.query.toLowerCase());
       const matchesTipo = !filters.tipo || uscita.tipo?.toLowerCase() === filters.tipo.toLowerCase();
+      const esterna = isUscitaEsterna(uscita.tipo);
+      const matchesCategoria = categoria === 'all' || (categoria === 'uscite' ? esterna : !esterna);
       const isClosed = uscita.status === 'chiusa';
       const matchesStatus =
         statusFilter === 'all' || (statusFilter === 'closed' ? isClosed : !isClosed);
-      return matchesQuery && matchesTipo && matchesStatus;
+      return matchesQuery && matchesTipo && matchesCategoria && matchesStatus;
     });
-  }, [uscite, filters, statusFilter]);
+  }, [uscite, filters, categoria, statusFilter]);
 
   return (
     <section className="page-grid">
       <AlertList alerts={[...adminAlerts, ...userAlerts]} navigate={navigate} onDismiss={dismissAlert} />
       <header>
-        <h1>Uscite</h1>
-        <p>Elenco aggiornato di spedizioni, corsi e attività in programma.</p>
+        <h1>Uscite ed eventi</h1>
+        <p>Uscite in esterno (esplorazione, allenamento, corso, sociale) ed eventi (serate in sede, formazione e altri eventi).</p>
       </header>
 
       <div className="card" style={{ display: 'grid', gap: '0.75rem' }}>
@@ -259,6 +264,22 @@ export default function Uscite() {
         </select>
         <div className="pill-group">
           {[
+            { value: 'all', label: 'Tutto' },
+            { value: 'uscite', label: 'Uscite' },
+            { value: 'eventi', label: 'Eventi' },
+          ].map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              onClick={() => setCategoria(item.value)}
+              className={`pill-button ${categoria === item.value ? 'pill-button--active' : ''}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="pill-group">
+          {[
             { value: 'all', label: 'Tutte' },
             { value: 'open', label: 'Prossime' },
             { value: 'closed', label: 'Chiuse' },
@@ -274,7 +295,7 @@ export default function Uscite() {
           ))}
         </div>
         <small style={{ color: 'var(--color-muted)' }}>
-          {filteredUscite.length} uscite su {uscite.length}
+          {filteredUscite.length} su {uscite.length} tra uscite ed eventi
         </small>
       </div>
 
@@ -282,7 +303,7 @@ export default function Uscite() {
 
       {!canEditUscite && (
         <p className="card" style={{ background: '#fff5f5', borderColor: '#ffc9c9', color: '#c92a2a' }}>
-          Non puoi modificare le uscite. Hai accesso in sola lettura.
+          Non puoi modificare uscite ed eventi. Hai accesso in sola lettura.
         </p>
       )}
 
@@ -302,7 +323,7 @@ export default function Uscite() {
       )}
 
       {loading ? (
-        <p>Caricamento uscite...</p>
+        <p>Caricamento...</p>
       ) : (
         <div className="card-list">
           {filteredUscite.map((uscita) => {
@@ -327,10 +348,16 @@ export default function Uscite() {
                   </p>
                 </div>
                 <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  <span
+                    className="chip"
+                    style={isUscitaEsterna(uscita.tipo) ? undefined : { background: '#e6fcf5', color: '#087f5b' }}
+                  >
+                    {nomeAttivita(uscita.tipo)}
+                  </span>
                   {uscita.tipo && <span className="chip">{etichettaTipo(uscita.tipo, uscita.tipo_descrizione)}</span>}
                   {isClosed && (
                     <span className="chip" style={{ background: 'rgba(173,181,189,0.3)', color: '#495057' }}>
-                      Chiusa
+                      {isUscitaEsterna(uscita.tipo) ? 'Chiusa' : 'Chiuso'}
                     </span>
                   )}
                 </div>
@@ -364,7 +391,7 @@ export default function Uscite() {
                     onClick={() => goToPrestito(uscita)}
                     disabled={disableLoanButton}
                     title={
-                      disableLoanButton ? 'Uscita chiusa: non è possibile registrare materiale' : undefined
+                      disableLoanButton ? `${nomeAttivita(uscita.tipo)} ${isUscitaEsterna(uscita.tipo) ? 'chiusa' : 'chiuso'}: non è possibile registrare materiale` : undefined
                     }
                   >
                     Materiale necessario
@@ -376,7 +403,7 @@ export default function Uscite() {
                     style={{ background: '#adb5bd' }}
                     onClick={() => navigate(`/uscite/${uscita.id}`)}
                     disabled={isClosed}
-                    title={isClosed ? 'Non puoi modificare uscite concluse.' : undefined}
+                    title={isClosed ? 'Non puoi modificare uscite o eventi conclusi.' : undefined}
                   >
                     Modifica
                   </button>
@@ -389,7 +416,7 @@ export default function Uscite() {
                     disabled={statusChangingId === uscita.id}
                     title={
                       isClosed && !canReopenUscita
-                        ? 'Solo admin e presidente possono riaprire un\'uscita chiusa.'
+                        ? `Solo admin e presidente possono riaprire ${conArticolo(uscita.tipo)}.`
                         : undefined
                     }
                   >
@@ -409,7 +436,7 @@ export default function Uscite() {
             </article>
             );
           })}
-          {!filteredUscite.length && !loading && <p>Nessuna uscita trovata.</p>}
+          {!filteredUscite.length && !loading && <p>Nessuna uscita o evento trovato.</p>}
         </div>
       )}
 
@@ -423,7 +450,7 @@ export default function Uscite() {
             setFormSuccess('');
           }}
         >
-          {showForm ? 'Chiudi modulo' : 'Nuova uscita'}
+          {showForm ? 'Chiudi modulo' : 'Nuova uscita o evento'}
         </button>
       )}
     </section>

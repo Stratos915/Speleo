@@ -110,7 +110,7 @@ export default function AdesioniUscita({ uscita, userId, puoModificare, onCopiaP
         </button>
       </div>
       {chiusa ? (
-        <p style={{ color: 'var(--color-muted)', margin: '0 0 0.75rem' }}>L&apos;uscita è chiusa: le risposte non si possono più cambiare.</p>
+        <p style={{ color: 'var(--color-muted)', margin: '0 0 0.75rem' }}>Le risposte sono chiuse e non si possono più cambiare.</p>
       ) : (
         <>
           <p style={{ margin: 0, color: 'var(--color-muted)' }}>

@@ -8,7 +8,12 @@ import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
 import { returnLoan } from '../services/loans.js';
 import AdesioniUscita from '../components/AdesioniUscita.jsx';
-import { etichettaTipo, usaMateriale } from '../utils/tipiUscita.js';
+import { conArticolo, etichettaTipo, isUscitaEsterna, nomeAttivita, usaMateriale } from '../utils/tipiUscita.js';
+
+// «Uscita chiusa» / «Evento chiuso».
+function stato(tipo, femminile, maschile) {
+  return isUscitaEsterna(tipo) ? femminile : maschile;
+}
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
@@ -74,7 +79,7 @@ export default function UscitaDettaglio() {
       setFeedbackText(data.feedback ?? '');
       setPhotosText((data.photo_urls ?? []).join('\n'));
     } catch (loadError) {
-      setError(loadError.message ?? 'Uscita non trovata.');
+      setError(loadError.message ?? 'Uscita o evento non trovato.');
     } finally {
       setLoading(false);
     }
@@ -219,7 +224,7 @@ export default function UscitaDettaglio() {
       setUscita(updated);
       setFeedbackText(updated.feedback ?? '');
       setPhotosText((updated.photo_urls ?? []).join('\n'));
-      setSuccess('Uscita aggiornata.');
+      setSuccess(`${nomeAttivita(uscita?.tipo)} ${stato(uscita?.tipo, 'aggiornata', 'aggiornato')}.`);
       setEditMode(false);
     } catch (updateError) {
       setFormError(updateError.message ?? 'Errore durante l\'aggiornamento.');
@@ -252,7 +257,7 @@ export default function UscitaDettaglio() {
 
   async function handleStatusToggle(nextStatus) {
     if (nextStatus === 'chiusa' && isSocio && hasOpenLoans) {
-      setStatusError('Per chiudere l\'uscita devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).');
+      setStatusError(`Per chiudere ${conArticolo(uscita?.tipo)} devi prima restituire tutto il materiale collegato (nessun prestito deve essere in corso).`);
       return;
     }
     setStatusChanging(true);
@@ -264,19 +269,19 @@ export default function UscitaDettaglio() {
       }
       const updated = await updateUscita(id, payload);
       setUscita(updated);
-      setSuccess(nextStatus === 'chiusa' ? 'Uscita chiusa.' : 'Uscita riaperta.');
+      setSuccess(`${nomeAttivita(uscita?.tipo)} ${nextStatus === 'chiusa' ? stato(uscita?.tipo, 'chiusa', 'chiuso') : stato(uscita?.tipo, 'riaperta', 'riaperto')}.`);
     } catch (toggleError) {
       if (supportsClosedAt && /closed_at/i.test(toggleError.message ?? '')) {
         try {
           const updated = await updateUscita(id, { status: nextStatus });
           setUscita(updated);
-          setSuccess(nextStatus === 'chiusa' ? 'Uscita chiusa.' : 'Uscita riaperta.');
+          setSuccess(`${nomeAttivita(uscita?.tipo)} ${nextStatus === 'chiusa' ? stato(uscita?.tipo, 'chiusa', 'chiuso') : stato(uscita?.tipo, 'riaperta', 'riaperto')}.`);
           return;
         } catch (fallbackError) {
-          setStatusError(fallbackError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+          setStatusError(fallbackError.message ?? 'Impossibile aggiornare lo stato.');
         }
       } else {
-        setStatusError(toggleError.message ?? 'Impossibile aggiornare lo stato dell\'uscita.');
+        setStatusError(toggleError.message ?? 'Impossibile aggiornare lo stato.');
       }
     } finally {
       setStatusChanging(false);
@@ -380,13 +385,13 @@ export default function UscitaDettaglio() {
   const canReopenUscita = role === 'admin' || role === 'presidente';
 
   if (loading) {
-    return <p>Caricamento uscita...</p>;
+    return <p>Caricamento...</p>;
   }
 
   if (!uscita) {
     return (
       <section className="page-grid">
-        <p>{error || 'Uscita non trovata.'}</p>
+        <p>{error || 'Uscita o evento non trovato.'}</p>
         <Link to="/uscite">Torna all'elenco</Link>
       </section>
     );
@@ -401,9 +406,9 @@ export default function UscitaDettaglio() {
         <h1>{uscita.titolo}</h1>
         <p>Creato il: {uscita.created_at ? new Date(uscita.created_at).toLocaleString('it-IT') : '-'}</p>
         <p>
-          Stato: <strong>{isClosed ? 'Chiusa' : 'Aperta'}</strong>
+          {nomeAttivita(uscita.tipo)} · Stato: <strong>{isClosed ? stato(uscita.tipo, 'Chiusa', 'Chiuso') : stato(uscita.tipo, 'Aperta', 'Aperto')}</strong>
           {isClosed && uscita.closed_at
-            ? ` · chiusa il ${new Date(uscita.closed_at).toLocaleString('it-IT')}`
+            ? ` · ${stato(uscita.tipo, 'chiusa', 'chiuso')} il ${new Date(uscita.closed_at).toLocaleString('it-IT')}`
             : ''}
         </p>
       </header>
@@ -413,7 +418,7 @@ export default function UscitaDettaglio() {
       {statusError && <p style={{ color: 'var(--color-accent)' }}>{statusError}</p>}
 
       <article className="card">
-        <h2>Dettagli uscita</h2>
+        <h2>Dettagli {isUscitaEsterna(uscita.tipo) ? 'uscita' : 'evento'}</h2>
         <dl style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '0.75rem' }}>
           <dt>Data</dt>
           <dd>{formatDate(uscita.data)}</dd>
@@ -438,7 +443,7 @@ export default function UscitaDettaglio() {
                 {new Date(uscita.rientro_previsto).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' })}
                 {!isClosed && new Date(uscita.rientro_previsto) < new Date() && (
                   <strong style={{ color: '#c92a2a', display: 'block' }}>
-                    Orario superato: se il gruppo è rientrato, chiudi l&apos;uscita.
+                    Orario superato: se il gruppo è rientrato, chiudi {conArticolo(uscita.tipo)}.
                   </strong>
                 )}
               </>
@@ -481,7 +486,7 @@ export default function UscitaDettaglio() {
           <h2>Feedback e foto</h2>
           <textarea
             rows={3}
-            placeholder="Commenti conclusivi sull'uscita..."
+            placeholder={`Commenti conclusivi ${stato(uscita.tipo, "sull'uscita", "sull'evento")}...`}
             value={feedbackText}
             onChange={(event) => setFeedbackText(event.target.value)}
           />
@@ -557,11 +562,11 @@ export default function UscitaDettaglio() {
                 disabled={statusChanging || (isSocio && hasOpenLoans)}
                 title={
                   isSocio && hasOpenLoans
-                    ? 'Chiudi l\'uscita solo dopo aver restituito tutto il materiale collegato.'
+                    ? `Chiudi ${conArticolo(uscita.tipo)} solo dopo aver restituito tutto il materiale collegato.`
                     : undefined
                 }
               >
-                {statusChanging ? 'Aggiornamento...' : 'Chiudi uscita'}
+                {statusChanging ? 'Aggiornamento...' : `Chiudi ${nomeAttivita(uscita.tipo, { minuscolo: true })}`}
               </button>
             )}
           </div>
@@ -604,7 +609,7 @@ export default function UscitaDettaglio() {
                     >
                       <img
                         src={url}
-                        alt="Anteprima foto uscita"
+                        alt="Anteprima foto"
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
                     </div>
@@ -641,7 +646,7 @@ export default function UscitaDettaglio() {
                 setFormError('');
                 setSuccess('');
               }}
-              submitLabel="Aggiorna uscita"
+              submitLabel="Aggiorna"
             />
           ) : (
             <>
@@ -653,9 +658,9 @@ export default function UscitaDettaglio() {
                     setSuccess('');
                   }}
                   disabled={isClosed}
-                  title={isClosed ? 'Non puoi modificare uscite concluse.' : undefined}
+                  title={isClosed ? 'Non puoi modificare uscite o eventi conclusi.' : undefined}
                 >
-                  Modifica uscita
+                  Modifica {nomeAttivita(uscita.tipo, { minuscolo: true })}
                 </button>
                 {conMateriale && (
                 <button
@@ -669,11 +674,11 @@ export default function UscitaDettaglio() {
                     checkingLoans
                       ? 'Verifico lo stato dei prestiti collegati...'
                       : disableLoanButton
-                      ? 'Uscita conclusa: tutti i prestiti risultano chiusi'
+                      ? `${nomeAttivita(uscita.tipo)} ${stato(uscita.tipo, 'conclusa', 'concluso')}: tutti i prestiti risultano chiusi`
                       : undefined
                   }
                 >
-                  Materiale necessario per questa uscita
+                  Materiale necessario
                 </button>
                 )}
                 <button
@@ -683,26 +688,26 @@ export default function UscitaDettaglio() {
                   disabled={statusChanging || (isClosed && !canReopenUscita) || (!isClosed && isSocio && hasOpenLoans)}
                   title={
                     isClosed && !canReopenUscita
-                      ? 'Solo admin e presidente possono riaprire un\'uscita chiusa.'
+                      ? `Solo admin e presidente possono riaprire ${conArticolo(uscita.tipo)}.`
                       : !isClosed && isSocio && hasOpenLoans
-                      ? 'Chiudi l\'uscita solo dopo aver restituito tutto il materiale collegato.'
+                      ? `Chiudi ${conArticolo(uscita.tipo)} solo dopo aver restituito tutto il materiale collegato.`
                       : undefined
                   }
                 >
                   {statusChanging
                     ? 'Aggiornamento...'
                     : isClosed
-                    ? 'Riapri uscita'
-                    : 'Chiudi uscita'}
+                    ? `Riapri ${nomeAttivita(uscita.tipo, { minuscolo: true })}`
+                    : `Chiudi ${nomeAttivita(uscita.tipo, { minuscolo: true })}`}
                 </button>
               </div>
               {conMateriale && disableLoanButton && (
                 <small style={{ color: 'var(--color-muted)' }}>
-                  Hai chiuso tutti i prestiti collegati dopo la data dell&apos;uscita, non puoi crearne di nuovi.
+                  Hai chiuso tutti i prestiti collegati dopo la data {stato(uscita.tipo, "dell'uscita", "dell'evento")}, non puoi crearne di nuovi.
                 </small>
               )}
               {isClosed && (
-                <small style={{ color: 'var(--color-muted)' }}>Riapri l&apos;uscita per modificare i dettagli.</small>
+                <small style={{ color: 'var(--color-muted)' }}>Riapri {conArticolo(uscita.tipo)} per modificare i dettagli.</small>
               )}
             </>
           )}
@@ -772,7 +777,7 @@ export default function UscitaDettaglio() {
                 ))}
               </ul>
             ) : (
-              <p>Nessun prestito collegato a questa uscita.</p>
+              <p>Nessun prestito collegato.</p>
             )}
           </article>
           )}
