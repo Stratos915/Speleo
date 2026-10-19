@@ -393,6 +393,13 @@ form {
   text-overflow: ellipsis;
 }
 
+/* eventi (serate in sede, formazione…): verde; le uscite restano arancioni */
+.cal-event--evento {
+  background: #e6fcf5;
+  color: #087f5b;
+  border-left-color: #12b886;
+}
+
 .cal-event--past {
   background: #eef1f1;
   color: var(--color-muted);
@@ -618,6 +625,10 @@ form {
     border: none;
     border-radius: 999px;
     background: var(--cal-event);
+  }
+
+  .cal-event--evento {
+    background: #12b886;
   }
 
   .cal-event--past {
