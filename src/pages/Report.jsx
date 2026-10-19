@@ -12,7 +12,7 @@ import SceltaRuoli from '../components/SceltaRuoli.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
 import { loadScuolaData } from '../services/scuola.js';
 import { getAdesioni } from '../services/adesioni.js';
-import { etichettaTipo } from '../utils/tipiUscita.js';
+import { contaAttivita, etichettaTipo, nomeAttivita, testoConteggio } from '../utils/tipiUscita.js';
 import { buildUscitaSingola, scaricaUscitaSingola } from '../utils/uscitaExport.js';
 import {
   buildCsv,
@@ -32,6 +32,7 @@ const csvColumns = {
     { key: 'titolo', label: 'Titolo' },
     { key: 'luogo', label: 'Luogo' },
     { key: 'data', label: 'Data' },
+    { key: 'categoria', label: 'Uscita/Evento' },
     { key: 'tipo', label: 'Tipo' },
     { key: 'responsabile', label: 'Responsabile' },
     { key: 'participants', label: 'Partecipanti soci' },
@@ -904,10 +905,10 @@ export default function Report() {
     if (format === 'pdf' && key === 'uscita') {
       const anno = usciteAnno === 'all' ? '' : ` ${usciteAnno}`;
       downloadPdfTable(
-        `Uscite${anno} (${rows.length})`,
+        `Uscite ed eventi${anno} (${testoConteggio(contaAttivita(usciteDellAnno))})`,
         csvColumns.uscita,
         rows,
-        `uscite${anno ? `-${usciteAnno}` : ''}-${new Date().toISOString().slice(0, 10)}.pdf`,
+        `uscite-eventi${anno ? `-${usciteAnno}` : ''}-${new Date().toISOString().slice(0, 10)}.pdf`,
       );
     } else if (format === 'pdf') {
       downloadPdf(rows, key);
@@ -969,6 +970,7 @@ export default function Report() {
         luogo: item.luogo,
         // La data resta in formato AAAA-MM-GG: la formatta l'esportazione.
         data: item.data ?? '',
+        categoria: nomeAttivita(item.tipo),
         tipo: etichettaTipo(item.tipo, item.tipo_descrizione),
         responsabile: responsabileLabel,
         participants: participantNames.join(', '),
@@ -982,7 +984,7 @@ export default function Report() {
     setError('');
     const uscita = uscite.find((item) => String(item.id) === uscitaSingolaId);
     if (!uscita) {
-      setError("Scegli prima l'uscita da esportare.");
+      setError("Scegli prima l'uscita o l'evento da esportare.");
       return;
     }
     setUscitaSingolaBusy(true);
@@ -995,7 +997,7 @@ export default function Report() {
       };
       await scaricaUscitaSingola(buildUscitaSingola({ uscita, nomeSocio, adesioni }), format);
     } catch (exportError) {
-      setError(exportError.message ?? "Impossibile esportare l'uscita.");
+      setError(exportError.message ?? 'Esportazione non riuscita.');
     } finally {
       setUscitaSingolaBusy(false);
     }
@@ -1711,7 +1713,7 @@ export default function Report() {
           <div className="card-list" style={{ marginTop: '0.75rem' }}>
             <article className="card" style={{ padding: 0 }}>
               <details open>
-                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '0.9rem 1rem' }}>Uscite</summary>
+                <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '0.9rem 1rem' }}>Uscite ed eventi</summary>
                 <div style={{ padding: '0 1rem 1rem', display: 'grid', gap: '0.75rem' }}>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', maxWidth: '260px' }}>
                     Anno
@@ -1731,27 +1733,27 @@ export default function Report() {
                     </select>
                   </label>
                   <ReportCard
-                    title={usciteAnno === 'all' ? 'Tutte le uscite' : `Uscite del ${usciteAnno}`}
-                    description={`Elenco complessivo: ${usciteDellAnno.length} ${usciteDellAnno.length === 1 ? 'uscita' : 'uscite'} con responsabile e partecipanti.`}
+                    title={usciteAnno === 'all' ? 'Tutte le uscite e gli eventi' : `Uscite ed eventi del ${usciteAnno}`}
+                    description={`Elenco complessivo: ${testoConteggio(contaAttivita(usciteDellAnno))}, con responsabile e partecipanti. La colonna «Uscita/Evento» li distingue.`}
                     onCsv={() => handleExport('uscita')}
                     onPdf={() => handleExport('uscita', 'pdf')}
                     onXlsx={() => handleExport('uscita', 'xlsx')}
                     disabled={loading}
                   />
                   <article className="card">
-                    <h3 style={{ margin: '0 0 0.25rem' }}>Uscita singola</h3>
+                    <h3 style={{ margin: '0 0 0.25rem' }}>Uscita o evento singolo</h3>
                     <p style={{ color: 'var(--color-muted)' }}>
-                      Dati dell&apos;uscita e chi partecipa: elenco ufficiale, esterni e risposte Partecipo · Forse · No.
+                      Dati dell&apos;uscita o dell&apos;evento e chi partecipa: elenco ufficiale, esterni e risposte Partecipo · Forse · No.
                     </p>
                     <select
                       value={uscitaSingolaId}
                       onChange={(event) => setUscitaSingolaId(event.target.value)}
                       style={{ maxWidth: '100%' }}
                     >
-                      <option value="">Scegli l&apos;uscita...</option>
+                      <option value="">Scegli l&apos;uscita o l&apos;evento...</option>
                       {usciteDellAnno.map((item) => (
                         <option key={item.id} value={String(item.id)}>
-                          {item.data ? formatDate(item.data) : 'senza data'} · {item.titolo ?? 'Uscita'}
+                          {item.data ? formatDate(item.data) : 'senza data'} · {nomeAttivita(item.tipo)} · {item.titolo ?? ''}
                         </option>
                       ))}
                     </select>

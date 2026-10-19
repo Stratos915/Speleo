@@ -7,6 +7,8 @@
 //   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna),
 //   uscite_promemoria (a tutti i soci, 7 e 3 giorni prima di un'uscita),
 //   adesioni_responsabile (al responsabile: chi si aggiunge o si ritira).
+// * I testi dicono «uscita» per le attività in esterno ed «evento» per le altre
+//   (serata in sede, formazione, altro evento, altro), come nell'app.
 // * Con "personali": [{ email, testo }] (adesioni, migrazione 15) ogni socio riceve un
 //   messaggio suo, con in fondo il proprio testo (i link per rispondere), al posto
 //   della copia nascosta.
@@ -118,6 +120,36 @@ function formatTipo(tipo: unknown, descrizione?: unknown) {
   return tipo === "altro_evento" && testo ? `${base}: ${testo}` : base;
 }
 
+// «Uscite» sono solo le attività in esterno; le altre sono «eventi» (come nell'app).
+// Un'attività senza tipo (vecchi dati) resta un'uscita.
+const TIPI_ESTERNI = new Set(["esplorazione", "allenamento", "corso", "sociale"]);
+
+function isEvento(tipo: unknown) {
+  const codice = String(tipo ?? "").toLowerCase();
+  return Boolean(codice) && !TIPI_ESTERNI.has(codice);
+}
+
+/** «uscita» / «evento». */
+function nome(tipo: unknown) {
+  return isEvento(tipo) ? "evento" : "uscita";
+}
+
+/** Prima lettera maiuscola. */
+function maiuscola(testo: string) {
+  return testo.charAt(0).toUpperCase() + testo.slice(1);
+}
+
+/** Desinenza: «annullata»/«annullato». */
+function genere(tipo: unknown, femminile: string, maschile: string) {
+  return isEvento(tipo) ? maschile : femminile;
+}
+
+/** Nome al plurale per un elenco: «uscite», «eventi» o «attività» se misti. */
+function plurale(elenco: any[], uscite = "uscite", eventi = "eventi", misti = "attività") {
+  const n = elenco.filter((item) => isEvento(item?.tipo)).length;
+  return n === 0 ? uscite : n === elenco.length ? eventi : misti;
+}
+
 function collectEmails(values: unknown[]): string[] {
   const out = new Set<string>();
   for (const value of values.flat(2)) {
@@ -158,19 +190,19 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const uscite: any[] = Array.isArray(payload.uscite) ? payload.uscite : [];
     if (!uscite.length) return null;
     const righe = uscite.map((uscita) =>
-      `- "${uscita.titolo ?? "uscita"}" a ${uscita.luogo ?? "luogo non indicato"}: rientro previsto per ${formatDateIt(uscita.rientro_previsto)}, responsabile ${uscita.responsabile_nome ?? "non indicato"}`
+      `- "${uscita.titolo ?? nome(uscita.tipo)}" a ${uscita.luogo ?? "luogo non indicato"}: rientro previsto per ${formatDateIt(uscita.rientro_previsto)}, responsabile ${uscita.responsabile_nome ?? "non indicato"}`
     );
     return {
-      subject: "GSU · Rientro uscita oltre l'orario previsto",
+      subject: `GSU · Rientro ${uscite.length === 1 ? nome(uscite[0].tipo) : "attività"} oltre l'orario previsto`,
       to: collectEmails([presidente, admin, recipients.responsabili]),
       body: [
-        "Queste uscite risultano ancora aperte oltre l'orario di rientro previsto:",
+        "Queste attività risultano ancora aperte oltre l'orario di rientro previsto:",
         "",
         ...righe,
         "",
         `Tolleranza applicata: ${payload.tolerance_minutes ?? 60} minuti.`,
         "",
-        "Se il gruppo e' rientrato, chiudete l'uscita nell'app per fermare i promemoria.",
+        "Se il gruppo e' rientrato, chiudetela nell'app per fermare i promemoria.",
         "Questo messaggio e' un promemoria automatico e non sostituisce le procedure di",
         "sicurezza del gruppo: in caso di ritardo reale o di emergenza chiamate il 112.",
       ].join("\n"),
@@ -232,7 +264,7 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const blocchi = uscite.map((uscita) => {
       const ora = formatOra(uscita.ora);
       return [
-        `• ${uscita.titolo ?? "Uscita"}`,
+        `• ${uscita.titolo ?? maiuscola(nome(uscita.tipo))}`,
         `  Quando: ${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}`,
         `  Dove: ${uscita.luogo || "da definire"}`,
         uscita.tipo ? `  Tipo: ${formatTipo(uscita.tipo, uscita.tipo_descrizione)}` : null,
@@ -243,14 +275,14 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const primo = uscite[0];
     return {
       subject: uscite.length === 1
-        ? `GSU · Nuova uscita: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`
-        : `GSU · ${uscite.length} nuove uscite in calendario`,
+        ? `GSU · ${genere(primo.tipo, "Nuova uscita", "Nuovo evento")}: ${primo.titolo ?? nome(primo.tipo)} (${formatDayIt(primo.data)})`
+        : `GSU · ${uscite.length} ${plurale(uscite, "nuove uscite", "nuovi eventi", "nuove attività")} in calendario`,
       to: [],
       bcc: collectEmails([recipients.soci]),
       body: [
         uscite.length === 1
-          ? "È stata aggiunta una nuova uscita al calendario del gruppo:"
-          : "Sono state aggiunte nuove uscite al calendario del gruppo:",
+          ? genere(primo.tipo, "È stata aggiunta una nuova uscita al calendario del gruppo:", "È stato aggiunto un nuovo evento al calendario del gruppo:")
+          : `Ci sono ${plurale(uscite, "nuove uscite", "nuovi eventi", "nuove attività")} nel calendario del gruppo:`,
         "",
         blocchi.join("\n\n"),
         "",
@@ -271,13 +303,13 @@ function buildMessage(payload: Record<string, any>): Message | null {
       const ora = formatOra(item.ora);
       if (item.esito === "annullata") {
         return [
-          `• ANNULLATA: ${item.titolo ?? "Uscita"}`,
-          `  Era prevista ${formatWeekdayIt(item.data)}${ora ? ` alle ${ora}` : ""}${item.luogo ? ` a ${item.luogo}` : ""}.`,
+          `• ${genere(item.tipo, "ANNULLATA", "ANNULLATO")}: ${item.titolo ?? maiuscola(nome(item.tipo))}`,
+          `  Era ${genere(item.tipo, "prevista", "previsto")} ${formatWeekdayIt(item.data)}${ora ? ` alle ${ora}` : ""}${item.luogo ? ` a ${item.luogo}` : ""}.`,
         ].join("\n");
       }
       const cambi: any[] = Array.isArray(item.cambi) ? item.cambi : [];
       return [
-        `• MODIFICATA: ${item.titolo ?? "Uscita"}`,
+        `• ${genere(item.tipo, "MODIFICATA", "MODIFICATO")}: ${item.titolo ?? maiuscola(nome(item.tipo))}`,
         ...cambi.map((cambio) => `  ${cambio.etichetta}: ${cambio.prima} → ${cambio.dopo}`),
         `  Nuovo programma: ${formatWeekdayIt(item.data)}${ora ? ` alle ${ora}` : ""}, ${item.luogo || "luogo da definire"}`,
         `  Dettagli: ${appUrl}/uscite/${item.id}`,
@@ -288,14 +320,14 @@ function buildMessage(payload: Record<string, any>): Message | null {
     let subject: string;
     if (items.length === 1) {
       subject = primo.esito === "annullata"
-        ? `GSU · Uscita annullata: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`
-        : `GSU · Uscita modificata: ${primo.titolo ?? "uscita"} (${formatDayIt(primo.data)})`;
+        ? `GSU · ${genere(primo.tipo, "Uscita annullata", "Evento annullato")}: ${primo.titolo ?? nome(primo.tipo)} (${formatDayIt(primo.data)})`
+        : `GSU · ${genere(primo.tipo, "Uscita modificata", "Evento modificato")}: ${primo.titolo ?? nome(primo.tipo)} (${formatDayIt(primo.data)})`;
     } else {
       subject = annullate === items.length
-        ? `GSU · ${items.length} uscite annullate`
+        ? `GSU · ${items.length} ${plurale(items, "uscite annullate", "eventi annullati", "attività annullate")}`
         : annullate
         ? `GSU · Cambi in calendario: ${items.length - annullate} modificate, ${annullate} annullate`
-        : `GSU · ${items.length} uscite modificate`;
+        : `GSU · ${items.length} ${plurale(items, "uscite modificate", "eventi modificati", "attività modificate")}`;
     }
     return {
       subject,
@@ -322,7 +354,7 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const blocchi = uscite.map((uscita) => {
       const ora = formatOra(uscita.ora);
       return [
-        `• ${uscita.titolo ?? "Uscita"} · tra ${uscita.giorni} giorni`,
+        `• ${uscita.titolo ?? maiuscola(nome(uscita.tipo))} · tra ${uscita.giorni} giorni`,
         `  Quando: ${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}`,
         `  Dove: ${uscita.luogo || "da definire"}`,
         uscita.responsabile_nome ? `  Responsabile: ${uscita.responsabile_nome}` : null,
@@ -332,16 +364,18 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const primo = uscite[0];
     return {
       subject: uscite.length === 1
-        ? `GSU · Promemoria: ${primo.titolo ?? "uscita"} tra ${primo.giorni} giorni (${formatDayIt(primo.data)})`
-        : `GSU · Promemoria: ${uscite.length} uscite in arrivo`,
+        ? `GSU · Promemoria: ${primo.titolo ?? nome(primo.tipo)} tra ${primo.giorni} giorni (${formatDayIt(primo.data)})`
+        : `GSU · Promemoria: ${uscite.length} ${plurale(uscite)} in arrivo`,
       to: [],
       bcc: collectEmails([recipients.soci]),
       body: [
-        uscite.length === 1 ? "Ti ricordiamo l'uscita in programma:" : "Ti ricordiamo le uscite in programma:",
+        uscite.length === 1
+          ? `Ti ricordiamo ${genere(primo.tipo, "l'uscita", "l'evento")} in programma:`
+          : `Ti ricordiamo ${plurale(uscite, "le uscite", "gli eventi", "le attività")} in programma:`,
         "",
         blocchi.join("\n\n"),
         "",
-        "Per i dettagli, i partecipanti e il materiale apri la scheda dell'uscita.",
+        "Per i dettagli, i partecipanti e il materiale apri la scheda nell'app.",
         "",
         `Calendario completo: ${appUrl}/calendario`,
         "",
@@ -362,11 +396,11 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const ora = formatOra(uscita.ora);
     return {
       subject: entrati.length
-        ? `GSU · ${entrati.length === 1 ? `${entrati[0]} partecipa` : `${entrati.length} nuove adesioni`} a ${uscita.titolo ?? "uscita"}`
-        : `GSU · Adesioni a ${uscita.titolo ?? "uscita"}: ${usciti.length === 1 ? "un ritiro" : `${usciti.length} ritiri`}`,
+        ? `GSU · ${entrati.length === 1 ? `${entrati[0]} partecipa` : `${entrati.length} nuove adesioni`} a ${uscita.titolo ?? nome(uscita.tipo)}`
+        : `GSU · Adesioni a ${uscita.titolo ?? nome(uscita.tipo)}: ${usciti.length === 1 ? "un ritiro" : `${usciti.length} ritiri`}`,
       to: destinatario,
       body: [
-        `Novità sulle adesioni a «${uscita.titolo ?? "uscita"}» (${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}):`,
+        `Novità sulle adesioni a «${uscita.titolo ?? nome(uscita.tipo)}» (${formatWeekdayIt(uscita.data)}${ora ? ` alle ${ora}` : ""}):`,
         "",
         ...entrati.map((nome) => `+ ${nome} partecipa`),
         ...usciti.map((nome) => `- ${nome} non partecipa più`),
@@ -375,7 +409,7 @@ function buildMessage(payload: Record<string, any>): Message | null {
         "",
         `Elenco completo e «Copia nei partecipanti»: ${appUrl}/uscite/${uscita.id}`,
         "",
-        "Ricevi questo avviso perché sei il responsabile dell'uscita.",
+        `Ricevi questo avviso perché sei il responsabile ${genere(uscita.tipo, "dell'uscita", "dell'evento")}.`,
       ].join("\n"),
     };
   }

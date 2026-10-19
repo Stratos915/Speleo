@@ -1,7 +1,7 @@
 // Esportazione di una singola uscita: dati dell'uscita in testa e l'elenco delle persone
 // (partecipanti ufficiali, esterni e risposte «Partecipo · Forse · No»).
 // Usata dal pulsante PDF nella scheda dell'uscita e dalla sezione Report.
-import { etichettaTipo } from './tipiUscita.js';
+import { etichettaTipo, nomeAttivita } from './tipiUscita.js';
 import { etichettaRuolo } from './permissions.js';
 import { buildCsv, buildXlsxBlob, downloadPdfTable, triggerDownload } from './exporters.js';
 
@@ -53,7 +53,8 @@ function nomeFile(uscita, estensione) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 40);
-  return `uscita-${data}-${titolo || 'uscita'}.${estensione}`;
+  const nome = nomeAttivita(uscita?.tipo, { minuscolo: true });
+  return `${nome}-${data}-${titolo || nome}.${estensione}`;
 }
 
 /**
@@ -125,7 +126,7 @@ export function buildUscitaSingola({ uscita, nomeSocio = () => null, adesioni = 
   ].filter(Boolean);
 
   return {
-    title: `Uscita: ${uscita?.titolo ?? 'senza titolo'}`,
+    title: `${nomeAttivita(uscita?.tipo)}: ${uscita?.titolo ?? 'senza titolo'}`,
     intro,
     columns: COLONNE_USCITA_SINGOLA,
     rows,
