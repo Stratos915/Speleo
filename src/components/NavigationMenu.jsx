@@ -4,7 +4,7 @@ import usePermissions from '../hooks/usePermissions.js';
 const NAV_ITEMS = [
   { to: '/dashboard', label: 'Home', icon: '🏠', page: 'dashboard' },
   { to: '/magazzino', label: 'Inventario', icon: '📦', page: 'magazzino' },
-  { to: '/uscite', label: 'Uscite', icon: '🧭', page: 'uscite' },
+  { to: '/uscite', label: 'Uscite ed eventi', icon: '🧭', page: 'uscite' },
   { to: '/prestito-avanzato', label: 'Prestiti', icon: '🔁', page: 'prestiti' },
   { to: '/corsi', label: 'Scuola', icon: '🎓', page: 'scuola' },
   { to: '/biblioteca', label: 'Biblioteca', icon: '📚', page: 'biblioteca' },

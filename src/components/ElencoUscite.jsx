@@ -1,6 +1,6 @@
 import { Link } from 'react-router-dom';
 import { dayKey } from '../utils/calendario.js';
-import { etichettaTipo } from '../utils/tipiUscita.js';
+import { etichettaTipo, nomeAttivita } from '../utils/tipiUscita.js';
 import useMieAdesioni from '../hooks/useMieAdesioni.js';
 
 const MIA_RISPOSTA = {
@@ -9,7 +9,7 @@ const MIA_RISPOSTA = {
   no: { testo: 'Non vengo', classe: 'cal-mia--no' },
 };
 
-// Righe di uscita riusate dalla Dashboard e dalla pagina Calendario.
+// Righe di uscite ed eventi riusate dalla Dashboard e dalla pagina Calendario.
 // Ogni riga porta alla scheda dell'uscita nella sezione Uscite.
 
 function formatOra(value) {
@@ -20,6 +20,13 @@ function formatOra(value) {
 function formatGiornoBreve(key) {
   const [y, m, d] = key.split('-').map(Number);
   return new Date(y, m - 1, d).toLocaleDateString('it-IT', { day: 'numeric', month: 'short' });
+}
+
+/** «Uscita: Esplorazione», «Evento: Serata in sede», «Altro evento: Cena». */
+function descriviTipo(uscita) {
+  const etichetta = etichettaTipo(uscita.tipo, uscita.tipo_descrizione);
+  if (!etichetta) return nomeAttivita(uscita.tipo);
+  return /evento/i.test(etichetta) ? etichetta : `${nomeAttivita(uscita.tipo)}: ${etichetta}`;
 }
 
 export function UscitaRiga({ uscita, showDate = false }) {
@@ -33,15 +40,19 @@ export function UscitaRiga({ uscita, showDate = false }) {
           {showDate && key ? formatGiornoBreve(key) : formatOra(uscita.ora) || '—'}
         </span>
         <span className="cal-item-body">
-          <strong>{uscita.titolo || 'Uscita'}</strong>
+          <strong>{uscita.titolo || nomeAttivita(uscita.tipo)}</strong>
           <span className="cal-item-meta">
-            {[showDate ? formatOra(uscita.ora) : null, uscita.luogo, etichettaTipo(uscita.tipo, uscita.tipo_descrizione)]
+            {[
+              showDate ? formatOra(uscita.ora) : null,
+              uscita.luogo,
+              descriviTipo(uscita),
+            ]
               .filter(Boolean)
               .join(' · ')}
           </span>
           {mia && <span className={`cal-mia ${mia.classe}`}>{mia.testo}</span>}
         </span>
-        <span className={`cal-badge${closed ? ' cal-badge--closed' : ''}`}>{closed ? 'Chiusa' : 'Apri'}</span>
+        <span className={`cal-badge${closed ? ' cal-badge--closed' : ''}`}>{closed ? (nomeAttivita(uscita.tipo) === 'Evento' ? 'Chiuso' : 'Chiusa') : 'Apri'}</span>
       </Link>
     </li>
   );
