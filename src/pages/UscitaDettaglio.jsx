@@ -18,6 +18,13 @@ function stato(tipo, femminile, maschile) {
 
 const PHOTO_BUCKET = import.meta.env.VITE_SUPABASE_PHOTOS_BUCKET || 'uscite-foto';
 
+/** Percorso nell'archivio delle foto caricate dall'app; null per i link esterni. */
+function percorsoFoto(url) {
+  const segno = `/storage/v1/object/public/${PHOTO_BUCKET}/`;
+  const posizione = String(url ?? '').indexOf(segno);
+  return posizione === -1 ? null : decodeURIComponent(url.slice(posizione + segno.length).split('?')[0]);
+}
+
 function formatDate(value) {
   if (!value) return '-';
   const source = value.includes('T') ? value : `${value}T00:00:00`;
@@ -52,7 +59,9 @@ export default function UscitaDettaglio() {
   const [prestitoParams, setPrestitoParams] = useState('');
   const [membersMap, setMembersMap] = useState(new Map());
   const [feedbackText, setFeedbackText] = useState('');
-  const [photosText, setPhotosText] = useState('');
+  // Link a un album esterno (Google Foto, Drive…), facoltativo.
+  const [linkAlbum, setLinkAlbum] = useState('');
+  const [fotoInEliminazione, setFotoInEliminazione] = useState(null);
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState('');
   const [feedbackError, setFeedbackError] = useState('');
@@ -80,7 +89,6 @@ export default function UscitaDettaglio() {
       const data = await getUscitaById(id);
       setUscita(data);
       setFeedbackText(data.feedback ?? '');
-      setPhotosText((data.photo_urls ?? []).join('\n'));
     } catch (loadError) {
       setError(loadError.message ?? 'Uscita o evento non trovato.');
     } finally {
@@ -226,7 +234,6 @@ export default function UscitaDettaglio() {
       const updated = await updateUscita(id, payload);
       setUscita(updated);
       setFeedbackText(updated.feedback ?? '');
-      setPhotosText((updated.photo_urls ?? []).join('\n'));
       setSuccess(`${nomeAttivita(uscita?.tipo)} ${stato(uscita?.tipo, 'aggiornata', 'aggiornato')}.`);
       setEditMode(false);
     } catch (updateError) {
@@ -241,14 +248,8 @@ export default function UscitaDettaglio() {
     setFeedbackError('');
     setFeedbackStatus('');
     try {
-      const photos = photosText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean);
-      const updated = await updateUscita(id, {
-        feedback: feedbackText.trim() || null,
-        photo_urls: photos.length ? photos : null,
-      });
+      // Solo il commento: l'elenco delle foto si cambia con «Carica», «Elimina» e il link all'album.
+      const updated = await updateUscita(id, { feedback: feedbackText.trim() || null });
       setUscita(updated);
       setFeedbackStatus('Feedback aggiornato.');
     } catch (saveError) {
@@ -328,7 +329,6 @@ export default function UscitaDettaglio() {
             const updated = await updateUscita(id, { photo_urls: elenco });
             elenco = updated.photo_urls ?? elenco;
             setUscita(updated);
-            setPhotosText(elenco.join('\n'));
             caricate += 1;
           }
         } catch (fileError) {
@@ -348,6 +348,49 @@ export default function UscitaDettaglio() {
       setUploadingPhotos(false);
       setUploadProgress(null);
       if (input && 'value' in input) input.value = '';
+    }
+  }
+
+  async function handlePhotoDelete(url) {
+    if (!window.confirm('Togliere questa foto dall\'uscita?')) return;
+    setUploadError('');
+    setFeedbackStatus('');
+    setFotoInEliminazione(url);
+    try {
+      const elenco = (uscita.photo_urls ?? []).filter((item) => item !== url);
+      const updated = await updateUscita(id, { photo_urls: elenco.length ? elenco : null });
+      setUscita(updated);
+      // Se la foto è nell'archivio dell'app prova a cancellare anche il file
+      // (ci riescono admin e presidente; per gli altri resta solo scollegata).
+      const percorso = percorsoFoto(url);
+      if (percorso) {
+        const { error: removeError } = await supabase.storage.from(PHOTO_BUCKET).remove([percorso]);
+        if (removeError) console.warn('[Uscita] file della foto non cancellato:', removeError.message);
+      }
+      setFeedbackStatus('Foto tolta.');
+    } catch (deleteError) {
+      setUploadError(deleteError.message ?? 'Impossibile togliere la foto.');
+    } finally {
+      setFotoInEliminazione(null);
+    }
+  }
+
+  async function handleAlbumAdd() {
+    const link = linkAlbum.trim();
+    if (!/^https?:\/\//i.test(link)) {
+      setUploadError('Il link deve iniziare con http:// o https://.');
+      return;
+    }
+    setUploadError('');
+    setFeedbackStatus('');
+    try {
+      const elenco = [...new Set([...(uscita.photo_urls ?? []), link])];
+      const updated = await updateUscita(id, { photo_urls: elenco });
+      setUscita(updated);
+      setLinkAlbum('');
+      setFeedbackStatus('Link aggiunto.');
+    } catch (addError) {
+      setUploadError(addError.message ?? 'Impossibile aggiungere il link.');
     }
   }
 
@@ -513,16 +556,6 @@ export default function UscitaDettaglio() {
             value={feedbackText}
             onChange={(event) => setFeedbackText(event.target.value)}
           />
-          <label htmlFor="photoUrls" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
-            Link foto (uno per riga)
-          </label>
-          <textarea
-            id="photoUrls"
-            rows={3}
-            placeholder="https://..."
-            value={photosText}
-            onChange={(event) => setPhotosText(event.target.value)}
-          />
           {PHOTO_BUCKET ? (
             <>
               <label htmlFor="photoUpload" style={{ marginTop: '0.5rem', fontWeight: 600 }}>
@@ -563,6 +596,21 @@ export default function UscitaDettaglio() {
               Configura la variabile VITE_SUPABASE_PHOTOS_BUCKET per attivare l&apos;upload diretto delle foto.
             </p>
           )}
+          <details style={{ marginTop: '0.25rem' }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--color-muted)' }}>Aggiungi un link a un album (Google Foto, Drive…)</summary>
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              <input
+                type="url"
+                placeholder="https://..."
+                value={linkAlbum}
+                onChange={(event) => setLinkAlbum(event.target.value)}
+                style={{ flex: '1 1 240px' }}
+              />
+              <button type="button" onClick={handleAlbumAdd} disabled={!linkAlbum.trim() || uploadingPhotos}>
+                Aggiungi link
+              </button>
+            </div>
+          </details>
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
             <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving || uploadingPhotos}>
               {feedbackSaving ? 'Salvataggio...' : 'Salva feedback'}
@@ -570,10 +618,7 @@ export default function UscitaDettaglio() {
             <button
               type="button"
               style={{ background: '#adb5bd' }}
-              onClick={() => {
-                setFeedbackText(uscita.feedback ?? '');
-                setPhotosText((uscita.photo_urls ?? []).join('\n'));
-              }}
+              onClick={() => setFeedbackText(uscita.feedback ?? '')}
             >
               Ripristina
             </button>
@@ -633,24 +678,43 @@ export default function UscitaDettaglio() {
                         overflow: 'hidden',
                         marginBottom: '0.4rem',
                         background: '#fff',
+                        display: 'grid',
+                        placeItems: 'center',
                       }}
                     >
-                      <img
-                        src={url}
-                        alt="Anteprima foto"
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
+                      {percorsoFoto(url) ? (
+                        <img
+                          src={url}
+                          alt="Anteprima foto"
+                          loading="lazy"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <span style={{ color: 'var(--color-muted)', padding: '0.5rem', textAlign: 'center' }}>
+                          🔗 Album o foto esterna
+                        </span>
+                      )}
                     </div>
                     <div style={{ display: 'flex', gap: '0.25rem', flexDirection: 'column' }}>
                       <a href={url} target="_blank" rel="noopener noreferrer">
-                        Apri originale
+                        {percorsoFoto(url) ? 'Apri originale' : 'Apri link'}
                       </a>
+                      {percorsoFoto(url) && (
+                        <button
+                          type="button"
+                          style={{ background: '#2b8a3e', color: '#fff' }}
+                          onClick={() => handlePhotoDownload(url)}
+                        >
+                          Scarica
+                        </button>
+                      )}
                       <button
                         type="button"
-                        style={{ background: '#2b8a3e', color: '#fff' }}
-                        onClick={() => handlePhotoDownload(url)}
+                        style={{ background: '#e03131', color: '#fff' }}
+                        onClick={() => handlePhotoDelete(url)}
+                        disabled={fotoInEliminazione === url || uploadingPhotos}
                       >
-                        Scarica
+                        {fotoInEliminazione === url ? 'Elimino…' : 'Elimina'}
                       </button>
                     </div>
                   </li>
