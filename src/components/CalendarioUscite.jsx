@@ -52,11 +52,25 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
     navigate(`/uscite/new?data=${key}`);
   }
 
+  function apriScheda(event, uscita) {
+    // Tocco sul nome dell'uscita nel riquadro del giorno: apre la sua scheda.
+    event.stopPropagation();
+    navigate(`/uscite/${uscita.id}`);
+  }
+
   function selectDay(cell) {
-    // Secondo tocco sul giorno già selezionato: apre «Nuova uscita» con la data compilata.
-    if (cell.key === selectedKey && canCreate) {
-      nuovaUscita(cell.key);
-      return;
+    // Secondo tocco sul giorno già selezionato: con una sola uscita apre la sua scheda;
+    // con più uscite restano elencate sotto; senza uscite apre «Nuova uscita» con la data.
+    if (cell.key === selectedKey) {
+      const dayUscite = byDay.get(cell.key) ?? [];
+      if (dayUscite.length === 1) {
+        navigate(`/uscite/${dayUscite[0].id}`);
+        return;
+      }
+      if (!dayUscite.length && canCreate) {
+        nuovaUscita(cell.key);
+        return;
+      }
     }
     setSelectedKey(cell.key);
     if (!cell.inMonth) {
@@ -107,11 +121,15 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
               onClick={() => selectDay(cell)}
               aria-pressed={cell.key === selectedKey}
               aria-label={`${formatGiorno(cell.key)}${dayUscite.length ? `, ${dayUscite.length} uscite` : ''}${
-                canCreate && cell.key === selectedKey ? ', tocca di nuovo per creare un\'uscita' : ''
+                cell.key === selectedKey && dayUscite.length === 1
+                  ? ', tocca di nuovo per aprire la scheda'
+                  : canCreate && cell.key === selectedKey && !dayUscite.length
+                    ? ', tocca di nuovo per creare un\'uscita'
+                    : ''
               }`}
             >
               <span className="cal-day-num">{cell.date.getDate()}</span>
-              {canCreate && cell.key === selectedKey && (
+              {canCreate && cell.key === selectedKey && !dayUscite.length && (
                 <span className="cal-add" aria-hidden="true">
                   + Nuova
                 </span>
@@ -120,6 +138,8 @@ export default function CalendarioUscite({ uscite = [], loading = false }) {
                 <span
                   key={uscita.id}
                   className={`cal-event${uscita.status === 'chiusa' || cell.key < todayKey ? ' cal-event--past' : ''}`}
+                  onClick={(event) => apriScheda(event, uscita)}
+                  title={`Apri la scheda: ${uscita.titolo || 'Uscita'}`}
                 >
                   <span className="cal-event-label">{uscita.titolo || 'Uscita'}</span>
                 </span>
