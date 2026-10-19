@@ -99,11 +99,13 @@ export default function Magazzino() {
     };
   }, [canManageInspections, user]);
 
+  // Il modulo per un materiale nuovo sta in cima: lo porta in vista.
+  // Per una modifica il modulo si apre al posto della scheda e la pagina non si sposta.
   useEffect(() => {
-    if (showForm && formRef.current) {
+    if (showForm && !editingId && formRef.current) {
       formRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  }, [showForm]);
+  }, [showForm, editingId]);
 
   async function loadMaterials() {
     setLoading(true);
@@ -341,6 +343,8 @@ export default function Magazzino() {
         await salvaFotoDopoModulo(savedEquipment);
       }
       const materialeModificato = editingId;
+      // Dopo una modifica si chiude il modulo (insieme, così non salta in cima come «nuovo»).
+      if (materialeModificato) setShowForm(false);
       setForm(emptyMaterial);
       setEditingId(null);
       setEditingBorrowed(0);
@@ -348,11 +352,8 @@ export default function Magazzino() {
       setRestockMode('replace');
       azzeraFoto();
       await loadMaterials();
-      // Dopo una modifica si chiude il modulo e si torna sulla scheda del materiale.
-      if (materialeModificato) {
-        setShowForm(false);
-        tornaAllaScheda(`materiale-${materialeModificato}`);
-      }
+      // La scheda modificata resta in vista.
+      if (materialeModificato) tornaAllaScheda(`materiale-${materialeModificato}`);
     } catch (submitError) {
       setError(friendlyDbError(submitError, 'Errore durante il salvataggio.'));
     } finally {
@@ -508,6 +509,206 @@ export default function Magazzino() {
     }
   }
 
+  const modificaInElenco = Boolean(
+    editingId && showForm && canEditInventory && filtered.some((item) => item.id === editingId),
+  );
+  // Modulo materiale: per un materiale nuovo sta in cima, per una modifica prende il posto
+  // della scheda nell'elenco, così la pagina resta alla stessa altezza.
+  const moduloMateriale = (
+    <div className="card" ref={formRef}>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+        <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
+        {!editingId && (
+          <>
+            <label htmlFor="materialSelect">Aggiungi quantità a materiale esistente (opzionale)</label>
+            <div style={{ display: 'grid', gap: '0.35rem' }}>
+              <select
+                id="materialSelect"
+                value={selectedMaterialId}
+                onChange={(event) => setSelectedMaterialId(event.target.value)}
+              >
+                <option value="">-- Nuovo materiale (scrivi sotto) --</option>
+                {materials.map((material, index) => {
+                  const optionKey = material?.id ?? `material-${index}`;
+                  const displayId = material?.equipment_number ?? index + 1;
+                  return (
+                    <option key={optionKey} value={String(material.id)}>
+                      {material.name ?? 'Materiale senza nome'} (ID #{displayId})
+                    </option>
+                  );
+                })}
+              </select>
+              {selectedMaterialId && (
+                <button
+                  type="button"
+                  style={{ background: '#adb5bd', width: 'fit-content' }}
+                  onClick={() => setSelectedMaterialId('')}
+                >
+                  Usa nuovo materiale
+                </button>
+              )}
+            </div>
+            {selectedMaterialId && (
+              <div
+                style={{
+                  marginTop: '0.5rem',
+                  padding: '0.6rem 0.75rem',
+                  border: '1px solid rgba(0,0,0,0.08)',
+                  borderRadius: '0.75rem',
+                  background: '#f8f9fa',
+                  display: 'grid',
+                  gap: '0.4rem',
+                }}
+              >
+                <small style={{ color: 'var(--color-muted)' }}>
+                  Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
+                </small>
+                <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
+                  <input
+                    type="radio"
+                    name="restockMode"
+                    value="replace"
+                    checked={restockMode === 'replace'}
+                    onChange={() => setRestockMode('replace')}
+                  />
+                  <span>
+                    <strong>Sostituzione</strong> (materiale perso): aumenta solo disponibile (totale invariato)
+                  </span>
+                </label>
+                <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
+                  <input
+                    type="radio"
+                    name="restockMode"
+                    value="stock"
+                    checked={restockMode === 'stock'}
+                    onChange={() => setRestockMode('stock')}
+                  />
+                  <span>
+                    <strong>Aggiunta scorte</strong>: aumenta totale e disponibile
+                  </span>
+                </label>
+              </div>
+            )}
+          </>
+        )}
+        {supportsEquipmentNumber && (
+          <input
+            type="number"
+            min={0}
+            placeholder="Codice materiale (opzionale)"
+            value={form.equipment_number}
+            onChange={(event) => handleChange('equipment_number', event.target.value)}
+            disabled={Boolean(selectedMaterialId) && !editingId}
+          />
+        )}
+          <input
+            placeholder="Nome"
+            value={form.name}
+            onChange={(event) => handleChange('name', event.target.value)}
+            required
+            disabled={Boolean(selectedMaterialId) && !editingId}
+          />
+        <textarea
+          placeholder="Descrizione"
+          value={form.description}
+          onChange={(event) => handleChange('description', event.target.value)}
+          disabled={Boolean(selectedMaterialId) && !editingId}
+        />
+        <label htmlFor="notes">
+          {selectedMaterialId && !editingId ? 'Nota da aggiungere (facoltativa)' : 'Note (acquisti, sostituzioni, altro)'}
+        </label>
+        <textarea
+          id="notes"
+          placeholder={
+            notesField
+              ? 'Es. Acquistato da Petzl a giugno 2024'
+              : 'Aggiungi una colonna "notes" nella tabella equipment per salvare queste informazioni'
+          }
+          value={form.notes}
+          disabled={!notesField}
+          onChange={(event) => handleChange('notes', event.target.value)}
+        />
+        {!notesField && (
+          <small style={{ color: 'var(--color-muted)' }}>
+            Questo campo verrà abilitato quando la tabella equipment includerà una colonna <code>notes</code>.
+          </small>
+        )}
+        {canManageInspections && (
+          <>
+            <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
+            <input
+              id="inspection_url"
+              type="url"
+              placeholder={
+                inspectionField ? 'https://drive.google.com/...' : 'https://drive.google.com/...'
+              }
+              value={form.inspection_url}
+              onChange={(event) => handleChange('inspection_url', event.target.value)}
+            />
+            <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
+              <label style={{ display: 'grid', gap: '0.25rem' }}>
+                Prossima ispezione
+                <input
+                  type="date"
+                  value={form.prossima_ispezione}
+                  onChange={(event) => handleChange('prossima_ispezione', event.target.value)}
+                />
+              </label>
+              <label style={{ display: 'grid', gap: '0.25rem' }}>
+                Fine vita del dispositivo
+                <input
+                  type="date"
+                  value={form.fine_vita}
+                  onChange={(event) => handleChange('fine_vita', event.target.value)}
+                />
+              </label>
+            </div>
+            <small style={{ color: 'var(--color-muted)' }}>
+              Per corde, imbraghi e connettori la fine vita la indica il produttore nella nota informativa.
+              L&apos;app avvisa 30 giorni prima dell&apos;ispezione e 90 giorni prima della fine vita.
+            </small>
+          </>
+        )}
+        {supportsPhoto && !(selectedMaterialId && !editingId) && (
+          <CampoFoto
+            attuale={fotoRimossa ? null : materials.find((item) => item.id === editingId)?.foto_path ?? null}
+            file={fotoFile}
+            onScegli={(file) => {
+              setFotoFile(file);
+              setFotoRimossa(false);
+            }}
+            onTogli={() => {
+              setFotoFile(null);
+              setFotoRimossa(true);
+            }}
+          />
+        )}
+        <input
+          type="number"
+          min={0}
+          placeholder={selectedMaterialId && !editingId ? 'Quantità da aggiungere' : 'Quantità totale'}
+          value={form.quantity}
+          onChange={(event) => handleChange('quantity', event.target.value)}
+          required
+        />
+        {editingId && editingBorrowed > 0 && (
+          <small style={{ color: 'var(--color-muted)' }}>
+            {editingBorrowed} {editingBorrowed === 1 ? 'pezzo è' : 'pezzi sono'} in prestito: restano conteggiati anche se cambi il totale.
+          </small>
+        )}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
+          </button>
+          <button type="button" style={{ background: '#adb5bd' }} onClick={cancelEdit}>
+            Annulla
+          </button>
+        </div>
+        {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+      </form>
+    </div>
+  );
+
   return (
     <section className="page-grid">
       <AlertList
@@ -545,200 +746,7 @@ export default function Magazzino() {
         </p>
       )}
 
-      {showForm && canEditInventory && (
-        <div className="card" ref={formRef}>
-          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-            <h2>{editingId ? 'Modifica materiale' : 'Nuovo materiale'}</h2>
-            {!editingId && (
-              <>
-                <label htmlFor="materialSelect">Aggiungi quantità a materiale esistente (opzionale)</label>
-                <div style={{ display: 'grid', gap: '0.35rem' }}>
-                  <select
-                    id="materialSelect"
-                    value={selectedMaterialId}
-                    onChange={(event) => setSelectedMaterialId(event.target.value)}
-                  >
-                    <option value="">-- Nuovo materiale (scrivi sotto) --</option>
-                    {materials.map((material, index) => {
-                      const optionKey = material?.id ?? `material-${index}`;
-                      const displayId = material?.equipment_number ?? index + 1;
-                      return (
-                        <option key={optionKey} value={String(material.id)}>
-                          {material.name ?? 'Materiale senza nome'} (ID #{displayId})
-                        </option>
-                      );
-                    })}
-                  </select>
-                  {selectedMaterialId && (
-                    <button
-                      type="button"
-                      style={{ background: '#adb5bd', width: 'fit-content' }}
-                      onClick={() => setSelectedMaterialId('')}
-                    >
-                      Usa nuovo materiale
-                    </button>
-                  )}
-                </div>
-                {selectedMaterialId && (
-                  <div
-                    style={{
-                      marginTop: '0.5rem',
-                      padding: '0.6rem 0.75rem',
-                      border: '1px solid rgba(0,0,0,0.08)',
-                      borderRadius: '0.75rem',
-                      background: '#f8f9fa',
-                      display: 'grid',
-                      gap: '0.4rem',
-                    }}
-                  >
-                    <small style={{ color: 'var(--color-muted)' }}>
-                      Verranno aggiornate solo le quantità. Nome e descrizione restano invariati.
-                    </small>
-                    <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
-                      <input
-                        type="radio"
-                        name="restockMode"
-                        value="replace"
-                        checked={restockMode === 'replace'}
-                        onChange={() => setRestockMode('replace')}
-                      />
-                      <span>
-                        <strong>Sostituzione</strong> (materiale perso): aumenta solo disponibile (totale invariato)
-                      </span>
-                    </label>
-                    <label style={{ display: 'grid', gridTemplateColumns: '18px 1fr', alignItems: 'start', gap: '0.5rem' }}>
-                      <input
-                        type="radio"
-                        name="restockMode"
-                        value="stock"
-                        checked={restockMode === 'stock'}
-                        onChange={() => setRestockMode('stock')}
-                      />
-                      <span>
-                        <strong>Aggiunta scorte</strong>: aumenta totale e disponibile
-                      </span>
-                    </label>
-                  </div>
-                )}
-              </>
-            )}
-            {supportsEquipmentNumber && (
-              <input
-                type="number"
-                min={0}
-                placeholder="Codice materiale (opzionale)"
-                value={form.equipment_number}
-                onChange={(event) => handleChange('equipment_number', event.target.value)}
-                disabled={Boolean(selectedMaterialId) && !editingId}
-              />
-            )}
-              <input
-                placeholder="Nome"
-                value={form.name}
-                onChange={(event) => handleChange('name', event.target.value)}
-                required
-                disabled={Boolean(selectedMaterialId) && !editingId}
-              />
-            <textarea
-              placeholder="Descrizione"
-              value={form.description}
-              onChange={(event) => handleChange('description', event.target.value)}
-              disabled={Boolean(selectedMaterialId) && !editingId}
-            />
-            <label htmlFor="notes">
-              {selectedMaterialId && !editingId ? 'Nota da aggiungere (facoltativa)' : 'Note (acquisti, sostituzioni, altro)'}
-            </label>
-            <textarea
-              id="notes"
-              placeholder={
-                notesField
-                  ? 'Es. Acquistato da Petzl a giugno 2024'
-                  : 'Aggiungi una colonna "notes" nella tabella equipment per salvare queste informazioni'
-              }
-              value={form.notes}
-              disabled={!notesField}
-              onChange={(event) => handleChange('notes', event.target.value)}
-            />
-            {!notesField && (
-              <small style={{ color: 'var(--color-muted)' }}>
-                Questo campo verrà abilitato quando la tabella equipment includerà una colonna <code>notes</code>.
-              </small>
-            )}
-            {canManageInspections && (
-              <>
-                <label htmlFor="inspection_url">Link scheda ispezione (Drive)</label>
-                <input
-                  id="inspection_url"
-                  type="url"
-                  placeholder={
-                    inspectionField ? 'https://drive.google.com/...' : 'https://drive.google.com/...'
-                  }
-                  value={form.inspection_url}
-                  onChange={(event) => handleChange('inspection_url', event.target.value)}
-                />
-                <div style={{ display: 'grid', gap: '0.5rem', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-                  <label style={{ display: 'grid', gap: '0.25rem' }}>
-                    Prossima ispezione
-                    <input
-                      type="date"
-                      value={form.prossima_ispezione}
-                      onChange={(event) => handleChange('prossima_ispezione', event.target.value)}
-                    />
-                  </label>
-                  <label style={{ display: 'grid', gap: '0.25rem' }}>
-                    Fine vita del dispositivo
-                    <input
-                      type="date"
-                      value={form.fine_vita}
-                      onChange={(event) => handleChange('fine_vita', event.target.value)}
-                    />
-                  </label>
-                </div>
-                <small style={{ color: 'var(--color-muted)' }}>
-                  Per corde, imbraghi e connettori la fine vita la indica il produttore nella nota informativa.
-                  L&apos;app avvisa 30 giorni prima dell&apos;ispezione e 90 giorni prima della fine vita.
-                </small>
-              </>
-            )}
-            {supportsPhoto && !(selectedMaterialId && !editingId) && (
-              <CampoFoto
-                attuale={fotoRimossa ? null : materials.find((item) => item.id === editingId)?.foto_path ?? null}
-                file={fotoFile}
-                onScegli={(file) => {
-                  setFotoFile(file);
-                  setFotoRimossa(false);
-                }}
-                onTogli={() => {
-                  setFotoFile(null);
-                  setFotoRimossa(true);
-                }}
-              />
-            )}
-            <input
-              type="number"
-              min={0}
-              placeholder={selectedMaterialId && !editingId ? 'Quantità da aggiungere' : 'Quantità totale'}
-              value={form.quantity}
-              onChange={(event) => handleChange('quantity', event.target.value)}
-              required
-            />
-            {editingId && editingBorrowed > 0 && (
-              <small style={{ color: 'var(--color-muted)' }}>
-                {editingBorrowed} {editingBorrowed === 1 ? 'pezzo è' : 'pezzi sono'} in prestito: restano conteggiati anche se cambi il totale.
-              </small>
-            )}
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button type="submit" disabled={submitting}>
-                {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
-              </button>
-              <button type="button" style={{ background: '#adb5bd' }} onClick={cancelEdit}>
-                Annulla
-              </button>
-            </div>
-            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-          </form>
-        </div>
-      )}
+      {showForm && canEditInventory && !modificaInElenco && moduloMateriale}
 
       {/* Il messaggio solo al primo caricamento: negli aggiornamenti l'elenco resta dov'è. */}
       {loading && !materials.length ? (
@@ -758,6 +766,13 @@ export default function Magazzino() {
                 total,
             );
             const displayId = material.equipment_number ?? index + 1;
+            if (modificaInElenco && material.id === editingId) {
+              return (
+                <div key={key} id={`materiale-${material.id}`}>
+                  {moduloMateriale}
+                </div>
+              );
+            }
             return (
               <article className="card" key={key} id={material.id != null ? `materiale-${material.id}` : undefined}>
                 <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
@@ -833,9 +848,6 @@ export default function Magazzino() {
                         if (!canEditInventory) return;
                         startEdit(material);
                         setShowForm(true);
-                        window.requestAnimationFrame(() =>
-                          formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
-                        );
                       }}
                       disabled={!canEditInventory}
                       style={{ opacity: canEditInventory ? 1 : 0.5, cursor: canEditInventory ? 'pointer' : 'not-allowed' }}
