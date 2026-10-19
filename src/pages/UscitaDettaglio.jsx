@@ -8,6 +8,7 @@ import { getMembers } from '../services/members';
 import { supabase } from '../lib/supabaseClient';
 import { returnLoan } from '../services/loans.js';
 import AdesioniUscita from '../components/AdesioniUscita.jsx';
+import { riduciFoto } from '../utils/immagini.js';
 import { conArticolo, etichettaTipo, isUscitaEsterna, nomeAttivita, usaMateriale } from '../utils/tipiUscita.js';
 
 // «Uscita chiusa» / «Evento chiuso».
@@ -66,6 +67,8 @@ export default function UscitaDettaglio() {
   const [statusChanging, setStatusChanging] = useState(false);
   const [statusError, setStatusError] = useState('');
   const [uploadingPhotos, setUploadingPhotos] = useState(false);
+  // Avanzamento del caricamento: { fatte, totale }
+  const [uploadProgress, setUploadProgress] = useState(null);
   const [uploadError, setUploadError] = useState('');
   const [photoDownloadError, setPhotoDownloadError] = useState('');
 
@@ -298,33 +301,53 @@ export default function UscitaDettaglio() {
       return;
     }
     setUploadError('');
+    setFeedbackStatus('');
     setUploadingPhotos(true);
+    setUploadProgress({ fatte: 0, totale: files.length });
+    // Ogni foto viene collegata all'uscita appena caricata: se il caricamento si
+    // interrompe (telefono in standby, pagina chiusa, rete) le foto già inviate restano.
+    let elenco = [...(uscita.photo_urls ?? [])];
+    let caricate = 0;
+    const nonCaricate = [];
     try {
-      const uploadedUrls = [];
       for (const file of files) {
-        const sanitizedName = file.name.replace(/\s+/g, '-');
-        const path = `${uscita.id}/${Date.now()}-${sanitizedName}`;
-        const { error: uploadErrorResp } = await supabase.storage
-          .from(PHOTO_BUCKET)
-          .upload(path, file, { upsert: false, cacheControl: '3600', contentType: file.type });
-        if (uploadErrorResp) {
-          throw uploadErrorResp;
+        try {
+          // Le foto del telefono pesano 3-5 MB: ridotte a 2048 px restano nitide e
+          // il caricamento è molto più veloce.
+          const ridotta = await riduciFoto(file, 2048, 0.85);
+          const nome = file.name.replace(/\.[^.]+$/, '').replace(/[^\w-]+/g, '-') || 'foto';
+          const estensione = ridotta.type === 'image/jpeg' ? 'jpg' : (file.name.split('.').pop() || 'jpg');
+          const path = `${uscita.id}/${Date.now()}-${nome}.${estensione}`;
+          const { error: uploadErrorResp } = await supabase.storage
+            .from(PHOTO_BUCKET)
+            .upload(path, ridotta, { upsert: false, cacheControl: '3600', contentType: ridotta.type || file.type });
+          if (uploadErrorResp) throw uploadErrorResp;
+          const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
+          if (publicData?.publicUrl) {
+            elenco = [...new Set([...elenco, publicData.publicUrl])];
+            const updated = await updateUscita(id, { photo_urls: elenco });
+            elenco = updated.photo_urls ?? elenco;
+            setUscita(updated);
+            setPhotosText(elenco.join('\n'));
+            caricate += 1;
+          }
+        } catch (fileError) {
+          console.warn('[Uscita] foto non caricata:', file.name, fileError);
+          nonCaricate.push(file.name);
         }
-        const { data: publicData } = supabase.storage.from(PHOTO_BUCKET).getPublicUrl(path);
-        if (publicData?.publicUrl) {
-          uploadedUrls.push(publicData.publicUrl);
-        }
+        setUploadProgress({ fatte: caricate + nonCaricate.length, totale: files.length });
       }
-      const mergedPhotos = [...new Set([...(uscita.photo_urls ?? []), ...uploadedUrls])];
-      const updated = await updateUscita(id, { photo_urls: mergedPhotos });
-      setUscita(updated);
-      setPhotosText((updated.photo_urls ?? []).join('\n'));
-      setFeedbackStatus('Foto caricate con successo.');
-    } catch (uploadErr) {
-      setUploadError(uploadErr.message ?? 'Impossibile caricare le foto.');
+      if (nonCaricate.length) {
+        setUploadError(
+          `${caricate} ${caricate === 1 ? 'foto caricata' : 'foto caricate'}, ${nonCaricate.length} non ${nonCaricate.length === 1 ? 'riuscita' : 'riuscite'} (${nonCaricate.slice(0, 5).join(', ')}${nonCaricate.length > 5 ? '…' : ''}). Riprova con quelle.`,
+        );
+      } else {
+        setFeedbackStatus(caricate === 1 ? 'Foto caricata.' : `${caricate} foto caricate.`);
+      }
     } finally {
       setUploadingPhotos(false);
-      input.value = '';
+      setUploadProgress(null);
+      if (input && 'value' in input) input.value = '';
     }
   }
 
@@ -541,7 +564,7 @@ export default function UscitaDettaglio() {
             </p>
           )}
           <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving}>
+            <button type="button" onClick={handleFeedbackSave} disabled={feedbackSaving || uploadingPhotos}>
               {feedbackSaving ? 'Salvataggio...' : 'Salva feedback'}
             </button>
             <button
@@ -572,6 +595,11 @@ export default function UscitaDettaglio() {
           </div>
           {feedbackError && <p style={{ color: 'var(--color-accent)' }}>{feedbackError}</p>}
           {feedbackStatus && <p style={{ color: 'var(--color-primary)' }}>{feedbackStatus}</p>}
+          {uploadProgress && (
+            <p style={{ color: 'var(--color-primary)', fontWeight: 600 }}>
+              Caricamento foto {uploadProgress.fatte} di {uploadProgress.totale}… Tieni aperta questa pagina.
+            </p>
+          )}
           {uploadError && <p style={{ color: 'var(--color-accent)' }}>{uploadError}</p>}
           {photoDownloadError && <p style={{ color: 'var(--color-accent)' }}>{photoDownloadError}</p>}
           {(uscita.photo_urls ?? []).length > 0 && (
