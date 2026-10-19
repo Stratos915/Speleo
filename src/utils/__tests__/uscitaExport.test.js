@@ -46,13 +46,13 @@ describe('esportazione di una singola uscita', () => {
 
   it('riassume i dati dell’uscita in testa', () => {
     const { title, intro, nomeFile } = buildUscitaSingola({ uscita, nomeSocio, adesioni });
-    expect(title).toBe('Uscita: Cena in sede per parlare del raduno');
+    expect(title).toBe('Evento: Cena in sede per parlare del raduno');
     expect(intro).toContain('Tipo: Serata in sede');
     expect(intro).toContain('Responsabile: Enrico Maria Sacchi');
     expect(intro).toContain('Partecipanti ufficiali: 3 (soci 1, esterni 2)');
     expect(intro).toContain('Risposte: 2 partecipo, 1 forse, 1 no, 8 senza risposta');
     expect(intro[0]).toMatch(/^Quando: .*20.*ottobre 2026 alle 20:30$/);
-    expect(nomeFile('pdf')).toBe('uscita-2026-10-20-cena-in-sede-per-parlare-del-raduno.pdf');
+    expect(nomeFile('pdf')).toBe('evento-2026-10-20-cena-in-sede-per-parlare-del-raduno.pdf');
   });
 
   it('mostra il ruolo nell\'app al posto di «Socio»', () => {
