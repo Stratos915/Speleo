@@ -985,9 +985,8 @@ export default function Members() {
       membership_paid: Boolean(member.membership_paid),
       membership_year: Number(member.membership_year) || DEFAULT_YEAR,
     });
+    // Il modulo si apre al posto della scheda: la pagina non si sposta.
     setShowForm(true);
-    // Il modulo è in cima all'elenco: lo porta in vista.
-    window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
   function handlePurchaseEdit(purchase) {
@@ -1337,6 +1336,76 @@ export default function Members() {
     duplicatedYearsRef.current.add(selectedYearNumber);
     duplicateYear(selectedYearNumber);
   }, [yearFilter, supportsYear, canEditMembers, selectedYearNumber, hasSelectedYearData, duplicateYear]);
+
+  const modificaInElenco = Boolean(
+    editingId && showForm && canEditMembers && filteredMembers.some((member) => member.id === editingId),
+  );
+  // Modulo socio: per un socio nuovo sta in cima, per una modifica prende il posto
+  // della scheda nell'elenco, così la pagina resta alla stessa altezza.
+  const moduloSocio = (
+    <div className="card" ref={formRef}>
+      <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+        <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
+        <input
+          type="number"
+          min={0}
+          placeholder="Numero tessera"
+          value={form.membership_number}
+          onChange={(event) => handleChange('membership_number', event.target.value)}
+          required
+        />
+        <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          Anno di riferimento
+          <select
+            value={form.membership_year}
+            onChange={(event) => handleChange('membership_year', Number(event.target.value))}
+          >
+            {yearOptions.map((yearOption) => (
+              <option key={yearOption} value={yearOption}>
+                {yearOption}
+              </option>
+            ))}
+          </select>
+        </label>
+        <input
+          placeholder="Nome e cognome"
+          value={form.full_name}
+          onChange={(event) => handleChange('full_name', event.target.value)}
+          required
+        />
+        {supportsEmail && (
+          <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
+        )}
+        {supportsPhone && (
+          <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
+        )}
+        {cambiaQuote && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            type="checkbox"
+            checked={Boolean(form.membership_paid)}
+            onChange={(event) => handleChange('membership_paid', event.target.checked)}
+          />
+          <span>Quota annuale pagata</span>
+        </div>
+        )}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button type="submit" disabled={submitting}>
+            {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
+          </button>
+          <button type="button" style={{ background: '#adb5bd' }} onClick={() => {
+            const idAperto = editingId;
+            resetForm();
+            setShowForm(false);
+            if (idAperto) tornaAllaScheda(`socio-${idAperto}`);
+          }}>
+            Annulla
+          </button>
+        </div>
+        {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+      </form>
+    </div>
+  );
 
   return (
     <section className="page-grid">
@@ -2022,77 +2091,18 @@ export default function Members() {
 
       {membersTab === 'anagrafica' && (
         <>
-          {showForm && canEditMembers && (
-            <div className="card" ref={formRef}>
-              <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-                <h2>{editingId ? 'Modifica socio' : 'Nuovo socio'}</h2>
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="Numero tessera"
-                  value={form.membership_number}
-                  onChange={(event) => handleChange('membership_number', event.target.value)}
-                  required
-                />
-                <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  Anno di riferimento
-                  <select
-                    value={form.membership_year}
-                    onChange={(event) => handleChange('membership_year', Number(event.target.value))}
-                  >
-                    {yearOptions.map((yearOption) => (
-                      <option key={yearOption} value={yearOption}>
-                        {yearOption}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <input
-                  placeholder="Nome e cognome"
-                  value={form.full_name}
-                  onChange={(event) => handleChange('full_name', event.target.value)}
-                  required
-                />
-                {supportsEmail && (
-                  <input placeholder="Email" value={form.email} onChange={(event) => handleChange('email', event.target.value)} />
-                )}
-                {supportsPhone && (
-                  <input placeholder="Telefono" value={form.phone} onChange={(event) => handleChange('phone', event.target.value)} />
-                )}
-                {cambiaQuote && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.membership_paid)}
-                    onChange={(event) => handleChange('membership_paid', event.target.checked)}
-                  />
-                  <span>Quota annuale pagata</span>
-                </div>
-                )}
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button type="submit" disabled={submitting}>
-                    {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
-                  </button>
-                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => {
-                    const idAperto = editingId;
-                    resetForm();
-                    setShowForm(false);
-                    if (idAperto) tornaAllaScheda(`socio-${idAperto}`);
-                  }}>
-                    Annulla
-                  </button>
-                </div>
-                {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-              </form>
-            </div>
-          )}
+          {showForm && canEditMembers && !modificaInElenco && moduloSocio}
 
           {/* Il messaggio solo al primo caricamento: negli aggiornamenti l'elenco resta dov'è. */}
           {loading && !members.length ? (
             <p>Caricamento soci...</p>
           ) : (
             <div className="card-list">
-              {filteredMembers.map((member) => (
+              {filteredMembers.map((member) => (modificaInElenco && member.id === editingId ? (
+                <div key={member.id} id={`socio-${member.id}`}>
+                  {moduloSocio}
+                </div>
+              ) : (
                 <article className="card" key={member.id} id={`socio-${member.id}`}>
                   <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
@@ -2178,7 +2188,7 @@ export default function Members() {
                   </div>
                   )}
                 </article>
-              ))}
+              )))}
               {!filteredMembers.length && <p>Nessun socio trovato.</p>}
             </div>
           )}
