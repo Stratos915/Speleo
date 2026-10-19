@@ -46,7 +46,7 @@ Il menu in alto (sul telefono in basso) porta alle sezioni. Vedi solo quelle per
 | Sezione | A cosa serve | Chi la vede |
 |---|---|---|
 | Home | Riepilogo: indicatori rapidi e andamento delle uscite | Tutti |
-| Uscite | Calendario delle attività, dettagli, partecipanti, foto | Tutti |
+| Uscite ed eventi | Calendario delle attività, dettagli, partecipanti, foto | Tutti |
 | Inventario | Materiale del magazzino, disponibilità e scadenze | Tutti |
 | Prestiti | Prendere e riconsegnare materiale, storico | Tutti |
 | Biblioteca | Catalogo dei libri e prestiti | Tutti |
@@ -57,22 +57,24 @@ Il menu in alto (sul telefono in basso) porta alle sezioni. Vedi solo quelle per
 Per «staff» si intendono i ruoli consiglio, segretario, tesoriere, magazziniere, direttore della scuola, presidente e amministratore.
 
 
-## Uscite
+## Uscite ed eventi
+
+Per non confondere le attività, l'app chiama **uscite** solo quelle in esterno (esplorazione, allenamento, corso, sociale) ed **eventi** tutte le altre (serata in sede, formazione, altro evento, altro). In Home ci sono due caselle separate, «Uscite» ed «Eventi»; nel calendario le uscite sono arancioni e gli eventi verdi.
 
 
-### Consultare le uscite
+### Consultare uscite ed eventi
 
-La pagina Uscite mostra le attività in programma. Puoi cercare per titolo o luogo e filtrare tra aperte e chiuse. «Apri scheda» mostra i dettagli: data, ora, luogo (con il link alla mappa), tipo, responsabile, partecipanti, note e materiale collegato.
+La pagina Uscite ed eventi mostra le attività in programma. Con i pulsanti «Tutto · Uscite · Eventi» vedi solo il gruppo che ti interessa. Puoi cercare per titolo o luogo e filtrare tra aperte e chiuse. «Apri scheda» mostra i dettagli: data, ora, luogo (con il link alla mappa), tipo, responsabile, partecipanti, note e materiale collegato.
 
 
 ### Calendario in Dashboard
 
-In Dashboard, accanto a Materiali, Soci e Uscite, c'è la casella «Calendario» con il mese corrente e il numero di uscite del mese; sotto trovi l'elenco delle prossime uscite. Toccando la casella si apre il calendario: le frecce cambiano mese, «Oggi» torna al mese corrente e toccando un giorno vedi le uscite di quella data. Le uscite sono in arancione (in grigio quelle passate o chiuse); toccandone una si apre la sua scheda nella sezione Uscite. Chi può creare uscite trova anche il pulsante «Nuova uscita», che apre la stessa pagina della sezione Uscite; toccando una seconda volta il giorno selezionato (oppure «Crea un'uscita in questa data») la pagina si apre con la data già compilata.
+In Dashboard, accanto a Materiali, Soci, Uscite ed Eventi, c'è la casella «Calendario» con il mese corrente e quante uscite ed eventi ci sono nel mese; sotto trovi l'elenco delle prossime uscite ed eventi. Toccando la casella si apre il calendario: le frecce cambiano mese, «Oggi» torna al mese corrente e toccando un giorno vedi le uscite di quella data. Le uscite sono in arancione, gli eventi in verde (in grigio quelli passati o chiusi); toccando il nome di un'uscita nel calendario, o nell'elenco sotto, si apre la sua scheda nella sezione Uscite. Toccando una seconda volta un giorno con una sola uscita si apre la sua scheda. Chi può creare uscite trova anche il pulsante «Nuova uscita», che apre la stessa pagina della sezione Uscite; toccando una seconda volta un giorno senza uscite (oppure «Crea un'uscita in questa data», sempre presente sotto il calendario) la pagina si apre con la data già compilata.
 
 
 ### Creare un'uscita
 
-1. In Uscite premi «Nuova uscita».
+1. In Uscite ed eventi premi «Nuova uscita o evento». Il tipo scelto decide se è un'uscita o un evento.
 2. Compila titolo, luogo, data e ora; scegli il tipo (sociale, corso, allenamento, formazione, esplorazione, serata in sede, altro evento, altro). Con «Altro evento» scrivi anche una breve descrizione. Per la «Serata in sede» non compare la parte del materiale.
 3. Indica il responsabile e seleziona i soci partecipanti; gli ospiti esterni si scrivono nel campo apposito.
 4. Se vuoi, indica il rientro previsto (vedi sotto).
