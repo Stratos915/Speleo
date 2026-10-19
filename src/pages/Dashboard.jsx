@@ -10,6 +10,7 @@ import { ElencoUscite } from '../components/ElencoUscite.jsx';
 import useAlerts from '../hooks/useAlerts.js';
 import { dedupeMembers } from '../utils/members.js';
 import { dayKey, prossimeEPassate, toIsoDate } from '../utils/calendario.js';
+import { contaAttivita, isUscitaEsterna, testoConteggio } from '../utils/tipiUscita.js';
 
 function countManualParticipants(value) {
   if (!value) return 0;
@@ -23,9 +24,10 @@ export default function Dashboard() {
   const { user, role, loading: authLoading } = useAuth();
   const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
-  const [stats, setStats] = useState({ equipment: 0, members: 0, uscite: 0 });
+  // «Uscite» sono solo le attività in esterno; le altre sono «eventi».
+  const [stats, setStats] = useState({ equipment: 0, members: 0, uscite: 0, eventi: 0 });
   const [statsLoading, setStatsLoading] = useState(true);
-  const [insights, setInsights] = useState({ participants: 0, upcoming: 0, loans: 0 });
+  const [insights, setInsights] = useState({ participants: 0, upcoming: { uscite: 0, eventi: 0 }, loans: 0 });
   const [trend, setTrend] = useState([]);
   const [calendarioUscite, setCalendarioUscite] = useState([]);
 
@@ -68,7 +70,7 @@ export default function Dashboard() {
       const nextStats = {
         equipment: equipmentCount,
         members: membersCount,
-        uscite: usciteList.length,
+        ...contaAttivita(usciteList),
       };
 
       if (usciteList.length) {
@@ -78,19 +80,21 @@ export default function Dashboard() {
           const manualCount = countManualParticipants(uscita.participants_manual);
           return sum + idsCount + manualCount;
         }, 0);
-        const upcoming = usciteList.filter((uscita) => {
-          if (!uscita.data) return false;
-          const uscitaDate = new Date(uscita.data);
-          if (Number.isNaN(uscitaDate.getTime())) return false;
-          return uscitaDate >= today;
-        }).length;
+        const upcoming = contaAttivita(
+          usciteList.filter((uscita) => {
+            if (!uscita.data) return false;
+            const uscitaDate = new Date(uscita.data);
+            if (Number.isNaN(uscitaDate.getTime())) return false;
+            return uscitaDate >= today;
+          }),
+        );
 
         const months = new Map();
         const now = new Date();
         for (let i = 5; i >= 0; i -= 1) {
           const ref = new Date(now.getFullYear(), now.getMonth() - i, 1);
           const key = `${ref.getFullYear()}-${ref.getMonth()}`;
-          months.set(key, { label: ref.toLocaleString('it-IT', { month: 'short' }), value: 0 });
+          months.set(key, { label: ref.toLocaleString('it-IT', { month: 'short' }), uscite: 0, eventi: 0 });
         }
         usciteList.forEach((uscita) => {
           if (!uscita.data) return;
@@ -98,7 +102,7 @@ export default function Dashboard() {
           if (Number.isNaN(uscitaDate.getTime())) return;
           const key = `${uscitaDate.getFullYear()}-${uscitaDate.getMonth()}`;
           if (months.has(key)) {
-            months.get(key).value += 1;
+            months.get(key)[isUscitaEsterna(uscita.tipo) ? 'uscite' : 'eventi'] += 1;
           }
         });
         setTrend(Array.from(months.values()));
@@ -106,13 +110,13 @@ export default function Dashboard() {
         setInsights({ participants, upcoming, loans: activeLoans });
       } else {
         setTrend([]);
-        setInsights({ participants: 0, upcoming: 0, loans: 0 });
+        setInsights({ participants: 0, upcoming: { uscite: 0, eventi: 0 }, loans: 0 });
       }
 
       setStats(nextStats);
     } catch (error) {
       console.error('Errore caricamento dashboard', error);
-      setStats({ equipment: 0, members: 0, uscite: 0 });
+      setStats({ equipment: 0, members: 0, uscite: 0, eventi: 0 });
     } finally {
       setStatsLoading(false);
     }
@@ -139,14 +143,15 @@ export default function Dashboard() {
         <DashboardCard title="Materiali" value={stats.equipment} loading={statsLoading} />
         <DashboardCard title="Soci" value={stats.members} loading={statsLoading} />
         <DashboardCard title="Uscite" value={stats.uscite} loading={statsLoading} />
+        <DashboardCard title="Eventi" value={stats.eventi} loading={statsLoading} />
         <CalendarioCard uscite={calendarioUscite} loading={statsLoading} />
       </div>
       {!statsLoading && (
         <article className="card">
           <ElencoUscite
-            titolo="Prossime uscite"
+            titolo="Prossime uscite ed eventi"
             uscite={prossimeEPassate(calendarioUscite, toIsoDate(new Date())).prossime}
-            vuoto="Nessuna uscita in programma."
+            vuoto="Nessuna uscita o evento in programma."
           />
         </article>
       )}
@@ -156,12 +161,17 @@ export default function Dashboard() {
           <IndicatorCard
             label="Partecipanti registrati"
             value={insights.participants}
-            helper="Somma dei nominativi inseriti nelle uscite imminenti e passate."
+            helper="Somma dei nominativi inseriti in uscite ed eventi, imminenti e passati."
           />
           <IndicatorCard
-            label="Uscite imminenti"
-            value={insights.upcoming}
-            helper="Numero di uscite con data futura nel calendario."
+            label="Uscite in programma"
+            value={insights.upcoming.uscite}
+            helper="Uscite in esterno con data futura: esplorazione, allenamento, corso, sociale."
+          />
+          <IndicatorCard
+            label="Eventi in programma"
+            value={insights.upcoming.eventi}
+            helper="Eventi con data futura: serate in sede, formazione e altri eventi."
           />
           <IndicatorCard
             label="Prestiti attivi"
@@ -172,28 +182,34 @@ export default function Dashboard() {
       </article>
 
       <article className="card">
-        <h2>Tendenza uscite (ultimi 6 mesi)</h2>
+        <h2>Tendenza uscite ed eventi (ultimi 6 mesi)</h2>
         {trend.length ? (
-          <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.75rem' }}>
-            {trend.map((item) => (
-              <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ width: '4rem', fontWeight: 600 }}>{item.label}</span>
-                <div style={{ flex: 1, background: '#edf2ff', borderRadius: '999px', height: '10px' }}>
-                  <div
-                    style={{
-                      width: `${Math.min(100, item.value * 20)}%`,
-                      height: '100%',
-                      background: '#364fc7',
-                      borderRadius: '999px',
-                    }}
-                  />
+          <>
+            <p style={{ margin: '0.25rem 0 0', color: 'var(--color-muted)', fontSize: '0.85rem' }}>
+              <span style={{ display: 'inline-block', width: '0.7rem', height: '0.7rem', borderRadius: '2px', background: '#364fc7', marginRight: '0.3rem' }} />
+              Uscite
+              <span style={{ display: 'inline-block', width: '0.7rem', height: '0.7rem', borderRadius: '2px', background: '#12b886', margin: '0 0.3rem 0 1rem' }} />
+              Eventi
+            </p>
+            <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.75rem' }}>
+              {trend.map((item) => (
+                <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ width: '4rem', fontWeight: 600 }}>{item.label}</span>
+                  <div style={{ flex: 1, background: '#edf2ff', borderRadius: '999px', height: '10px', display: 'flex', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, item.uscite * 20)}%`, height: '100%', background: '#364fc7' }} />
+                    <div
+                      style={{ width: `${Math.min(100 - Math.min(100, item.uscite * 20), item.eventi * 20)}%`, height: '100%', background: '#12b886' }}
+                    />
+                  </div>
+                  <span style={{ minWidth: '3rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                    {item.uscite} + {item.eventi}
+                  </span>
                 </div>
-                <span style={{ width: '2rem', textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{item.value}</span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          </>
         ) : (
-          <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>Non ci sono ancora uscite registrate negli ultimi mesi.</p>
+          <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>Non ci sono ancora uscite o eventi negli ultimi mesi.</p>
         )}
       </article>
     </section>
@@ -221,14 +237,14 @@ function DashboardCard({ title, value, loading }) {
 function CalendarioCard({ uscite, loading }) {
   const now = new Date();
   const meseKey = toIsoDate(now).slice(0, 7);
-  const delMese = uscite.filter((uscita) => dayKey(uscita.data)?.startsWith(meseKey)).length;
+  const delMese = contaAttivita(uscite.filter((uscita) => dayKey(uscita.data)?.startsWith(meseKey)));
   const mese = now.toLocaleDateString('it-IT', { month: 'long' });
   return (
-    <Link to="/calendario" className="dash-cal-card" aria-label="Apri il calendario delle uscite">
+    <Link to="/calendario" className="dash-cal-card" aria-label="Apri il calendario di uscite ed eventi">
       <p style={{ margin: 0, color: 'var(--color-muted)' }}>Calendario</p>
       <h2 style={{ margin: '0.25rem 0 0', textTransform: 'capitalize' }}>{mese}</h2>
       <small className="dash-cal-card-meta">
-        {loading ? '...' : `${delMese} ${delMese === 1 ? 'uscita' : 'uscite'} questo mese`} · Apri →
+        {loading ? '...' : `${testoConteggio(delMese)} questo mese`} · Apri →
       </small>
     </Link>
   );
