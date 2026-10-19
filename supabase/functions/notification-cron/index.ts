@@ -24,6 +24,9 @@
 // «Partecipo · Forse · No» (push) e tre link personali (email), firmati con il segreto
 // adesioni_segreto di app_private_config.
 //
+// Nei testi «uscita» vale solo per le attività in esterno (esplorazione, allenamento,
+// corso, sociale); le altre si chiamano «evento», come nell'app.
+//
 // Ogni avviso viene registrato in notification_log con (kind, ref_id) univoco:
 // eseguire il job più volte non manda doppioni.
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
@@ -34,6 +37,26 @@ const END_OF_LIFE_WARNING_DAYS = 90;
 // Uscite create entro queste ore e con data da oggi in avanti generano l'avviso.
 const NUOVA_USCITA_FINESTRA_ORE = 6;
 const APP_URL_DEFAULT = "https://speleoapp.netlify.app";
+
+// «Uscite» sono solo le attività in esterno; le altre sono «eventi» (come nell'app).
+// Un'attività senza tipo (vecchi dati) resta un'uscita.
+const TIPI_ESTERNI = new Set(["esplorazione", "allenamento", "corso", "sociale"]);
+
+function isEvento(tipo: unknown) {
+  const codice = String(tipo ?? "").toLowerCase();
+  return Boolean(codice) && !TIPI_ESTERNI.has(codice);
+}
+
+/** Sceglie il testo per uscita (femminile) o evento (maschile). */
+function perTipo(tipo: unknown, uscita: string, evento: string) {
+  return isEvento(tipo) ? evento : uscita;
+}
+
+/** Plurale per un elenco: uscite, eventi o attività se misti. */
+function perElenco(elenco: any[], uscite: string, eventi: string, misti: string) {
+  const n = elenco.filter((item) => isEvento(item?.tipo)).length;
+  return n === 0 ? uscite : n === elenco.length ? eventi : misti;
+}
 // Modifiche fatte da meno di questi minuti aspettano il giro dopo: più salvataggi
 // di fila diventano un solo avviso.
 const MODIFICHE_ATTESA_MINUTI = 10;
@@ -241,7 +264,7 @@ async function checkUsciteRientro(supabase: SupabaseClient, config: Config, runI
   const limit = new Date(now.getTime() - config.toleranceMinutes * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("uscite")
-    .select("id, titolo, luogo, data, rientro_previsto, responsabile_id, responsabile_nome, status")
+    .select("id, titolo, luogo, data, tipo, rientro_previsto, responsabile_id, responsabile_nome, status")
     .not("rientro_previsto", "is", null)
     .lte("rientro_previsto", limit)
     .or("status.is.null,status.neq.chiusa");
@@ -303,12 +326,16 @@ async function checkUsciteRientro(supabase: SupabaseClient, config: Config, runI
   const rows: Record<string, unknown>[] = [];
   for (const uscita of enriched) {
     const when = new Date(uscita.rientro_previsto).toLocaleString("it-IT", { timeZone: "Europe/Rome" });
-    const message = `L'uscita "${uscita.titolo}" risulta ancora aperta: il rientro era previsto per ${when}. Verificate che il gruppo sia rientrato e chiudete l'uscita.`;
+    const message = perTipo(
+      uscita.tipo,
+      `L'uscita "${uscita.titolo}" risulta ancora aperta: il rientro era previsto per ${when}. Verificate che il gruppo sia rientrato e chiudete l'uscita.`,
+      `L'evento "${uscita.titolo}" risulta ancora aperto: il rientro era previsto per ${when}. Verificate che il gruppo sia rientrato e chiudete l'evento.`,
+    );
     rows.push({
       audience: "admin",
       target_role: "presidente",
       type: "warning",
-      title: "Rientro uscita superato",
+      title: perTipo(uscita.tipo, "Rientro uscita superato", "Rientro evento superato"),
       message,
       link: `/uscite/${uscita.id}`,
       due_date: uscita.rientro_previsto,
@@ -320,7 +347,7 @@ async function checkUsciteRientro(supabase: SupabaseClient, config: Config, runI
         audience: "user",
         user_id: responsabile.id,
         type: "warning",
-        title: "Rientro uscita superato",
+        title: perTipo(uscita.tipo, "Rientro uscita superato", "Rientro evento superato"),
         message,
         link: `/uscite/${uscita.id}`,
         due_date: uscita.rientro_previsto,
@@ -706,7 +733,7 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
       destinatari.filter((d: any) => d.vuoleEmail).map(async (d: any) => ({
         email: d.email,
         testo: (await Promise.all(fresh.map(async (uscita) =>
-          `Parteciperai a «${uscita.titolo ?? "uscita"}»? Tocca una risposta:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
+          `Parteciperai a «${uscita.titolo ?? perTipo(uscita.tipo, "uscita", "evento")}»? Tocca una risposta:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
         ))).join("\n\n"),
       })),
     )
@@ -726,14 +753,14 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
   const primo = fresh[0];
   const payload: PushPayload = fresh.length === 1
     ? {
-      title: `Nuova uscita: ${primo.titolo ?? "uscita"}`,
+      title: `${perTipo(primo.tipo, "Nuova uscita", "Nuovo evento")}: ${primo.titolo ?? perTipo(primo.tipo, "uscita", "evento")}`,
       body: `${giornoIt(primo.data)}${oraBreve(primo.ora)}${primo.luogo ? ` · ${primo.luogo}` : ""}`,
       url: `/uscite/${primo.id}`,
       tag: `uscita-${primo.id}`,
     }
     : {
-      title: `${fresh.length} nuove uscite in calendario`,
-      body: fresh.map((u) => `${giornoIt(u.data)} · ${u.titolo ?? "uscita"}`).join("\n"),
+      title: `${fresh.length} ${perElenco(fresh, "nuove uscite", "nuovi eventi", "nuove attività")} in calendario`,
+      body: fresh.map((u) => `${giornoIt(u.data)} · ${u.titolo ?? perTipo(u.tipo, "uscita", "evento")}`).join("\n"),
       url: "/calendario",
       tag: "nuove-uscite",
     };
@@ -744,7 +771,7 @@ async function checkNuoveUscite(supabase: SupabaseClient, config: Config, runId:
     for (const userId of pushUserIds) {
       const payloads = await Promise.all(fresh.map((uscita) =>
         pushConAdesione(adesioni, {
-          title: `Nuova uscita: ${uscita.titolo ?? "uscita"}`,
+          title: `${perTipo(uscita.tipo, "Nuova uscita", "Nuovo evento")}: ${uscita.titolo ?? perTipo(uscita.tipo, "uscita", "evento")}`,
           body: `${giornoIt(uscita.data)}${oraBreve(uscita.ora)}${uscita.luogo ? ` · ${uscita.luogo}` : ""}\nParteciperai?`,
           url: `/uscite/${uscita.id}`,
           tag: `uscita-${uscita.id}`,
@@ -968,13 +995,13 @@ async function checkUsciteCambiate(supabase: SupabaseClient, config: Config, run
   const payloads: PushPayload[] = items.map((item) =>
     item.esito === "annullata"
       ? {
-        title: `Uscita annullata: ${item.titolo ?? "uscita"}`,
+        title: `${perTipo(item.tipo, "Uscita annullata", "Evento annullato")}: ${item.titolo ?? perTipo(item.tipo, "uscita", "evento")}`,
         body: `${giornoIt(item.data)}${oraBreve(item.ora)}${item.luogo ? ` · ${item.luogo}` : ""} non si farà più.`,
         url: "/calendario",
         tag: `uscita-${item.id}`,
       }
       : {
-        title: `Uscita modificata: ${item.titolo ?? "uscita"}`,
+        title: `${perTipo(item.tipo, "Uscita modificata", "Evento modificato")}: ${item.titolo ?? perTipo(item.tipo, "uscita", "evento")}`,
         body: item.cambi.map((cambio: any) => `${cambio.etichetta}: ${cambio.dopo}`).join(" · "),
         url: `/uscite/${item.id}`,
         tag: `uscita-${item.id}`,
@@ -1162,7 +1189,7 @@ async function checkPromemoriaUscite(supabase: SupabaseClient, config: Config, r
   const usciteEmail = fresh.map(({ refId: _ref, ...uscita }) => uscita);
   const tra = (giorni: number) => `tra ${giorni} giorni`;
   const basePush = (uscita: any): PushPayload => ({
-    title: `${uscita.titolo ?? "Uscita"} ${tra(uscita.giorni)}`,
+    title: `${uscita.titolo ?? perTipo(uscita.tipo, "Uscita", "Evento")} ${tra(uscita.giorni)}`,
     body: `${giornoIt(uscita.data)}${oraBreve(uscita.ora)}${uscita.luogo ? ` · ${uscita.luogo}` : ""}`,
     url: `/uscite/${uscita.id}`,
     tag: `promemoria-${uscita.id}`,
@@ -1193,8 +1220,8 @@ async function checkPromemoriaUscite(supabase: SupabaseClient, config: Config, r
     const righe = await Promise.all(sue.map(async (uscita) => {
       const r = risposta(uscita.id, d.id);
       return r
-        ? `«${uscita.titolo ?? "uscita"}»: hai risposto «${RISPOSTA_TESTO[r] ?? r}». Per cambiare:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
-        : `«${uscita.titolo ?? "uscita"}»: non hai ancora risposto. Parteciperai?\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`;
+        ? `«${uscita.titolo ?? perTipo(uscita.tipo, "uscita", "evento")}»: hai risposto «${RISPOSTA_TESTO[r] ?? r}». Per cambiare:\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`
+        : `«${uscita.titolo ?? perTipo(uscita.tipo, "uscita", "evento")}»: non hai ancora risposto. Parteciperai?\n  ${await linkAdesione(adesioni, uscita.id, d.id)}`;
     }));
     personali.push({ email: d.email, uscite: sue.map((uscita) => uscita.id), testo: righe.join("\n\n") });
   }
@@ -1294,7 +1321,7 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
   const userIds = [...new Set(nuovi.map((evento: any) => evento.user_id))];
   const [{ data: uscite, error: usciteError }, { data: profili, error: profiliError }, { data: tutteSi, error: siError }] =
     await Promise.all([
-      supabase.from("uscite").select("id, titolo, data, ora, luogo, status, responsabile_id").in("id", usciteIds),
+      supabase.from("uscite").select("id, titolo, data, ora, luogo, tipo, status, responsabile_id").in("id", usciteIds),
       supabase.from("profiles").select("id, email, first_name, last_name, member_id, approval_status"),
       supabase.from("uscite_adesioni").select("uscita_id").eq("risposta", "si").in("uscita_id", usciteIds),
     ]);
@@ -1371,7 +1398,7 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
     }
 
     const totale = contaSi.get(uscitaId) ?? 0;
-    const titolo = uscita.titolo ?? "uscita";
+    const titolo = uscita.titolo ?? perTipo(uscita.tipo, "uscita", "evento");
     const frasi = [
       entrati.length ? `${entrati.map((e) => nome(e.user_id)).join(", ")} ${entrati.length === 1 ? "partecipa" : "partecipano"}` : null,
       usciti.length ? `${usciti.map((e) => nome(e.user_id)).join(", ")} non ${usciti.length === 1 ? "partecipa" : "partecipano"} più` : null,
@@ -1385,7 +1412,7 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
       esito = await sendWebhook(config, {
         type: "adesioni_responsabile",
         app_url: priv.get("app_url") || APP_URL_DEFAULT,
-        uscita: { id: uscitaId, titolo, data: uscita.data, ora: uscita.ora, luogo: uscita.luogo },
+        uscita: { id: uscitaId, titolo, data: uscita.data, ora: uscita.ora, luogo: uscita.luogo, tipo: uscita.tipo },
         entrati: entrati.map((e) => nome(e.user_id)),
         usciti: usciti.map((e) => nome(e.user_id)),
         totale,
