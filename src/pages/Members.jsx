@@ -11,6 +11,7 @@ import {
 } from '../services/memberPurchases';
 import { supabase } from '../lib/supabaseClient';
 import { dedupeMembers } from '../utils/members.js';
+import { tornaAllaScheda } from '../utils/scorrimento.js';
 import { canEditQuote, canViewQuote, getAllRoles } from '../utils/permissions.js';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
 
@@ -507,8 +508,8 @@ export default function Members() {
   const [yearColumn, setYearColumn] = useState('membership_year');
   const [yearFilter, setYearFilter] = useState(DEFAULT_YEAR_STRING);
   const formRef = useRef(null);
+  const purchaseFormRef = useRef(null);
   const duplicatedYearsRef = useRef(new Set());
-  const lastScrollPositionRef = useRef(0);
   const [cloningYear, setCloningYear] = useState(null);
   const { user, role } = useAuth();
   const { canEditSection, roles } = usePermissions();
@@ -624,16 +625,6 @@ export default function Members() {
       ignore = true;
     };
   }, [canManageRoles, supportsEmail]);
-
-  function rememberScrollPosition() {
-    lastScrollPositionRef.current = window.scrollY || window.pageYOffset || 0;
-  }
-
-  function restoreScrollPosition() {
-    window.requestAnimationFrame(() => {
-      window.scrollTo(0, lastScrollPositionRef.current || 0);
-    });
-  }
 
   useEffect(() => {
     if (!canEditMembers && showForm) {
@@ -985,7 +976,6 @@ export default function Members() {
   }
 
   function handleEdit(member) {
-    rememberScrollPosition();
     setEditingId(member.id);
     setForm({
       membership_number: member.old_id ?? '',
@@ -996,6 +986,8 @@ export default function Members() {
       membership_year: Number(member.membership_year) || DEFAULT_YEAR,
     });
     setShowForm(true);
+    // Il modulo è in cima all'elenco: lo porta in vista.
+    window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   }
 
   function handlePurchaseEdit(purchase) {
@@ -1015,6 +1007,9 @@ export default function Members() {
       notes: purchase.notes ?? '',
     });
     setShowPurchaseForm(true);
+    window.requestAnimationFrame(() =>
+      purchaseFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
   }
 
   function resetForm(yearValue = yearFilter, seedProfile = null) {
@@ -1081,9 +1076,11 @@ export default function Members() {
           user,
         );
       }
+      const acquistoModificato = purchaseEditingId;
       resetPurchaseForm();
       setShowPurchaseForm(false);
-      loadPurchases();
+      await loadPurchases();
+      if (acquistoModificato) tornaAllaScheda(`acquisto-${acquistoModificato}`);
     } catch (submitError) {
       setPurchaseError(submitError.message ?? 'Impossibile salvare l&apos;acquisto.');
     } finally {
@@ -1171,6 +1168,7 @@ export default function Members() {
     setSubmitting(true);
     setError('');
     const wasEditing = Boolean(editingId);
+    const idModificato = editingId;
     const membershipValue = form.membership_number ? Number(form.membership_number) : null;
     const normalizedYear = Number(form.membership_year) || DEFAULT_YEAR;
     const payload = {
@@ -1213,9 +1211,8 @@ export default function Members() {
       resetForm();
       setShowForm(false);
       await loadMembers();
-      if (wasEditing) {
-        restoreScrollPosition();
-      }
+      // Dopo una modifica si torna sulla scheda del socio, non in cima alla pagina.
+      if (wasEditing) tornaAllaScheda(`socio-${idModificato}`);
     } catch (submitError) {
       setError(submitError.message ?? 'Errore durante il salvataggio del socio.');
     } finally {
@@ -1749,6 +1746,7 @@ export default function Members() {
           {canEditMembers && (
             <details
               className="card"
+              ref={purchaseFormRef}
               open={showPurchaseForm}
               onToggle={(event) => setShowPurchaseForm(event.currentTarget.open)}
             >
@@ -1902,8 +1900,10 @@ export default function Members() {
                       type="button"
                       style={{ background: '#adb5bd' }}
                       onClick={() => {
+                        const idAperto = purchaseEditingId;
                         resetPurchaseForm();
                         setShowPurchaseForm(false);
+                        if (idAperto) tornaAllaScheda(`acquisto-${idAperto}`);
                       }}
                     >
                       Annulla
@@ -1913,7 +1913,7 @@ export default function Members() {
               </div>
             </details>
           )}
-          {purchaseLoading ? (
+          {purchaseLoading && !purchases.length ? (
             <p>Caricamento acquisti...</p>
           ) : purchaseGroups.length ? (
             <div className="card-list">
@@ -1948,7 +1948,7 @@ export default function Members() {
                       {group.map((purchase) => {
                         const member = membersById.get(String(purchase.member_id));
                         return (
-                          <article className="card" key={purchase.id}>
+                          <article className="card" key={purchase.id} id={`acquisto-${purchase.id}`}>
                             <header style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                               <div>
                                 <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
@@ -2073,7 +2073,12 @@ export default function Members() {
                   <button type="submit" disabled={submitting}>
                     {submitting ? 'Salvataggio...' : editingId ? 'Aggiorna' : 'Aggiungi'}
                   </button>
-                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => { resetForm(); setShowForm(false); }}>
+                  <button type="button" style={{ background: '#adb5bd' }} onClick={() => {
+                    const idAperto = editingId;
+                    resetForm();
+                    setShowForm(false);
+                    if (idAperto) tornaAllaScheda(`socio-${idAperto}`);
+                  }}>
                     Annulla
                   </button>
                 </div>
@@ -2082,12 +2087,13 @@ export default function Members() {
             </div>
           )}
 
-          {loading ? (
+          {/* Il messaggio solo al primo caricamento: negli aggiornamenti l'elenco resta dov'è. */}
+          {loading && !members.length ? (
             <p>Caricamento soci...</p>
           ) : (
             <div className="card-list">
               {filteredMembers.map((member) => (
-                <article className="card" key={member.id}>
+                <article className="card" key={member.id} id={`socio-${member.id}`}>
                   <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <div>
                     <h3 style={{ margin: 0 }}>{member.full_name}</h3>
@@ -2183,10 +2189,10 @@ export default function Members() {
               type="button"
               onClick={() => {
                 const nextShow = !showForm;
-                if (nextShow) {
-                  rememberScrollPosition();
-                }
                 setShowForm(nextShow);
+                if (nextShow) {
+                  window.requestAnimationFrame(() => formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+                }
                 if (nextShow && !editingId) {
                   resetForm(yearFilter, profileSeed);
                 } else {
