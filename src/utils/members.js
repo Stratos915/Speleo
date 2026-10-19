@@ -37,6 +37,29 @@ export function buildMemberTooltip(member) {
   return details.length ? details.join(' · ') : 'Dettagli socio non disponibili';
 }
 
+// Particelle che fanno parte del cognome: «Marta di Biase» → «di Biase».
+const PARTICELLE = new Set(['di', 'de', 'da', 'del', 'della', 'dei', 'degli', 'dal', 'dalla', 'lo', 'la', 'van', 'von', 'mc']);
+
+/**
+ * Cognome dal nome completo, scritto «Nome Cognome»: l'ultima parola, con le
+ * particelle che la precedono. Un nome di una sola parola vale come cognome.
+ */
+export function cognomeSocio(member) {
+  const parole = resolveFullName(member).split(/\s+/).filter(Boolean);
+  if (parole.length <= 1) return parole[0] ?? '';
+  let inizio = parole.length - 1;
+  while (inizio > 1 && PARTICELLE.has(parole[inizio - 1].toLowerCase())) inizio -= 1;
+  return parole.slice(inizio).join(' ');
+}
+
+/** Ordine alfabetico per cognome, poi per nome (come un registro). */
+export function confrontaPerCognome(a, b) {
+  const opzioni = { sensitivity: 'base' };
+  const perCognome = cognomeSocio(a).localeCompare(cognomeSocio(b), 'it', opzioni);
+  if (perCognome) return perCognome;
+  return resolveFullName(a).localeCompare(resolveFullName(b), 'it', opzioni);
+}
+
 export function dedupeMembers(list = []) {
   if (!Array.isArray(list)) return [];
   const seen = new Set();

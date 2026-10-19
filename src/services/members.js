@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabaseClient';
+import { confrontaPerCognome } from '../utils/members.js';
 
 const TABLE = 'members';
 
@@ -74,16 +75,8 @@ export async function getMembers() {
   if (error) throw error;
   return (data ?? [])
     .map((row) => normalizeMemberRow({ ...row, membership_paid: quote.get(String(row.id)) ?? false }))
-    .sort((a, b) => {
-      const aNumber = Number(a.membership_number);
-      const bNumber = Number(b.membership_number);
-      if (!Number.isNaN(aNumber) || !Number.isNaN(bNumber)) {
-        if (Number.isNaN(aNumber)) return 1;
-        if (Number.isNaN(bNumber)) return -1;
-        if (aNumber !== bNumber) return aNumber - bNumber;
-      }
-      return a.full_name.localeCompare(b.full_name, 'it', { sensitivity: 'base' });
-    });
+    // In ordine alfabetico di cognome; la stessa persona in più anni resta vicina, per anno.
+    .sort((a, b) => confrontaPerCognome(a, b) || Number(a.membership_year ?? 0) - Number(b.membership_year ?? 0));
 }
 
 export async function createMember(payload) {
