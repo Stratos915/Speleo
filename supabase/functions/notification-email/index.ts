@@ -216,17 +216,17 @@ function buildMessage(payload: Record<string, any>): Message | null {
       const quando = formatDateIt(item.quando);
       if (item.tipo === "rientro") {
         const mancanti = Number(item.mancanti ?? 0);
-        const coda = mancanti > 0 ? ` — ATTENZIONE: ${mancanti} pezzi mancanti` : "";
-        return `- RIENTRO  ${item.materiale} x${item.quantita} da ${item.socio ?? "socio"} (${quando})${coda}`;
+        const coda = mancanti > 0 ? ` — ATTENZIONE: ${mancanti} ${mancanti === 1 ? "pezzo mancante" : "pezzi mancanti"}` : "";
+        return `- RESTITUZIONE  ${item.materiale} x${item.quantita} da ${item.socio ?? "socio"} (${quando})${coda}`;
       }
       const note = item.note ? ` — ${item.note}` : "";
-      return `- USCITA   ${item.materiale} x${item.quantita} a ${item.socio ?? "socio"} (${quando})${note}`;
+      return `- PRESTITO      ${item.materiale} x${item.quantita} a ${item.socio ?? "socio"} (${quando})${note}`;
     });
     const consegne = items.filter((item) => item.tipo !== "rientro").length;
     const rientri = items.length - consegne;
     return {
-      subject: `GSU · Movimenti magazzino: ${consegne} in uscita, ${rientri} in rientro`,
-      to: collectEmails([magazziniere, admin]),
+      subject: `GSU · Movimenti magazzino: ${consegne} ${consegne === 1 ? "prestito" : "prestiti"}, ${rientri} ${rientri === 1 ? "restituzione" : "restituzioni"}`,
+      to: collectEmails([magazziniere, admin, presidente]),
       body: [
         "Movimenti di materiale registrati nell'ultimo controllo:",
         "",
