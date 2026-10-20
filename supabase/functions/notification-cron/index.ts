@@ -6,7 +6,9 @@
 //   2. USCITA_RIENTRO   uscite ancora aperte oltre il rientro previsto + tolleranza
 //   3. DPI_ISPEZIONE    materiali con ispezione scaduta o entro 30 giorni
 //   4. DPI_FINE_VITA    materiali con fine vita superata o entro 90 giorni
-//   5. MOVIMENTO        consegne e rientri di materiale, riepilogo al magazziniere
+//   5. MOVIMENTO        prestiti e restituzioni di materiale: riepilogo via email a magazziniere,
+//                       admin e presidente, e una notifica push per ogni movimento a chi ha
+//                       ruolo magazziniere, presidente o admin (secondo le sue preferenze)
 //   6. NUOVA_USCITA     nuove uscite in calendario: email (copia nascosta) e notifica
 //                       push a tutti i soci approvati, secondo le loro preferenze
 //   7. USCITA_CAMBIATA  uscite in programma modificate (data, ora, luogo, titolo, tipo)
@@ -437,7 +439,7 @@ async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: s
   const since = new Date(now.getTime() - 2 * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await supabase
     .from("loans")
-    .select("id, equipment_id, quantity, missing_quantity, status, borrower_name, delivered_at, returned_at, notes, equipment:equipment_id(name)")
+    .select("id, equipment_id, quantity, missing_quantity, status, borrower_name, borrower_email, delivered_at, returned_at, notes, equipment:equipment_id(name)")
     .or(`delivered_at.gte.${since},returned_at.gte.${since}`);
   if (error) throw error;
 
@@ -452,6 +454,7 @@ async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: s
         materiale: nome,
         quantita: loan.quantity,
         socio: loan.borrower_name,
+        email: loan.borrower_email ?? null,
         quando: loan.delivered_at,
         note: loan.notes ?? null,
       });
@@ -465,6 +468,7 @@ async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: s
         quantita: loan.quantity,
         mancanti: loan.missing_quantity ?? 0,
         socio: loan.borrower_name,
+        email: loan.borrower_email ?? null,
         quando: loan.returned_at,
       });
     }
@@ -484,11 +488,71 @@ async function checkMovimenti(supabase: SupabaseClient, config: Config, runId: s
     type: "movimenti_prestiti",
     count: fresh.length,
     items: config.testMode ? fresh.slice(0, 1) : fresh,
-    recipients: { magazziniere: config.recipients.magazziniere, admin: config.recipients.admin },
+    recipients: {
+      magazziniere: config.recipients.magazziniere,
+      admin: config.recipients.admin,
+      presidente: config.recipients.presidente,
+    },
     meta: { runId, kind },
   });
   await finalize(supabase, config, kind, fresh.map((evento) => evento.refId), result);
-  return { total: eventi.length, new: fresh.length };
+  const push = await pushMovimenti(supabase, config, runId, fresh);
+  return { total: eventi.length, new: fresh.length, push };
+}
+
+// Ruoli che ricevono la notifica push di ogni prestito e restituzione.
+const RUOLI_MAGAZZINO = ["magazziniere", "presidente", "admin"];
+
+/**
+ * Una notifica push per ogni movimento a chi ha ruolo magazziniere, presidente o admin
+ * (ruolo principale o in più), secondo le sue preferenze. Chi ha fatto il movimento
+ * non riceve l'avviso del proprio prestito.
+ */
+async function pushMovimenti(supabase: SupabaseClient, config: Config, runId: string, movimenti: any[]) {
+  const priv = await loadPrivateConfig(supabase).catch(() => null);
+  if (!priv) return { skipped: "migrazione 09 mancante" };
+  const [{ data: profili, error: profiliError }, { data: preferenze, error: prefError }] = await Promise.all([
+    supabase.from("profiles").select("id, email, role, ruoli_extra").eq("approval_status", "approved"),
+    supabase.from("notifica_preferenze").select("user_id, push"),
+  ]);
+  if (profiliError) throw profiliError;
+  if (prefError) throw prefError;
+  const senzaPush = new Set((preferenze ?? []).filter((row: any) => row.push === false).map((row: any) => row.user_id));
+  const soloA = (priv.get("avvisi_uscite_solo_a") || "").trim().toLowerCase();
+  const responsabili = (profili ?? []).filter((p: any) => {
+    const ruoli = [p.role, ...(Array.isArray(p.ruoli_extra) ? p.ruoli_extra : [])];
+    if (!ruoli.some((ruolo) => RUOLI_MAGAZZINO.includes(ruolo))) return false;
+    if (senzaPush.has(p.id)) return false;
+    return !soloA || String(p.email ?? "").toLowerCase() === soloA;
+  });
+  if (!responsabili.length) return { destinatari: 0 };
+
+  const esiti: unknown[] = [];
+  for (const persona of responsabili) {
+    const email = String(persona.email ?? "").toLowerCase();
+    const payloads: PushPayload[] = movimenti
+      .filter((m) => !email || String(m.email ?? "").toLowerCase() !== email)
+      .map((m) => {
+        const pezzi = `${m.materiale} ×${m.quantita ?? 1}`;
+        const mancanti = Number(m.mancanti ?? 0);
+        return m.tipo === "rientro"
+          ? {
+            title: mancanti > 0 ? "Restituzione con pezzi mancanti" : "Materiale restituito",
+            body: `${pezzi} da ${m.socio ?? "un socio"}${mancanti > 0 ? ` · mancano ${mancanti}` : ""}`,
+            url: "/storico-prestiti",
+            tag: `movimento-${m.refId}`,
+          }
+          : {
+            title: "Nuovo prestito",
+            body: `${pezzi} a ${m.socio ?? "un socio"}`,
+            url: "/storico-prestiti",
+            tag: `movimento-${m.refId}`,
+          };
+      });
+    if (!payloads.length) continue;
+    esiti.push(await sendPushSicuro(supabase, priv, [persona.id], payloads, config.testMode, runId));
+  }
+  return { destinatari: responsabili.length, esiti, prova: Boolean(soloA) };
 }
 
 // ---------------------------------------------------------------------------
@@ -1515,7 +1579,8 @@ async function runCron(req: Request, interno = false) {
       ["promemoria_uscite", () => checkPromemoriaUscite(supabase, config, runId, now)],
       ["adesioni", () => checkAdesioni(supabase, config, runId, now)],
     ];
-    const CONTROLLI_SOCI = ["nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite", "adesioni"];
+    // Anche i movimenti di magazzino: così gli avvisi arrivano entro una decina di minuti.
+    const CONTROLLI_SOCI = ["movimenti", "nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite", "adesioni"];
     for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
         checks[name] = await fn();
