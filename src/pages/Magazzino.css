@@ -60,3 +60,215 @@
   margin: 0;
   color: #fff;
 }
+
+/* Cartella riservata: materiale della scuola diviso per sacco */
+.scuola-cartella {
+  display: grid;
+  gap: 0.75rem;
+  border: 1px dashed var(--color-primary);
+  background: #f8fdfd;
+}
+
+.scuola-cartella-titolo,
+.scuola-sacco-titolo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0;
+  background: none;
+  color: var(--color-text);
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.scuola-cartella-titolo:hover,
+.scuola-sacco-titolo:hover {
+  background: none;
+  box-shadow: none;
+  transform: none;
+}
+
+.scuola-cartella-titolo > span:first-child {
+  font-size: 1.6rem;
+}
+
+.scuola-cartella-nome,
+.scuola-sacco-info {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.scuola-sacco-info {
+  font-size: 1rem;
+}
+
+.scuola-cartella-nome small,
+.scuola-sacco-info small {
+  font-weight: 400;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.scuola-freccia {
+  color: var(--color-muted);
+  font-size: 1.1rem;
+}
+
+.scuola-contenuto {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.scuola-barra,
+.scuola-prepara,
+.scuola-azioni {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.scuola-prepara input {
+  width: 6rem;
+}
+
+.scuola-azioni select {
+  width: auto;
+  max-width: 100%;
+}
+
+.scuola-azioni--piccole button {
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
+
+.scuola-btn-neutro {
+  background: #868e96;
+}
+
+.scuola-btn-elimina {
+  background: #e03131;
+}
+
+.scuola-sacco {
+  background: #fff;
+  border: 1px solid var(--color-border);
+  border-radius: 0.85rem;
+  padding: 0.75rem;
+  display: grid;
+  gap: 0.6rem;
+}
+
+.scuola-numero {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  height: 2.4rem;
+  padding: 0 0.4rem;
+  border-radius: 0.6rem;
+  background: var(--color-primary);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.1rem;
+}
+
+.scuola-sacco-corpo {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.scuola-pezzi {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.scuola-pezzo {
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 0.6rem;
+  background: var(--color-bg);
+}
+
+.scuola-pezzo-testa {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+.scuola-pezzo-testa small,
+.scuola-date,
+.scuola-note,
+.scuola-senza-scheda {
+  color: var(--color-muted);
+}
+
+.scuola-note {
+  margin: 0;
+  font-style: italic;
+}
+
+.scuola-avviso {
+  width: fit-content;
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: #fff9db;
+  color: #8a6d00;
+}
+
+.scuola-avviso--expired {
+  background: #fff5f5;
+  color: #c92a2a;
+}
+
+.scuola-modulo {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.scuola-modulo h3 {
+  margin: 0;
+}
+
+.scuola-modulo label {
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.scuola-modulo--pezzo {
+  padding: 0.75rem;
+  border-radius: 0.6rem;
+  border: 1px solid var(--color-primary);
+  background: #fff;
+}
+
+.scuola-campi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.6rem;
+}
+
+.scuola-errore {
+  margin: 0;
+  color: #c92a2a;
+}
+
+.scuola-vuoto {
+  margin: 0;
+  color: var(--color-muted);
+}
