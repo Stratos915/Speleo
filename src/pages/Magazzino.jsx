@@ -19,6 +19,7 @@ import { getDpiAlerts } from '../utils/dpi.js';
 import './Magazzino.css';
 import { caricaFotoMateriale, rimuoviFotoMateriale, urlFotoMateriale } from '../services/fotoMateriali.js';
 import { tornaAllaScheda } from '../utils/scorrimento.js';
+import MaterialeScuola from '../components/MaterialeScuola.jsx';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -720,6 +721,9 @@ export default function Magazzino() {
         <h1>Magazzino materiali</h1>
         <p>Gestisci l&apos;inventario dell&apos;attrezzatura speleo già importata su Supabase.</p>
       </div>
+
+      {/* Cartella riservata alla scuola: compare solo a chi non è socio semplice. */}
+      <MaterialeScuola />
 
       <input
         type="search"

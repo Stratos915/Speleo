@@ -123,6 +123,20 @@ export function canEditQuote(role) {
   return hasOne(role, QUOTE_EDIT_ROLES);
 }
 
+// Materiale della scuola nei sacchi (migrazione 19): lo vedono tutti tranne i soci
+// semplici, lo modificano admin, presidente, magazziniere e direttore scuola.
+// Il database applica la stessa regola.
+const SACCHI_VIEW_ROLES = VIEW_ALL_ROLES;
+const SACCHI_EDIT_ROLES = [...FULL_ACCESS_ROLES, 'magazziniere', 'direttore_scuola'];
+
+export function canViewSacchiScuola(role) {
+  return hasOne(role, SACCHI_VIEW_ROLES);
+}
+
+export function canEditSacchiScuola(role) {
+  return hasOne(role, SACCHI_EDIT_ROLES);
+}
+
 export function getAllRoles() {
   return [...ALL_ROLES];
 }
