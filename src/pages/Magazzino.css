@@ -272,3 +272,39 @@
   margin: 0;
   color: var(--color-muted);
 }
+
+.scuola-composto {
+  white-space: normal;
+}
+
+.scuola-consegnato {
+  color: var(--color-primary-dark) !important;
+  font-weight: 600 !important;
+}
+
+.scuola-avvisi-sacco {
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: #c92a2a;
+}
+
+.scuola-consegna {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.6rem 0.75rem 0.75rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 0.6rem;
+}
+
+.scuola-consegna legend {
+  padding: 0 0.3rem;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+.scuola-btn-piccolo {
+  width: fit-content;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.85rem;
+}
