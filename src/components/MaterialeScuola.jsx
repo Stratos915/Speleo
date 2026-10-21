@@ -176,7 +176,13 @@ export default function MaterialeScuola() {
       else nuovoId = (await creaSacco(valori)).id;
     });
     if (ok) {
-      setModulo(null);
+      if (!id && nuovoId) {
+        // Sacco nuovo: si apre subito il suo contenuto, pronto per il primo pezzo.
+        setValori(PEZZO_VUOTO);
+        setModulo({ tipo: 'pezzo', saccoId: nuovoId, id: null });
+      } else {
+        setModulo(null);
+      }
       if (nuovoId) {
         apriSacco(nuovoId, true);
         tornaAllaScheda(`sacco-${nuovoId}`);
@@ -465,82 +471,95 @@ export default function MaterialeScuola() {
                         <div className="scuola-sacco-corpo">
                           {sacco.note && <p className="scuola-note">Note: {sacco.note}</p>}
 
-                          {sacco.materiale.length ? (
-                            <ul className="scuola-pezzi">
-                              {sacco.materiale.map((pezzo) => {
-                                if (modulo?.tipo === 'pezzo' && modulo.id === pezzo.id) {
-                                  return <li key={pezzo.id} id={`pezzo-${pezzo.id}`}>{moduloPezzo}</li>;
-                                }
-                                const avvisiPezzo = getDpiAlerts(pezzo);
-                                return (
-                                  <li key={pezzo.id} id={`pezzo-${pezzo.id}`} className="scuola-pezzo">
-                                    <div className="scuola-pezzo-testa">
-                                      <span>
-                                        <strong>{pezzo.nome}</strong>
-                                        {pezzo.quantita > 1 ? ` ×${pezzo.quantita}` : ''}
-                                        {pezzo.matricola ? <small> · matr. {pezzo.matricola}</small> : null}
-                                      </span>
-                                      {pezzo.scheda_url ? (
-                                        <a href={pezzo.scheda_url} target="_blank" rel="noreferrer">📄 Scheda ispezione</a>
-                                      ) : (
-                                        <small className="scuola-senza-scheda">Nessuna scheda collegata</small>
-                                      )}
-                                    </div>
-                                    {(pezzo.prossima_ispezione || pezzo.fine_vita) && (
-                                      <small className="scuola-date">
-                                        {pezzo.prossima_ispezione ? `Prossima ispezione: ${dataIt(pezzo.prossima_ispezione)}` : ''}
-                                        {pezzo.prossima_ispezione && pezzo.fine_vita ? ' · ' : ''}
-                                        {pezzo.fine_vita ? `Fine vita: ${dataIt(pezzo.fine_vita)}` : ''}
-                                      </small>
-                                    )}
-                                    {avvisiPezzo.map((avviso) => (
-                                      <span
-                                        key={avviso.kind}
-                                        className={`scuola-avviso scuola-avviso--${avviso.level}`}
-                                      >
-                                        {avviso.text}
-                                        {avviso.kind === 'fine_vita' && avviso.level === 'expired' ? ' · non usare, da ritirare' : ''}
-                                      </span>
-                                    ))}
-                                    {pezzo.note && <small className="scuola-note">{pezzo.note}</small>}
-                                    {puoModificare && (
-                                      <div className="scuola-azioni scuola-azioni--piccole">
-                                        <button type="button" onClick={() => modificaPezzo(pezzo)} disabled={inCorso}>Modifica</button>
-                                        <button type="button" className="scuola-btn-elimina" onClick={() => cancellaPezzo(pezzo)} disabled={inCorso}>
-                                          Togli
-                                        </button>
+                          <section className="scuola-contenuto-sacco" aria-label={`Contenuto del sacco ${sacco.numero}`}>
+                            <h4>
+                              Contenuto sacco
+                              <small>
+                                {sacco.materiale.length
+                                  ? ` · ${sacco.materiale.length} ${sacco.materiale.length === 1 ? 'voce' : 'voci'}`
+                                  : ''}
+                              </small>
+                            </h4>
+                            {sacco.materiale.length ? (
+                              <ul className="scuola-pezzi">
+                                {sacco.materiale.map((pezzo) => {
+                                  if (modulo?.tipo === 'pezzo' && modulo.id === pezzo.id) {
+                                    return <li key={pezzo.id} id={`pezzo-${pezzo.id}`}>{moduloPezzo}</li>;
+                                  }
+                                  const avvisiPezzo = getDpiAlerts(pezzo);
+                                  return (
+                                    <li key={pezzo.id} id={`pezzo-${pezzo.id}`} className="scuola-pezzo">
+                                      <div className="scuola-pezzo-testa">
+                                        <span>
+                                          <strong>{pezzo.nome}</strong>
+                                          {pezzo.quantita > 1 ? ` ×${pezzo.quantita}` : ''}
+                                          {pezzo.matricola ? <small> · matr. {pezzo.matricola}</small> : null}
+                                        </span>
+                                        {pezzo.scheda_url ? (
+                                          <a href={pezzo.scheda_url} target="_blank" rel="noreferrer">📄 Scheda ispezione</a>
+                                        ) : (
+                                          <small className="scuola-senza-scheda">Nessuna scheda collegata</small>
+                                        )}
                                       </div>
-                                    )}
-                                  </li>
-                                );
-                              })}
-                            </ul>
-                          ) : (
-                            <p className="scuola-vuoto">Sacco vuoto.</p>
-                          )}
+                                      {(pezzo.prossima_ispezione || pezzo.fine_vita) && (
+                                        <small className="scuola-date">
+                                          {pezzo.prossima_ispezione ? `Prossima ispezione: ${dataIt(pezzo.prossima_ispezione)}` : ''}
+                                          {pezzo.prossima_ispezione && pezzo.fine_vita ? ' · ' : ''}
+                                          {pezzo.fine_vita ? `Fine vita: ${dataIt(pezzo.fine_vita)}` : ''}
+                                        </small>
+                                      )}
+                                      {avvisiPezzo.map((avviso) => (
+                                        <span
+                                          key={avviso.kind}
+                                          className={`scuola-avviso scuola-avviso--${avviso.level}`}
+                                        >
+                                          {avviso.text}
+                                          {avviso.kind === 'fine_vita' && avviso.level === 'expired' ? ' · non usare, da ritirare' : ''}
+                                        </span>
+                                      ))}
+                                      {pezzo.note && <small className="scuola-note">{pezzo.note}</small>}
+                                      {puoModificare && (
+                                        <div className="scuola-azioni scuola-azioni--piccole">
+                                          <button type="button" onClick={() => modificaPezzo(pezzo)} disabled={inCorso}>Modifica</button>
+                                          <button type="button" className="scuola-btn-elimina" onClick={() => cancellaPezzo(pezzo)} disabled={inCorso}>
+                                            Togli
+                                          </button>
+                                        </div>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            ) : (
+                              <p className="scuola-vuoto">Il sacco è vuoto: aggiungi il materiale che contiene.</p>
+                            )}
 
-                          {modulo?.tipo === 'pezzo' && !modulo.id && modulo.saccoId === sacco.id && moduloPezzo}
+                            {modulo?.tipo === 'pezzo' && !modulo.id && modulo.saccoId === sacco.id && moduloPezzo}
+
+                            {puoModificare && !(modulo?.tipo === 'pezzo' && !modulo.id && modulo.saccoId === sacco.id) && (
+                              <div className="scuola-azioni">
+                                <button type="button" onClick={() => nuovoPezzo(sacco)} disabled={inCorso}>+ Aggiungi materiale</button>
+                                {!sacco.materiale.length && altri.length > 0 && (
+                                  <select
+                                    aria-label="Copia l'elenco da un altro sacco"
+                                    value=""
+                                    disabled={inCorso}
+                                    onChange={(event) => copiaDa(sacco, event.target.value)}
+                                  >
+                                    <option value="">Copia l&apos;elenco dal sacco…</option>
+                                    {altri.map((s) => (
+                                      <option key={s.id} value={s.id}>
+                                        n° {s.numero} ({s.materiale.length} {s.materiale.length === 1 ? 'pezzo' : 'pezzi'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </div>
+                            )}
+                          </section>
 
                           {puoModificare && (
                             <div className="scuola-azioni">
-                              {!(modulo?.tipo === 'pezzo' && !modulo.id && modulo.saccoId === sacco.id) && (
-                                <button type="button" onClick={() => nuovoPezzo(sacco)} disabled={inCorso}>+ Aggiungi materiale</button>
-                              )}
-                              {!sacco.materiale.length && altri.length > 0 && (
-                                <select
-                                  aria-label="Copia l'elenco da un altro sacco"
-                                  value=""
-                                  disabled={inCorso}
-                                  onChange={(event) => copiaDa(sacco, event.target.value)}
-                                >
-                                  <option value="">Copia l&apos;elenco dal sacco…</option>
-                                  {altri.map((s) => (
-                                    <option key={s.id} value={s.id}>
-                                      n° {s.numero} ({s.materiale.length} {s.materiale.length === 1 ? 'pezzo' : 'pezzi'})
-                                    </option>
-                                  ))}
-                                </select>
-                              )}
                               <button type="button" className="scuola-btn-neutro" onClick={() => modificaSacco(sacco)} disabled={inCorso}>
                                 Modifica sacco
                               </button>
