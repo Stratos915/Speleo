@@ -308,3 +308,23 @@
   padding: 0.35rem 0.75rem;
   font-size: 0.85rem;
 }
+
+.scuola-contenuto-sacco {
+  display: grid;
+  gap: 0.6rem;
+  padding: 0.7rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--color-border);
+  background: #fbfefe;
+}
+
+.scuola-contenuto-sacco h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--color-primary-dark);
+}
+
+.scuola-contenuto-sacco h4 small {
+  font-weight: 400;
+  color: var(--color-muted);
+}
