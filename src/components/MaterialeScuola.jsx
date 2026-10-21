@@ -1,7 +1,8 @@
 // Cartella del magazzino riservata alla scuola: il materiale diviso per numero di sacco.
-// Ogni sacco si consegna a un corsista e contiene un elenco di pezzi, ognuno con il
-// link alla sua scheda d'ispezione. I soci semplici non vedono questa sezione (e il
-// database non gliela fa leggere, migrazione 19).
+// Ogni sacco contiene un elenco di pezzi, ognuno con il link alla sua scheda d'ispezione.
+// La consegna a un corsista è facoltativa e serve solo durante un corso.
+// I soci semplici non vedono questa sezione (e il database non gliela fa leggere,
+// migrazione 19).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import usePermissions from '../hooks/usePermissions.js';
 import { canEditSacchiScuola, canViewSacchiScuola } from '../utils/permissions.js';
@@ -45,6 +46,11 @@ function dataIt(valore) {
   const data = new Date(`${String(valore).slice(0, 10)}T12:00:00Z`);
   if (Number.isNaN(data.getTime())) return String(valore);
   return data.toLocaleDateString('it-IT', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+/** «Imbrago, Croll, Moschettoni ×3» */
+function composizione(materiale) {
+  return materiale.map((p) => (p.quantita > 1 ? `${p.nome} ×${p.quantita}` : p.nome)).join(', ');
 }
 
 function prossimoNumero(sacchi) {
@@ -263,19 +269,33 @@ export default function MaterialeScuola() {
           Numero del sacco
           <input type="number" min="1" step="1" required {...campo('numero')} />
         </label>
-        <label>
-          Consegnato a (corsista)
-          <input type="text" placeholder="Nome e cognome" {...campo('consegnato_a')} />
-        </label>
-        <label>
-          Consegnato il
-          <input type="date" {...campo('consegnato_il')} />
-        </label>
       </div>
       <label>
         Note
         <textarea rows={2} {...campo('note')} />
       </label>
+      <fieldset className="scuola-consegna">
+        <legend>Consegna al corsista (facoltativa, solo durante un corso)</legend>
+        <div className="scuola-campi">
+          <label>
+            Corsista
+            <input type="text" placeholder="Nome e cognome" {...campo('consegnato_a')} />
+          </label>
+          <label>
+            Consegnato il
+            <input type="date" {...campo('consegnato_il')} />
+          </label>
+        </div>
+        {(valori.consegnato_a || valori.consegnato_il) && (
+          <button
+            type="button"
+            className="scuola-btn-neutro scuola-btn-piccolo"
+            onClick={() => setValori((prima) => ({ ...prima, consegnato_a: '', consegnato_il: '' }))}
+          >
+            Togli la consegna (sacco restituito)
+          </button>
+        )}
+      </fieldset>
       {errore && <p className="scuola-errore">{errore}</p>}
       <div className="scuola-azioni">
         <button type="submit" disabled={inCorso}>{inCorso ? 'Salvataggio…' : 'Salva'}</button>
@@ -422,15 +442,21 @@ export default function MaterialeScuola() {
                       >
                         <span className="scuola-numero">{sacco.numero}</span>
                         <span className="scuola-sacco-info">
-                          <strong>Sacco n° {sacco.numero}</strong>
-                          <small>
-                            {sacco.consegnato_a
-                              ? `Consegnato a ${sacco.consegnato_a}${sacco.consegnato_il ? ` il ${dataIt(sacco.consegnato_il)}` : ''}`
-                              : 'In magazzino'}
-                            {' · '}
-                            {sacco.materiale.length} {sacco.materiale.length === 1 ? 'pezzo' : 'pezzi'}
-                            {avvisi ? ` · ⚠️ ${avvisi}` : ''}
+                          <strong>
+                            Sacco n° {sacco.numero}
+                            {avvisi ? <span className="scuola-avvisi-sacco"> · ⚠️ {avvisi}</span> : null}
+                          </strong>
+                          <small className="scuola-composto">
+                            {sacco.materiale.length
+                              ? `Composto da: ${composizione(sacco.materiale)}`
+                              : 'Sacco vuoto'}
                           </small>
+                          {sacco.consegnato_a && (
+                            <small className="scuola-consegnato">
+                              🎓 Consegnato a {sacco.consegnato_a}
+                              {sacco.consegnato_il ? ` il ${dataIt(sacco.consegnato_il)}` : ''}
+                            </small>
+                          )}
                         </span>
                         <span aria-hidden="true" className="scuola-freccia">{espanso ? '▾' : '▸'}</span>
                       </button>
