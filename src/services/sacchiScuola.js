@@ -117,20 +117,42 @@ export async function eliminaPezzo(id) {
   controlla(error);
 }
 
-/**
- * Copia l'elenco di un sacco in un altro: nome, quantità e note.
- * Matricola, scheda d'ispezione e date restano vuote, perché ogni pezzo ha le sue.
- */
-export async function copiaElenco(daSacco, aSaccoId, posizioneIniziale = 0) {
-  const righe = (daSacco.materiale ?? []).map((pezzo, indice) => ({
-    sacco_id: aSaccoId,
+/** Le voci di un sacco pronte da copiare: solo nome e quantità degli articoli. */
+function vociDaCopiare(daSacco, saccoId, posizioneIniziale = 0) {
+  return (daSacco.materiale ?? []).map((pezzo, indice) => ({
+    sacco_id: saccoId,
     nome: pezzo.nome,
     quantita: pezzo.quantita ?? 1,
-    note: pezzo.note ?? null,
     posizione: posizioneIniziale + indice,
   }));
+}
+
+/**
+ * Copia l'elenco di un sacco in un altro: nome e quantità degli articoli.
+ * Matricola, scheda d'ispezione, date e note restano vuote, perché ogni pezzo ha le sue.
+ */
+export async function copiaElenco(daSacco, aSaccoId, posizioneIniziale = 0) {
+  const righe = vociDaCopiare(daSacco, aSaccoId, posizioneIniziale);
   if (!righe.length) return 0;
   const { error } = await supabase.from(MATERIALE).insert(righe);
   controlla(error);
   return righe.length;
+}
+
+/**
+ * Duplica un sacco: crea i sacchi con i numeri indicati, ognuno con lo stesso elenco
+ * di articoli (solo nome e quantità). Restituisce i sacchi creati.
+ * Se la copia dell'elenco non riesce, i sacchi appena creati vengono tolti.
+ */
+export async function duplicaSacco(daSacco, numeri) {
+  const nuovi = await creaSacchiNumerati(numeri);
+  const righe = nuovi.flatMap((sacco) => vociDaCopiare(daSacco, sacco.id));
+  if (righe.length) {
+    const { error } = await supabase.from(MATERIALE).insert(righe);
+    if (error) {
+      await supabase.from(SACCHI).delete().in('id', nuovi.map((sacco) => sacco.id));
+      controlla(error);
+    }
+  }
+  return nuovi;
 }
