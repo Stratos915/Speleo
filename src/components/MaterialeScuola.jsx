@@ -16,6 +16,7 @@ import {
   copiaElenco,
   creaSacchiNumerati,
   creaSacco,
+  duplicaSacco,
   eliminaPezzo,
   eliminaSacco,
   getSacchi,
@@ -220,6 +221,32 @@ export default function MaterialeScuola() {
       return;
     }
     await esegui(() => copiaElenco(origine, sacco.id, sacco.materiale.length), `sacco-${sacco.id}`);
+  };
+
+  const duplica = async (sacco) => {
+    const primo = prossimoNumero(sacchi);
+    const risposta = window.prompt(
+      `Quante copie del sacco n° ${sacco.numero}?\n` +
+        `Saranno numerate da ${primo} in poi, con gli stessi articoli (solo nome e quantità).\n` +
+        'Matricole e schede d\'ispezione le aggiungi poi in ogni sacco.',
+      '1',
+    );
+    if (risposta === null) return;
+    const quante = Number(String(risposta).trim());
+    if (!Number.isInteger(quante) || quante < 1 || quante > 100) {
+      setErrore('Indica quante copie fare (da 1 a 100).');
+      return;
+    }
+    const numeri = Array.from({ length: quante }, (_, i) => primo + i);
+    let creati = [];
+    const ok = await esegui(async () => {
+      creati = await duplicaSacco(sacco, numeri);
+    });
+    if (ok && creati.length) {
+      const primoNuovo = creati.find((s) => s.numero === primo) ?? creati[0];
+      apriSacco(primoNuovo.id, true);
+      tornaAllaScheda(`sacco-${primoNuovo.id}`);
+    }
   };
 
   // ---- Pezzi -----------------------------------------------------------
@@ -560,6 +587,11 @@ export default function MaterialeScuola() {
 
                           {puoModificare && (
                             <div className="scuola-azioni">
+                              {sacco.materiale.length > 0 && (
+                                <button type="button" onClick={() => duplica(sacco)} disabled={inCorso}>
+                                  ⧉ Duplica sacco
+                                </button>
+                              )}
                               <button type="button" className="scuola-btn-neutro" onClick={() => modificaSacco(sacco)} disabled={inCorso}>
                                 Modifica sacco
                               </button>
