@@ -6,7 +6,9 @@ import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
 import { formatMemberLabel } from '../utils/members.js';
 import { dedupeMembers } from '../utils/members.js';
-import { canViewQuote, getAllRoles } from '../utils/permissions.js';
+import { canViewQuote, canViewSacchiScuola, getAllRoles } from '../utils/permissions.js';
+import { MigrazioneSacchiMancante, getSacchi } from '../services/sacchiScuola.js';
+import { colonneSacchi, colonneSacchiPdf, consegneSacchi, riepilogoSacchi, righeSacchi } from '../utils/sacchiExport.js';
 import AccountRegistrati from '../components/AccountRegistrati.jsx';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
 import { fetchAccessEvents, fetchDailyVisits } from '../services/analytics.js';
@@ -145,6 +147,8 @@ export default function Report() {
   const { role, roles, isAuthenticated, user } = useAuth();
   // Stato delle quote: solo admin, presidente, consiglio e tesoriere.
   const vedeQuote = canViewQuote(roles?.length ? roles : [role]);
+  const vedeSacchi = canViewSacchiScuola(roles?.length ? roles : [role]);
+  const [sacchiBusy, setSacchiBusy] = useState(false);
   const colonneSociCompleto = vedeQuote
     ? csvColumns.soci_full
     : csvColumns.soci_full.filter((col) => col.key !== 'status_label');
@@ -916,6 +920,49 @@ export default function Report() {
       downloadXlsx(rows, key);
     } else {
       downloadCsv(rows, key);
+    }
+  }
+
+  // Sacchi della scuola (migrazione 19): si leggono al momento dell'esportazione.
+  async function handleSacchiExport(format = 'csv') {
+    setError('');
+    setSacchiBusy(true);
+    try {
+      const sacchi = await getSacchi();
+      if (!sacchi.length) {
+        setError('Non ci sono sacchi della scuola da esportare.');
+        return;
+      }
+      const righe = righeSacchi(sacchi);
+      const conConsegna = sacchi.some((sacco) => sacco.consegnato_a);
+      const giorno = new Date().toISOString().slice(0, 10);
+      const nomeFile = `sacchi-scuola-${giorno}`;
+      if (format === 'pdf') {
+        await downloadPdfTable(
+          'Materiale scuola · Sacchi',
+          colonneSacchiPdf(),
+          righe,
+          `${nomeFile}.pdf`,
+          {
+            intro: [
+              `Situazione al ${new Date().toLocaleDateString('it-IT')}: ${riepilogoSacchi(sacchi)}`,
+              ...consegneSacchi(sacchi),
+            ],
+          },
+        );
+      } else if (format === 'xlsx') {
+        triggerDownload(buildXlsxBlob(colonneSacchi(conConsegna), righe), `${nomeFile}.xlsx`);
+      } else {
+        triggerDownload(buildCsv(righe, colonneSacchi(conConsegna)), `${nomeFile}.csv`, 'text/csv;charset=utf-8;');
+      }
+    } catch (exportError) {
+      setError(
+        exportError instanceof MigrazioneSacchiMancante
+          ? exportError.message
+          : exportError.message ?? 'Esportazione dei sacchi non riuscita.',
+      );
+    } finally {
+      setSacchiBusy(false);
     }
   }
 
@@ -1794,6 +1841,16 @@ export default function Report() {
               onXlsx={() => handleExport('magazzino', 'xlsx')}
               disabled={loading}
             />
+            {vedeSacchi && (
+              <ReportCard
+                title="Materiale scuola · Sacchi"
+                description="Contenuto di ogni sacco: articoli, matricole, scadenze e, in CSV ed Excel, il link alla scheda d'ispezione."
+                onCsv={() => handleSacchiExport()}
+                onPdf={() => handleSacchiExport('pdf')}
+                onXlsx={() => handleSacchiExport('xlsx')}
+                disabled={loading || sacchiBusy}
+              />
+            )}
             <article className="card" style={{ padding: 0 }}>
               <details open>
                 <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '0.9rem 1rem' }}>Soci</summary>
