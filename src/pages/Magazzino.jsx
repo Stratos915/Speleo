@@ -439,6 +439,23 @@ export default function Magazzino() {
     }
   }
 
+  // Foto sbagliata: la toglie dal materiale e dall'archivio, senza aprire il modulo.
+  async function eliminaFotoDaScheda(material) {
+    if (!material.foto_path || !canEditInventory) return;
+    if (!window.confirm(`Eliminare la foto di «${material.name ?? 'questo materiale'}»?`)) return;
+    setError('');
+    setFotoInCaricamento(material.id);
+    try {
+      await updateEquipment(material.id, { foto_path: null });
+      await rimuoviFotoMateriale(material.foto_path);
+      await loadMaterials();
+    } catch (fotoError) {
+      setError(`Foto non eliminata: ${fotoError.message ?? 'errore sconosciuto'}`);
+    } finally {
+      setFotoInCaricamento(null);
+    }
+  }
+
   async function handleInspectionLinkEdit(material) {
     if (!canManageInspections) return;
     if (!canEditInventory) return;
@@ -788,6 +805,7 @@ export default function Magazzino() {
                         inCaricamento={fotoInCaricamento === material.id}
                         onApri={(url) => setFotoGrande({ url, nome: material.name })}
                         onCarica={(file) => caricaFotoDaScheda(material, file)}
+                        onElimina={() => eliminaFotoDaScheda(material)}
                       />
                     )}
                     <div style={{ minWidth: 0 }}>
@@ -942,13 +960,27 @@ export default function Magazzino() {
 
 // Miniatura della scheda: tocca per ingrandire; chi gestisce l'inventario
 // può aggiungere la foto direttamente da qui (sul telefono si apre la fotocamera).
-function Miniatura({ material, modificabile, inCaricamento, onApri, onCarica }) {
+function Miniatura({ material, modificabile, inCaricamento, onApri, onCarica, onElimina }) {
   const url = urlFotoMateriale(material.foto_path);
   if (url) {
     return (
-      <button type="button" className="mat-foto" onClick={() => onApri(url)} aria-label={`Ingrandisci la foto di ${material.name}`}>
-        <img src={url} alt="" loading="lazy" />
-      </button>
+      <span className="mat-foto-box">
+        <button type="button" className="mat-foto" onClick={() => onApri(url)} aria-label={`Ingrandisci la foto di ${material.name}`}>
+          <img src={url} alt="" loading="lazy" />
+        </button>
+        {modificabile && (
+          <button
+            type="button"
+            className="mat-foto-elimina"
+            onClick={onElimina}
+            disabled={inCaricamento}
+            aria-label={`Elimina la foto di ${material.name}`}
+            title="Elimina foto"
+          >
+            {inCaricamento ? '…' : '✕'}
+          </button>
+        )}
+      </span>
     );
   }
   if (!modificabile) {
