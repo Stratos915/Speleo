@@ -197,6 +197,8 @@ export function splitIntoLines(text, maxChars) {
 export function computeColumnWidths(columns, rows) {
   const values = rows.map((row) => columns.map((column) => formatCellValue(column, row[column.key]) || ''));
   const rawChars = columns.map((column, index) => {
+    // Larghezza fissa (in caratteri) quando la colonna la indica.
+    if (Number.isFinite(column.chars)) return Math.max(column.chars, PDF_MIN_COL_CHARS);
     const headerLength = String(column.label ?? '').length;
     const maxValueLength = values.reduce((max, row) => Math.max(max, String(row[index] ?? '').length), 0);
     const candidate = Math.max(headerLength, maxValueLength, PDF_MIN_COL_CHARS);
