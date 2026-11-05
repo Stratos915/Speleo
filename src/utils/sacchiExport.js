@@ -24,18 +24,32 @@ export function colonneSacchi(conConsegna) {
 }
 
 /**
- * Colonne per il PDF: larghezze fisse perché stiano nella pagina. Niente link lunghi:
- * la consegna ai corsisti va nell'introduzione (vedi consegneSacchi).
+ * Colonne per il PDF: un blocco per sacco, con il numero del sacco come titolo
+ * (vedi `gruppo` in generateTablePdf) e larghezze fisse perché stiano nella pagina.
+ * Niente link lunghi: su carta non si aprono.
  */
 export function colonneSacchiPdf() {
   return [
-    { key: 'sacco', label: 'Sacco', chars: 6 },
-    { key: 'articolo', label: 'Materiale', chars: 31 },
-    { key: 'matricola', label: 'Matricola', chars: 10 },
+    { key: 'sacco', label: 'Sacco', gruppo: true, intestazione: 'intestazione' },
+    { key: 'articolo', label: 'Materiale', chars: 36 },
+    { key: 'matricola', label: 'Matricola', chars: 12 },
     { key: 'prossima_ispezione', label: 'Ispezione', chars: 10 },
     { key: 'fine_vita', label: 'Fine vita', chars: 10 },
     { key: 'stato_breve', label: 'Stato', chars: 15 },
   ];
+}
+
+/** Titolo del blocco di un sacco nel PDF: numero, note e consegna. */
+function intestazioneSacco(sacco) {
+  const parti = [`Sacco n° ${sacco.numero}`];
+  if (sacco.note) parti.push(String(sacco.note).trim());
+  if (sacco.consegnato_a) {
+    const quando = sacco.consegnato_il
+      ? ` il ${formatDate(`${String(sacco.consegnato_il).slice(0, 10)}T12:00:00`)}`
+      : '';
+    parti.push(`consegnato a ${sacco.consegnato_a}${quando}`);
+  }
+  return parti.join(' · ');
 }
 
 function statoBreve(avvisi, conScheda) {
@@ -77,6 +91,7 @@ export function righeSacchi(sacchi, oggi = new Date()) {
   return ordinati.flatMap((sacco) => {
     const base = {
       sacco: sacco.numero,
+      intestazione: intestazioneSacco(sacco),
       consegnato_a: sacco.consegnato_a ?? '',
       consegnato_il: sacco.consegnato_il ? formatDate(`${String(sacco.consegnato_il).slice(0, 10)}T12:00:00`) : '',
     };

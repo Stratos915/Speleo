@@ -13,6 +13,7 @@ const PDF_PAGE_HEIGHT = 792;
 const PDF_MARGIN = 40;
 const PDF_FONT_SIZE = 8;
 const PDF_TITLE_FONT_SIZE = 12;
+const PDF_GROUP_TITLE_FONT_SIZE = 10;
 const PDF_LINE_HEIGHT = 11;
 const PDF_CHAR_WIDTH = 6;
 const PDF_CELL_PADDING = 3;
@@ -232,44 +233,115 @@ export function computeColumnWidths(columns, rows) {
   return { widths, charLimits };
 }
 
+/**
+ * Una colonna con `gruppo: true` divide la tabella in blocchi (es. un blocco per sacco):
+ * la colonna sparisce dalla tabella, ogni blocco ha il suo titolo (il campo indicato da
+ * `intestazione`, oppure «etichetta valore») e la sua riga di intestazione, e un blocco
+ * non viene spezzato fra due pagine se ci sta intero in una pagina.
+ */
+function dividiInGruppi(columns, rows) {
+  const colonnaGruppo = columns.find((column) => column.gruppo);
+  if (!colonnaGruppo) return null;
+  const gruppi = [];
+  rows.forEach((row) => {
+    const valore = row[colonnaGruppo.key];
+    let gruppo = gruppi[gruppi.length - 1];
+    if (!gruppo || gruppo.valore !== valore) {
+      const titolo = colonnaGruppo.intestazione
+        ? row[colonnaGruppo.intestazione]
+        : `${colonnaGruppo.label} ${formatCellValue(colonnaGruppo, valore)}`;
+      gruppo = { valore, titolo: String(titolo ?? ''), rows: [] };
+      gruppi.push(gruppo);
+    }
+    gruppo.rows.push(row);
+  });
+  return { colonne: columns.filter((column) => column !== colonnaGruppo), gruppi };
+}
+
 export function generateTablePdf(title, columns, rows, { backgroundImage, intro = [] } = {}) {
   const hasBackground = Boolean(backgroundImage?.data?.length);
   const startY = hasBackground ? 640 : PDF_PAGE_HEIGHT - PDF_MARGIN;
   const bottomY = hasBackground ? 90 : PDF_MARGIN;
-  const { widths, charLimits } = computeColumnWidths(columns, rows);
+  const raggruppati = dividiInGruppi(columns, rows);
+  const tableColumns = raggruppati ? raggruppati.colonne : columns;
+  const { widths, charLimits } = computeColumnWidths(tableColumns, rows);
   // Righe di testo sotto il titolo, solo nella prima pagina (es. i dati di un'uscita).
   const introLines = intro.flatMap((line) => splitIntoLines(line, PDF_INTRO_MAX_CHARS));
   const introHeight = introLines.length ? introLines.length * PDF_LINE_HEIGHT + PDF_LINE_HEIGHT : 0;
-  const headerLines = columns.map((column, index) => splitIntoLines(column.label, charLimits[index]));
-  const headerHeight =
-    Math.max(...headerLines.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
-  const rowLines = rows.map((row) =>
-    columns.map((column, index) => splitIntoLines(formatCellValue(column, row[column.key]), charLimits[index])),
-  );
+  const headerLines = tableColumns.map((column, index) => splitIntoLines(column.label, charLimits[index]));
+  const altezzaRiga = (row) =>
+    Math.max(...row.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
+  const headerHeight = altezzaRiga(headerLines);
+  const righe = (lista) =>
+    lista.map((row) =>
+      tableColumns.map((column, index) => splitIntoLines(formatCellValue(column, row[column.key]), charLimits[index])),
+    );
+  const titoloGruppoHeight = PDF_LINE_HEIGHT * 2;
+  const spazioTraGruppi = PDF_LINE_HEIGHT;
 
+  // Ogni pagina è un elenco di elementi: titolo di un blocco, intestazione, riga.
   const pages = [];
   let current = [];
   let cursorY = startY;
   let firstPage = true;
-  rowLines.forEach((row) => {
-    const rowHeight =
-      Math.max(...row.map((lines) => lines.length), 1) * PDF_LINE_HEIGHT + PDF_CELL_PADDING * 2;
-    const headerSpace = firstPage ? headerHeight + PDF_LINE_HEIGHT * 2 + introHeight : headerHeight;
-    if (cursorY - headerSpace - rowHeight < bottomY) {
-      pages.push({ rows: current, firstPage });
-      current = [];
-      cursorY = startY;
-      firstPage = false;
-    }
-    current.push(row);
-    cursorY -= rowHeight;
-  });
-  pages.push({ rows: current, firstPage });
+  const altezzaPrimaPagina = PDF_LINE_HEIGHT * 2 + introHeight;
+  const nuovaPagina = () => {
+    pages.push({ items: current, firstPage });
+    current = [];
+    cursorY = startY;
+    firstPage = false;
+  };
+  const spazioLibero = () => cursorY - (firstPage ? altezzaPrimaPagina : 0) - bottomY;
+  const aggiungi = (item, altezza) => {
+    current.push(item);
+    cursorY -= altezza;
+  };
+
+  if (!raggruppati) {
+    aggiungi({ tipo: 'intestazione' }, headerHeight);
+    righe(rows).forEach((row) => {
+      const rowHeight = altezzaRiga(row);
+      if (spazioLibero() - rowHeight < 0 && current.length > 1) {
+        nuovaPagina();
+        aggiungi({ tipo: 'intestazione' }, headerHeight);
+      }
+      aggiungi({ tipo: 'riga', row }, rowHeight);
+    });
+  } else {
+    raggruppati.gruppi.forEach((gruppo) => {
+      const righeGruppo = righe(gruppo.rows);
+      const altezzaGruppo =
+        titoloGruppoHeight + headerHeight + righeGruppo.reduce((sum, row) => sum + altezzaRiga(row), 0);
+      const staInUnaPagina = altezzaGruppo <= startY - bottomY;
+      if (current.length) {
+        const libero = spazioLibero() - spazioTraGruppi;
+        // Il blocco va a pagina nuova se non ci sta in quella corrente ma in una pagina intera sì;
+        // se è più lungo di una pagina, comincia qui solo se ci sta almeno titolo, intestazione e due righe.
+        const minimo = staInUnaPagina ? altezzaGruppo : titoloGruppoHeight + headerHeight * 3;
+        if (libero < minimo) nuovaPagina();
+      }
+      if (current.length) cursorY -= spazioTraGruppi;
+      aggiungi({ tipo: 'titolo', testo: gruppo.titolo }, titoloGruppoHeight);
+      aggiungi({ tipo: 'intestazione' }, headerHeight);
+      righeGruppo.forEach((row) => {
+        const rowHeight = altezzaRiga(row);
+        if (spazioLibero() - rowHeight < 0) {
+          // Blocco più lungo di una pagina: continua nella successiva con il suo titolo.
+          nuovaPagina();
+          aggiungi({ tipo: 'titolo', testo: `${gruppo.titolo} (segue)` }, titoloGruppoHeight);
+          aggiungi({ tipo: 'intestazione' }, headerHeight);
+        }
+        aggiungi({ tipo: 'riga', row }, rowHeight);
+      });
+    });
+  }
+  pages.push({ items: current, firstPage });
 
   const pageObjectNumbers = pages.map((_page, index) => 3 + index * 2);
   const contentObjectNumbers = pageObjectNumbers.map((number) => number + 1);
   const fontObjectNumber = 3 + pages.length * 2;
-  const imageObjectNumber = hasBackground ? fontObjectNumber + 1 : null;
+  const boldFontObjectNumber = fontObjectNumber + 1;
+  const imageObjectNumber = hasBackground ? fontObjectNumber + 2 : null;
 
   const encoder = new TextEncoder();
   const parts = [];
@@ -302,8 +374,8 @@ export function generateTablePdf(title, columns, rows, { backgroundImage, intro 
     const pageNumber = pageObjectNumbers[index];
     const contentNumber = contentObjectNumbers[index];
     const resources = hasBackground
-      ? `<< /Font << /F1 ${fontObjectNumber} 0 R >> /XObject << /Im1 ${imageObjectNumber} 0 R >> >>`
-      : `<< /Font << /F1 ${fontObjectNumber} 0 R >> >>`;
+      ? `<< /Font << /F1 ${fontObjectNumber} 0 R /F2 ${boldFontObjectNumber} 0 R >> /XObject << /Im1 ${imageObjectNumber} 0 R >> >>`
+      : `<< /Font << /F1 ${fontObjectNumber} 0 R /F2 ${boldFontObjectNumber} 0 R >> >>`;
     startObject();
     pushString(
       `${pageNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Contents ${contentNumber} 0 R /Resources ${resources} >>\nendobj\n`,
@@ -343,9 +415,20 @@ export function generateTablePdf(title, columns, rows, { backgroundImage, intro 
       return yTop - rowHeight;
     };
 
-    y = drawRow(headerLines, y);
-    pageData.rows.forEach((row) => {
-      y = drawRow(row, y);
+    pageData.items.forEach((item, itemIndex) => {
+      if (item.tipo === 'titolo') {
+        // Spazio prima di un blocco che non è il primo della pagina.
+        if (itemIndex > 0) y -= spazioTraGruppi;
+        const textY = y - PDF_LINE_HEIGHT - 2;
+        contentLines.push(
+          `BT /F2 ${PDF_GROUP_TITLE_FONT_SIZE} Tf ${PDF_MARGIN} ${textY} Td (${escapePdfText(item.testo)}) Tj ET`,
+        );
+        y -= titoloGruppoHeight;
+      } else if (item.tipo === 'intestazione') {
+        y = drawRow(headerLines, y);
+      } else {
+        y = drawRow(item.row, y);
+      }
     });
     const content = contentLines.join('\n');
     startObject();
@@ -357,6 +440,8 @@ export function generateTablePdf(title, columns, rows, { backgroundImage, intro 
 
   startObject();
   pushString(`${fontObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>\nendobj\n`);
+  startObject();
+  pushString(`${boldFontObjectNumber} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Courier-Bold /Encoding /WinAnsiEncoding >>\nendobj\n`);
 
   if (hasBackground) {
     startObject();

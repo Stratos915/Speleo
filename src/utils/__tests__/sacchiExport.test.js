@@ -28,6 +28,8 @@ describe('esportazione sacchi della scuola', () => {
       [2, '(sacco vuoto)'],
     ]);
     expect(righe[0].consegnato_a).toBe('Anna Verdi');
+    expect(righe[0].intestazione).toMatch(/^Sacco n° 1 · consegnato a Anna Verdi il /);
+    expect(righe[2].intestazione).toBe('Sacco n° 2');
     expect(righe[0].scheda_url).toBe('https://drive.google.com/x');
     expect(righe[0].scheda).toBe('Sì');
     expect(righe[0].stato).toMatch(/^Ispezione tra 15 giorni$/);
@@ -42,6 +44,7 @@ describe('esportazione sacchi della scuola', () => {
     expect(colonneSacchi(false).some((c) => c.key === 'consegnato_a')).toBe(false);
     expect(colonneSacchi(true).some((c) => c.key === 'consegnato_a')).toBe(true);
     expect(colonneSacchiPdf().some((c) => c.key === 'scheda_url')).toBe(false);
+    expect(colonneSacchiPdf().find((c) => c.key === 'sacco').gruppo).toBe(true);
     expect(consegneSacchi(sacchi)[0]).toMatch(/^Consegnati: n\. 1 a Anna Verdi \(/);
     expect(consegneSacchi([{ numero: 1 }])).toEqual([]);
   });
@@ -50,5 +53,20 @@ describe('esportazione sacchi della scuola', () => {
     expect(riepilogoSacchi(sacchi, oggi)).toBe(
       "2 sacchi · 2 articoli · 1 consegnato ai corsisti · 1 da controllare · 1 senza scheda d'ispezione",
     );
+  });
+
+  it('nel PDF ogni sacco è un blocco con il suo titolo e non si spezza fra due pagine', async () => {
+    const { generateTablePdf } = await import('../exporters.js');
+    const nomi = Array.from({ length: 11 }, (_, i) => ({ nome: `Articolo ${i + 1}`, quantita: 1 }));
+    const molti = Array.from({ length: 5 }, (_, i) => ({ numero: i + 1, materiale: nomi }));
+    const pdf = new TextDecoder('latin1').decode(generateTablePdf('Sacchi', colonneSacchiPdf(), righeSacchi(molti, oggi)));
+    const pagine = pdf.split('/Type /Page /Parent').slice(1);
+    // Ogni pagina contiene sacchi interi: titolo e tutte le 11 righe dello stesso sacco.
+    const perPagina = pagine.map((pagina) => (pagina.match(/Sacco n\\260 \d+/g) ?? []).length);
+    expect(perPagina.reduce((a, b) => a + b, 0)).toBe(5);
+    pagine.forEach((pagina, i) => {
+      expect((pagina.match(/\(Articolo \d+\)/g) ?? []).length).toBe(perPagina[i] * 11);
+    });
+    expect(pagine.length).toBeGreaterThan(1);
   });
 });
