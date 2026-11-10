@@ -22,6 +22,7 @@ import { useNavigate } from 'react-router-dom';
 const QUALIFICATION_OPTIONS = [
   { value: 'istruttore', label: 'Istruttore' },
   { value: 'aiuto_istruttore', label: 'Aiuto istruttore' },
+  { value: 'itca', label: 'ITCA · Istruttore cavità artificiali' },
 ];
 
 const PAYMENT_STATUS_OPTIONS = [
@@ -64,7 +65,11 @@ const emptyStudentForm = {
 const REGISTRY_QUALIFICATION_OPTIONS = [
   { value: 'istruttore', label: 'Istruttore' },
   { value: 'aiuto_istruttore', label: 'Aiuto istruttore' },
+  { value: 'itca', label: 'ITCA · Istruttore cavità artificiali' },
 ];
+
+// Sigla mostrata nel registro accanto al nome.
+const ABBREVIAZIONI_QUALIFICA = { istruttore: 'IT', aiuto_istruttore: 'AI', itca: 'ITCA' };
 
 const SAVE_DELAY_MS = 1200;
 
@@ -468,9 +473,10 @@ export default function Corso() {
     [registry, yearFolders],
   );
   const registryStats = useMemo(() => {
-    const summary = { total: registryEntriesWithYear.length, ai: 0, it: 0 };
+    const summary = { total: registryEntriesWithYear.length, ai: 0, it: 0, itca: 0 };
     registryEntriesWithYear.forEach((entry) => {
       if (entry.qualificationType === 'aiuto_istruttore') summary.ai += 1;
+      else if (entry.qualificationType === 'itca') summary.itca += 1;
       else summary.it += 1;
     });
     return summary;
@@ -1540,6 +1546,7 @@ function updateCourse(yearId, courseId, updater) {
                 <strong>Totale registrazioni: {registryStats.total}</strong>
                 <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
                   IT: {registryStats.it} · AI: {registryStats.ai}
+                  {registryStats.itca ? ` · ITCA: ${registryStats.itca}` : ''}
                 </p>
               </div>
               <label style={{ flex: '1 0 200px' }}>
@@ -1558,7 +1565,7 @@ function updateCourse(yearId, courseId, updater) {
               {filteredRegistryEntries.length ? (
                 filteredRegistryEntries.map((entry) => {
                   const member = membersMap.get(entry.memberId);
-                  const abbreviation = entry.qualificationType === 'aiuto_istruttore' ? 'AI' : 'IT';
+                  const abbreviation = ABBREVIAZIONI_QUALIFICA[entry.qualificationType] ?? 'IT';
                   const isExpanded = registryExpandedEntry === entry.id;
                   return (
                     <article key={entry.id} className="card" style={{ padding: '1rem' }}>
