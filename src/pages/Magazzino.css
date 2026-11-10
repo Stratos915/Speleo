@@ -360,3 +360,40 @@
   font-weight: 400;
   color: var(--color-muted);
 }
+
+/* Magazzino ACAR: bombole, erogatori, maschere (stessi stili della cartella scuola) */
+.acar-cartella {
+  border-color: #1c7ed6;
+  background: #f5faff;
+}
+
+.acar-tipologia,
+.acar-filtri {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  align-items: center;
+}
+
+.acar-filtri input[type='search'] {
+  flex: 1 1 14rem;
+}
+
+.scuola-modulo .acar-scelta,
+.acar-scelta {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.acar-scelta input {
+  width: auto;
+  margin: 0;
+}
+
+.acar-tecnici {
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
