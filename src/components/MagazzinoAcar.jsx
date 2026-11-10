@@ -1,7 +1,8 @@
 // Area del magazzino per il materiale ACAR: bombole, erogatori, maschere.
 // Per ogni pezzo: matricola, scadenza della revisione e, per le bombole,
 // tipologia (composito / acciaio), capacità, pressione e percentuale di ossigeno.
-// La vedono tutti; la modificano admin, presidente e magazziniere (migrazione 20).
+// Come il materiale scuola la vedono tutti tranne i soci semplici; la modificano
+// admin, presidente e magazziniere (migrazioni 20 e 21).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import usePermissions from '../hooks/usePermissions.js';
 import { canEditAcar, canViewAcar } from '../utils/permissions.js';
@@ -292,7 +293,7 @@ export default function MagazzinoAcar() {
         <span className="scuola-cartella-nome">
           Magazzino ACAR
           <small>
-            Bombole, erogatori, maschere{riepilogo}
+            Riservato: non visibile ai soci{riepilogo}
             {daRevisionare ? ` · ⚠️ ${daRevisionare} da revisionare` : ''}
           </small>
         </span>
