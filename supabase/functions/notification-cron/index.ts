@@ -21,6 +21,9 @@
 //                       a chi non l'ha ancora data
 //  10. ADESIONE         al responsabile dell'uscita: chi si aggiunge («Partecipo») o
 //                       chi non partecipa più (migrazione 15)
+//  11. RICHIESTA_ACCESSO nuovo utente registrato in attesa di approvazione: email ad admin e
+//                       presidente, avviso nell'app e notifica push a chi ha ruolo admin o
+//                       presidente (chi può approvare). Solo account con l'email confermata.
 //
 // Adesioni (migrazione 15): gli avvisi di nuova uscita e i promemoria portano i pulsanti
 // «Partecipo · Forse · No» (push) e tre link personali (email), firmati con il segreto
@@ -1502,6 +1505,105 @@ async function checkAdesioni(supabase: SupabaseClient, config: Config, runId: st
 }
 
 // ---------------------------------------------------------------------------
+// 11. Richieste di accesso: nuovi utenti in attesa di approvazione
+// ---------------------------------------------------------------------------
+// Chi può approvare le richieste (come nella pagina Report).
+const RUOLI_APPROVAZIONE = ["admin", "presidente"];
+// Richieste più vecchie di così non generano avvisi (per non ripescare il passato).
+const RICHIESTE_FINESTRA_GIORNI = 7;
+
+async function checkRichiesteAccesso(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "RICHIESTA_ACCESSO";
+  const since = new Date(now.getTime() - RICHIESTE_FINESTRA_GIORNI * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("id, email, first_name, last_name, phone, created_at")
+    .eq("approval_status", "pending")
+    .gte("created_at", since)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  if (!data?.length) return { total: 0, new: 0 };
+
+  const fresh: any[] = [];
+  let inAttesaConferma = 0;
+  for (const profilo of data) {
+    // Solo chi ha confermato l'email: gli altri potrebbero essere indirizzi sbagliati o spam.
+    // Se la conferma arriva dopo, l'avviso parte al giro successivo.
+    const { data: utente, error: utenteError } = await supabase.auth.admin.getUserById(profilo.id);
+    if (!utenteError && utente?.user && !utente.user.email_confirmed_at) {
+      inAttesaConferma += 1;
+      continue;
+    }
+    if (await claim(supabase, runId, { kind, refId: profilo.id, meta: { email: profilo.email } })) fresh.push(profilo);
+  }
+  if (!fresh.length) return { total: data.length, new: 0, in_attesa_conferma: inAttesaConferma };
+
+  const nome = (p: any) => `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || String(p.email ?? "Nuovo utente");
+  const priv = await loadPrivateConfig(supabase).catch(() => null);
+  const appUrl = priv?.get("app_url") || APP_URL_DEFAULT;
+
+  const result = await sendWebhook(config, {
+    type: "richieste_accesso",
+    count: fresh.length,
+    items: fresh.map((p) => ({
+      nome: nome(p),
+      email: p.email ?? null,
+      telefono: p.phone ?? null,
+      registrato_il: p.created_at,
+    })),
+    app_url: appUrl,
+    recipients: { admin: config.recipients.admin, presidente: config.recipients.presidente },
+    meta: { runId, kind },
+  });
+  await finalize(supabase, config, kind, fresh.map((p) => p.id), result);
+
+  await notifyInApp(
+    supabase,
+    fresh.map((p) => ({
+      audience: "admin",
+      target_role: "presidente",
+      type: "info",
+      title: "Nuova richiesta di accesso",
+      message: `${nome(p)}${p.email ? ` (${p.email})` : ""} si è registrato e aspetta l'approvazione.`,
+      link: "/report",
+      meta: { profile_id: p.id, runId },
+    })),
+  );
+
+  // Notifica push a chi può approvare, secondo le sue preferenze.
+  let push: unknown = { skipped: "migrazione 09 mancante" };
+  if (priv) {
+    const [{ data: profili, error: profiliError }, { data: preferenze, error: prefError }] = await Promise.all([
+      supabase.from("profiles").select("id, role, ruoli_extra").eq("approval_status", "approved"),
+      supabase.from("notifica_preferenze").select("user_id, push"),
+    ]);
+    if (profiliError) throw profiliError;
+    if (prefError) throw prefError;
+    const senzaPush = new Set((preferenze ?? []).filter((row: any) => row.push === false).map((row: any) => row.user_id));
+    const destinatari = (profili ?? [])
+      .filter((p: any) => [p.role, ...(Array.isArray(p.ruoli_extra) ? p.ruoli_extra : [])].some((r) => RUOLI_APPROVAZIONE.includes(r)))
+      .filter((p: any) => !senzaPush.has(p.id))
+      .map((p: any) => p.id as string);
+    const payload: PushPayload = fresh.length === 1
+      ? {
+        title: "Nuova richiesta di accesso",
+        body: `${nome(fresh[0])} aspetta l'approvazione.`,
+        url: "/report",
+        tag: `richiesta-${fresh[0].id}`,
+      }
+      : {
+        title: `${fresh.length} nuove richieste di accesso`,
+        body: fresh.map((p) => nome(p)).join(", "),
+        url: "/report",
+        tag: "richieste-accesso",
+      };
+    push = await sendPushSicuro(supabase, priv, destinatari, [payload], config.testMode, runId);
+  }
+
+  return { total: data.length, new: fresh.length, in_attesa_conferma: inAttesaConferma, push };
+}
+
+// ---------------------------------------------------------------------------
 /** Confronto a tempo costante, per non rivelare il token un carattere alla volta. */
 function stessoToken(a: string, b: string) {
   if (!a || !b || a.length !== b.length) return false;
@@ -1578,9 +1680,18 @@ async function runCron(req: Request, interno = false) {
       ["promemoria_prestiti", () => checkPromemoriaPrestiti(supabase, config, runId, now)],
       ["promemoria_uscite", () => checkPromemoriaUscite(supabase, config, runId, now)],
       ["adesioni", () => checkAdesioni(supabase, config, runId, now)],
+      ["richieste_accesso", () => checkRichiesteAccesso(supabase, config, runId, now)],
     ];
-    // Anche i movimenti di magazzino: così gli avvisi arrivano entro una decina di minuti.
-    const CONTROLLI_SOCI = ["movimenti", "nuove_uscite", "uscite_cambiate", "promemoria_prestiti", "promemoria_uscite", "adesioni"];
+    // Anche movimenti di magazzino e richieste di accesso: così gli avvisi arrivano entro una decina di minuti.
+    const CONTROLLI_SOCI = [
+      "movimenti",
+      "nuove_uscite",
+      "uscite_cambiate",
+      "promemoria_prestiti",
+      "promemoria_uscite",
+      "adesioni",
+      "richieste_accesso",
+    ];
     for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
         checks[name] = await fn();
