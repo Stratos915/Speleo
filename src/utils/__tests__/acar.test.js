@@ -5,8 +5,10 @@ import { canEditAcar, canViewAcar } from '../permissions.js';
 const oggi = new Date('2026-11-10T10:00:00');
 
 describe('magazzino ACAR', () => {
-  it('permessi: tutti vedono, modificano admin, presidente e magazziniere', () => {
-    expect(canViewAcar(['socio'])).toBe(true);
+  it('permessi: come il materiale scuola (non i soci semplici), modificano admin, presidente e magazziniere', () => {
+    expect(canViewAcar(['socio'])).toBe(false);
+    expect(canViewAcar(['socio', 'consiglio'])).toBe(true);
+    expect(canViewAcar(['direttore_scuola'])).toBe(true);
     expect(canEditAcar(['socio'])).toBe(false);
     expect(canEditAcar(['direttore_scuola'])).toBe(false);
     expect(canEditAcar(['socio', 'magazziniere'])).toBe(true);
