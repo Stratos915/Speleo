@@ -121,6 +121,7 @@ const YEAR_END = 2050;
 const qualificationLabels = {
   istruttore: 'Istruttore',
   aiuto_istruttore: 'Aiuto istruttore',
+  itca: 'ITCA · Istruttore cavità artificiali',
 };
 
 const sociSummaryColumns = [
