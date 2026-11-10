@@ -13,7 +13,8 @@ import {
   uploadScuolaFile,
 } from '../services/scuola.js';
 import { SCUOLA_UI_STATE_KEY, extractScuolaDocument, hasScuolaContent } from '../utils/scuolaData.js';
-import { dedupeMembers } from '../utils/members.js';
+import { dedupeMembers, emailSocio, mappaEmailSoci } from '../utils/members.js';
+import SelectSocio from '../components/SelectSocio.jsx';
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
@@ -446,6 +447,8 @@ export default function Corso() {
   }, [yearFolders, activeYearId, activeCourseId]);
 
   const membersMap = useMemo(() => new Map(members.map((member) => [member.id, member])), [members]);
+  // Email del socio: se manca nella riga dell'anno si prende da un altro anno dello stesso socio.
+  const emailPerNome = useMemo(() => mappaEmailSoci(members), [members]);
   const uniqueMembers = useMemo(() => {
     const sorted = [...members].sort((a, b) => {
       const yearA = Number(a.membership_year ?? a.year ?? a.anno ?? 0);
@@ -569,18 +572,13 @@ export default function Corso() {
         >
           <label>
             Seleziona socio
-            <select
+            <SelectSocio
+              members={uniqueMembers}
               value={instructorForm.memberId}
-              onChange={(event) => handleInstructorFormChange('memberId', event.target.value)}
+              onChange={(memberId) => handleInstructorFormChange('memberId', memberId)}
               disabled={membersLoading || isActiveCourseClosed}
-            >
-              <option value="">--</option>
-              {uniqueMembers.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
-                </option>
-              ))}
-            </select>
+              style={{ marginTop: '0.35rem' }}
+            />
           </label>
           <label>
             Qualifica principale
@@ -620,7 +618,7 @@ export default function Corso() {
                   <div>
                     <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
                     <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-                      Tessera: {member?.old_id ?? 'N/D'} · {member?.email ?? 'Email non disponibile'}
+                      Tessera: {member?.old_id ?? 'N/D'} · {emailSocio(member, emailPerNome) || 'Email non disponibile'}
                     </p>
                   </div>
                   <button
@@ -990,21 +988,23 @@ function updateCourse(yearId, courseId, updater) {
     updateCourse(activeYear.id, courseId, () => ({ name: value }));
   }
 
-  function handleCourseRemove(event, courseId) {
+  // Un anno può anche restare senza corsi (anni in cui la scuola non ne organizza).
+  function handleCourseRemove(event, yearId, courseId) {
     event.preventDefault();
-    if (!activeYear) return;
-    const remaining = activeYear.courses.filter((course) => course.id !== courseId);
-    if (!remaining.length) {
-      window.alert('Ogni anno deve contenere almeno un corso.');
-      return;
-    }
+    const year = yearFolders.find((item) => item.id === yearId);
+    const course = year?.courses.find((item) => item.id === courseId);
+    if (!year || !course) return;
+    const iscritti = (course.instructors?.length ?? 0) + (course.students?.length ?? 0);
+    const dettaglio = iscritti
+      ? `\n\nContiene ${course.instructors?.length ?? 0} istruttori e ${course.students?.length ?? 0} corsisti, che verranno cancellati.`
+      : '';
+    if (!window.confirm(`Eliminare il corso «${course.name || 'senza nome'}» da ${year.label}?${dettaglio}`)) return;
+    const remaining = year.courses.filter((item) => item.id !== courseId);
     setYearFolders((prev) =>
-      prev.map((year) =>
-        year.id === activeYear.id ? { ...year, courses: remaining } : year,
-      ),
+      prev.map((item) => (item.id === yearId ? { ...item, courses: remaining } : item)),
     );
     if (activeCourseId === courseId) {
-      setActiveCourseId(remaining[0].id);
+      setActiveCourseId(remaining[0]?.id ?? null);
     }
   }
 
@@ -1428,6 +1428,11 @@ function updateCourse(yearId, courseId, updater) {
               </p>
               {expandedYearId === year.id && (
                 <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(0,0,0,0.08)', paddingTop: '1rem' }}>
+                  {!year.courses.length && (
+                    <p style={{ margin: '0 0 0.75rem', color: 'var(--color-muted)' }}>
+                      Nessun corso in quest&apos;anno. Puoi aggiungerne uno qui sotto quando serve.
+                    </p>
+                  )}
                   {year.courses.map((course) => {
                     const isCurrentCourse = year.id === activeYearId && course.id === activeCourseId;
                     return (
@@ -1478,7 +1483,7 @@ function updateCourse(yearId, courseId, updater) {
                             style={{ background: '#e03131' }}
                             onClick={(event) => {
                               setActiveYearId(year.id);
-                              handleCourseRemove(event, course.id);
+                              handleCourseRemove(event, year.id, course.id);
                             }}
                           >
                             Elimina
@@ -1575,7 +1580,7 @@ function updateCourse(yearId, courseId, updater) {
                             {member?.full_name ?? 'Socio non trovato'} · {abbreviation}
                           </h4>
                           <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-                            Tessera: {member?.old_id ?? 'N/D'} · {member?.email ?? 'Email non disponibile'} · {entry.yearLabel}
+                            Tessera: {member?.old_id ?? 'N/D'} · {emailSocio(member, emailPerNome) || 'Email non disponibile'} · {entry.yearLabel}
                           </p>
                         </div>
                         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -1782,18 +1787,14 @@ function updateCourse(yearId, courseId, updater) {
           </label>
           <label>
             Seleziona istruttore
-            <select
+            <SelectSocio
+              members={uniqueMembers}
               value={registryForm.memberId}
-              onChange={(event) => handleRegistryFormChange('memberId', event.target.value)}
+              onChange={(memberId) => handleRegistryFormChange('memberId', memberId)}
               disabled={membersLoading}
-            >
-              <option value="">--</option>
-              {uniqueMembers.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.full_name} {member.old_id ? `(Tessera ${member.old_id})` : ''}
-                </option>
-              ))}
-            </select>
+              placeholder="Seleziona istruttore"
+              style={{ marginTop: '0.35rem' }}
+            />
           </label>
           <label>
             Qualifica nel registro
