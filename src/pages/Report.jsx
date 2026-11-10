@@ -4,8 +4,7 @@ import { createMember, getMembers, updateMember } from '../services/members.js';
 import { getEquipment } from '../services/equipment.js';
 import { getActivityLogs } from '../services/activityLogs.js';
 import useAuth from '../context/useAuth.js';
-import { formatMemberLabel } from '../utils/members.js';
-import { dedupeMembers } from '../utils/members.js';
+import { dedupeMembers, emailSocio, formatMemberLabel, mappaEmailSoci, ordinaSociPerNome } from '../utils/members.js';
 import { canViewQuote, canViewSacchiScuola, getAllRoles } from '../utils/permissions.js';
 import { MigrazioneSacchiMancante, getSacchi } from '../services/sacchiScuola.js';
 import { colonneSacchi, colonneSacchiPdf, consegneSacchi, riepilogoSacchi, righeSacchi } from '../utils/sacchiExport.js';
@@ -131,6 +130,16 @@ const sociSummaryColumns = [
   { key: 'unpaid', label: 'Quote da saldare' },
 ];
 
+// Nel Report gli elenchi vanno dal più recente al più vecchio.
+function dalPiuRecente(list, getDate) {
+  const tempo = (item) => {
+    const value = getDate(item);
+    const parsed = value ? new Date(value).getTime() : NaN;
+    return Number.isNaN(parsed) ? Number.MIN_SAFE_INTEGER : parsed;
+  };
+  return [...(list ?? [])].sort((a, b) => tempo(b) - tempo(a));
+}
+
 function resolveYearValue(input) {
   if (Number.isFinite(input)) return Number(input);
   const numeric = Number(input);
@@ -188,7 +197,8 @@ export default function Report() {
       return { total: 0, lastDay: null };
     }
     const total = visitsData.reduce((sum, row) => sum + Number(row?.visits ?? 0), 0);
-    const lastDay = visitsData[visitsData.length - 1] ?? null;
+    // L'elenco parte dal giorno più recente.
+    const lastDay = visitsData[0] ?? null;
     return { total, lastDay };
   }, [visitsData]);
   const visitsRows = useMemo(
@@ -246,7 +256,7 @@ export default function Report() {
       }
 
       if (usciteRes.status === 'fulfilled') {
-        setUscite(usciteRes.value.data ?? []);
+        setUscite(dalPiuRecente(usciteRes.value.data ?? [], (item) => item?.data));
       } else {
         console.warn('[Report] Impossibile caricare le uscite:', usciteRes.reason?.message ?? usciteRes.reason);
       }
@@ -258,7 +268,7 @@ export default function Report() {
       }
 
       if (logsRes.status === 'fulfilled') {
-        setActivityLogs(canViewActivityLog ? logsRes.value ?? [] : []);
+        setActivityLogs(canViewActivityLog ? dalPiuRecente(logsRes.value ?? [], (log) => log?.created_at) : []);
       } else if (canViewActivityLog) {
         console.warn('[Report] Impossibile caricare i log:', logsRes.reason?.message ?? logsRes.reason);
       }
@@ -292,7 +302,7 @@ export default function Report() {
       setVisitsLoading(true);
       try {
         const rows = await fetchDailyVisits({ days: visitsRange });
-        if (!ignore) setVisitsData(rows);
+        if (!ignore) setVisitsData(dalPiuRecente(rows, (row) => row?.day));
       } catch (analyticsErr) {
         console.error('[Report] Impossibile caricare le statistiche visite:', analyticsErr);
         if (!ignore) {
@@ -335,7 +345,7 @@ export default function Report() {
           const minutes = Number(activeRange.replace('m', '')) || 2;
           rows = await fetchAccessEvents({ minutes, limit: 2000 });
         }
-        if (!ignore) setActiveUsers(rows);
+        if (!ignore) setActiveUsers(dalPiuRecente(rows, (row) => row?.created_at ?? row?.last_seen_at));
       } catch (activeErr) {
         console.error('[Report] Impossibile caricare gli accessi utenti:', activeErr);
         if (!ignore) setActiveError('Impossibile caricare gli accessi utenti.');
@@ -366,7 +376,7 @@ export default function Report() {
         .eq('approval_status', 'pending')
         .order('created_at', { ascending: false });
       if (profilesError) throw profilesError;
-      const rows = data ?? [];
+      const rows = dalPiuRecente(data ?? [], (row) => row?.created_at);
       setPendingProfiles(rows);
       const nextAssignments = {};
       const nextExtra = {};
@@ -394,7 +404,7 @@ export default function Report() {
         .order('created_at', { ascending: false })
         .limit(200);
       if (historyErrorRes) throw historyErrorRes;
-      setApprovalHistory(data ?? []);
+      setApprovalHistory(dalPiuRecente(data ?? [], (row) => row?.created_at));
     } catch (loadError) {
       setHistoryError(loadError.message ?? 'Impossibile caricare lo storico.');
     } finally {
@@ -424,6 +434,8 @@ export default function Report() {
     () => new Map(members.map((member) => [String(member.id), member])),
     [members],
   );
+  // Email del socio: se manca nella riga dell'anno si prende da un altro anno dello stesso socio.
+  const emailPerNome = useMemo(() => mappaEmailSoci(members), [members]);
 
   const normalizeName = useCallback((value) => {
     return String(value ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
@@ -778,7 +790,7 @@ export default function Report() {
 
   const scuolaYearOptions = useMemo(() => {
     const options = [];
-    for (let year = YEAR_START; year <= YEAR_END; year += 1) {
+    for (let year = YEAR_END; year >= YEAR_START; year -= 1) {
       options.push(String(year));
     }
     return options;
@@ -786,8 +798,10 @@ export default function Report() {
 
   const filteredYearFolders = useMemo(() => {
     if (!scuolaSummary) return [];
-    if (scuolaYearFilter === 'all') return scuolaSummary.yearFolders;
-    return scuolaSummary.yearFolders.filter((folder) => {
+    const anno = (folder) => resolveYearValue(folder.year ?? folder.value ?? folder.label ?? folder.id) ?? 0;
+    const ordinate = [...scuolaSummary.yearFolders].sort((a, b) => anno(b) - anno(a));
+    if (scuolaYearFilter === 'all') return ordinate;
+    return ordinate.filter((folder) => {
       const folderYear = resolveYearValue(folder.year ?? folder.value ?? folder.label ?? folder.id);
       if (!folderYear) return false;
       return String(folderYear) === scuolaYearFilter;
@@ -846,7 +860,7 @@ export default function Report() {
         membership_number: member?.old_id ?? member?.membership_number ?? '',
         qualification: qualificationLabels[item.qualification] ?? item.qualification,
         custom_qualification: item.customQualification || '',
-        email: member?.email ?? '',
+        email: emailSocio(member, emailPerNome),
       };
     });
   }
@@ -875,7 +889,7 @@ export default function Report() {
     const yearLabelMap = new Map(
       (scuolaSummary.yearFolders ?? []).map((year) => [year.id, year.label]),
     );
-    return (scuolaSummary.registry ?? []).map((entry) => {
+    const rows = (scuolaSummary.registry ?? []).map((entry) => {
       const member = membersMap.get(entry.memberId);
       return {
         id: entry.id,
@@ -890,10 +904,19 @@ export default function Report() {
         last_maintenance_date: entry.lastMaintenanceDate,
         next_maintenance_date: entry.nextMaintenanceDate,
         activities: entry.activities,
-        email: member?.email ?? '',
+        email: emailSocio(member, emailPerNome),
       };
     });
-  }, [scuolaSummary, membersMap]);
+    // Anni dal più recente; dentro l'anno il registro resta in ordine alfabetico.
+    const registry = scuolaSummary.registry ?? [];
+    const annoDi = (row) => resolveYearValue(row.year_label) ?? 0;
+    const perNome = ordinaSociPerNome(registry.map((entry) => membersMap.get(entry.memberId)).filter(Boolean));
+    const posizione = (row) => {
+      const indice = perNome.indexOf(membersMap.get(row.member_id));
+      return indice === -1 ? Number.MAX_SAFE_INTEGER : indice;
+    };
+    return rows.sort((a, b) => annoDi(b) - annoDi(a) || posizione(a) - posizione(b));
+  }, [scuolaSummary, membersMap, emailPerNome]);
 
   function handleExport(key, format = 'csv') {
     setError('');

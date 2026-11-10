@@ -14,6 +14,7 @@ import { dedupeMembers } from '../utils/members.js';
 import { tornaAllaScheda } from '../utils/scorrimento.js';
 import { canEditQuote, canViewQuote, getAllRoles } from '../utils/permissions.js';
 import SceltaRuoli from '../components/SceltaRuoli.jsx';
+import SelectSocio from '../components/SelectSocio.jsx';
 
 const YEAR_START = 2025;
 const YEAR_END = 2050;
@@ -1826,18 +1827,12 @@ export default function Members() {
                 <form onSubmit={handlePurchaseSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
                   <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                     Socio
-                    <select
+                    <SelectSocio
+                      members={uniqueMembers}
                       value={purchaseForm.member_id}
-                      onChange={(event) => handlePurchaseChange('member_id', event.target.value)}
+                      onChange={(memberId) => handlePurchaseChange('member_id', memberId)}
                       required
-                    >
-                      <option value="">Seleziona socio</option>
-                      {uniqueMembers.map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.full_name} (#{member.old_id ?? 'N/D'})
-                        </option>
-                      ))}
-                    </select>
+                    />
                   </label>
                   <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>

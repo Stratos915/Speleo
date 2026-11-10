@@ -76,3 +76,65 @@ export function dedupeMembers(list = []) {
     return true;
   });
 }
+
+/** Nome del socio come appare nelle tendine («Nome Cognome»). */
+export function nomeSocio(member) {
+  return resolveFullName(member);
+}
+
+/** Numero di tessera del socio, se c'è. */
+export function tesseraSocio(member) {
+  return getMembershipNumber(member);
+}
+
+const normalizzaTesto = (value) =>
+  String(value ?? '')
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/** Ordine alfabetico come si legge nella tendina: per nome completo. */
+export function ordinaSociPerNome(list = []) {
+  if (!Array.isArray(list)) return [];
+  const opzioni = { sensitivity: 'base', numeric: true };
+  return [...list].sort((a, b) => {
+    const perNome = resolveFullName(a).localeCompare(resolveFullName(b), 'it', opzioni);
+    if (perNome) return perNome;
+    return String(getMembershipNumber(a) ?? '').localeCompare(String(getMembershipNumber(b) ?? ''), 'it', opzioni);
+  });
+}
+
+/**
+ * Ricerca libera: ogni parola scritta deve comparire nel nome, nella tessera
+ * o nell'email (senza badare a maiuscole e accenti).
+ */
+export function filtraSoci(list = [], testo = '') {
+  if (!Array.isArray(list)) return [];
+  const parole = normalizzaTesto(testo).split(' ').filter(Boolean);
+  if (!parole.length) return list;
+  return list.filter((member) => {
+    const campi = normalizzaTesto(
+      [resolveFullName(member), getMembershipNumber(member), member?.email].filter(Boolean).join(' '),
+    );
+    return parole.every((parola) => campi.includes(parola));
+  });
+}
+
+/** Email per nome: le righe degli anni diversi dello stesso socio si completano a vicenda. */
+export function mappaEmailSoci(list = []) {
+  const mappa = new Map();
+  (Array.isArray(list) ? list : []).forEach((member) => {
+    const email = String(member?.email ?? '').trim();
+    const nome = normalizzaTesto(resolveFullName(member));
+    if (email && nome && !mappa.has(nome)) mappa.set(nome, email);
+  });
+  return mappa;
+}
+
+export function emailSocio(member, mappa) {
+  const propria = String(member?.email ?? '').trim();
+  if (propria) return propria;
+  return mappa?.get(normalizzaTesto(resolveFullName(member))) ?? '';
+}
