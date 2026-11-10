@@ -90,7 +90,7 @@ export function tesseraSocio(member) {
 const normalizzaTesto = (value) =>
   String(value ?? '')
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/\p{M}/gu, '')
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
