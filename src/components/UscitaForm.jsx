@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getMembers } from '../services/members';
-import { dedupeMembers, formatMemberLabel, buildMemberTooltip } from '../utils/members.js';
+import { dedupeMembers, formatMemberLabel } from '../utils/members.js';
+import SelectSocio from './SelectSocio.jsx';
 import { TIPI_USCITA, TIPO_CON_DESCRIZIONE, usaMateriale } from '../utils/tipiUscita.js';
 
 const EMPTY_FORM = {
@@ -81,7 +82,6 @@ export default function UscitaForm({
   const [members, setMembers] = useState(membersList ?? []);
   const [membersLoading, setMembersLoading] = useState(!membersList);
   const [membersError, setMembersError] = useState('');
-  const [participantsSearch, setParticipantsSearch] = useState('');
   const [selectedParticipantId, setSelectedParticipantId] = useState('');
   const timeInputRef = useRef(null);
   const prestitoParams = useMemo(() => {
@@ -106,7 +106,6 @@ export default function UscitaForm({
       rientro_previsto: datetimeLocalForInput(initialValues?.rientro_previsto),
       tipo_descrizione: initialValues?.tipo_descrizione ?? '',
     });
-    setParticipantsSearch('');
     setSelectedParticipantId('');
   }, [initialValues]);
 
@@ -150,16 +149,6 @@ export default function UscitaForm({
     if (!form.luogo?.trim()) return null;
     return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(form.luogo.trim())}`;
   }, [form.luogo]);
-
-  const filteredParticipants = useMemo(() => {
-    if (!participantsSearch.trim()) return members;
-    const term = participantsSearch.toLowerCase();
-    return members.filter(
-      (member) =>
-        member.full_name?.toLowerCase().includes(term) ||
-        String(member.membership_number ?? '').includes(term),
-    );
-  }, [members, participantsSearch]);
 
   const memberLabelsMap = useMemo(() => {
     const map = new Map();
@@ -314,11 +303,11 @@ export default function UscitaForm({
           <p>Caricamento soci...</p>
         ) : (
           <>
-            <select
+            <SelectSocio
               id="responsabile"
+              members={members}
               value={form.responsabile_id}
-              onChange={(event) => {
-                const selectedId = event.target.value;
+              onChange={(selectedId) => {
                 const selectedMember = members.find((member) => String(member.id) === selectedId);
                 setForm((prev) => ({
                   ...prev,
@@ -326,26 +315,10 @@ export default function UscitaForm({
                   responsabile_nome: selectedMember ? selectedMember.full_name : prev.responsabile_nome,
                 }));
               }}
-              disabled={!members.length}
-            >
-              <option value="">{members.length ? 'Seleziona responsabile' : 'Nessun socio disponibile'}</option>
-              {members.map((member, index) => {
-                const optionValue = member?.id ? String(member.id) : '';
-                const optionKey = member?.id ?? member?.old_id ?? member?.membership_number ?? `member-${index}`;
-                const optionLabel =
-                  formatMemberLabel(member, { includeMembership: false, fallback: '' }) ||
-                  (member?.id ? `Socio senza nome (ID ${member.id})` : 'Socio senza nome');
-                return (
-                  <option
-                    key={optionKey}
-                    value={optionValue}
-                    style={{ color: '#0f2a2a', fontWeight: 600 }}
-                  >
-                    {optionLabel}
-                  </option>
-                );
-              })}
-            </select>
+              placeholder="Seleziona responsabile"
+              etichetta={(member) => formatMemberLabel(member, { includeMembership: false })}
+              style={{ marginTop: '0.5rem' }}
+            />
             {!members.length && !membersError && (
               <small style={{ color: 'var(--color-muted)' }}>
                 Importa i soci per assegnare un responsabile (facoltativo).
@@ -362,37 +335,15 @@ export default function UscitaForm({
           <p>Caricamento soci...</p>
         ) : (
           <>
-            <input
-              type="search"
-              placeholder="Filtra per nome o tessera"
-              value={participantsSearch}
-              onChange={(event) => setParticipantsSearch(event.target.value)}
-            />
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-              <select
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+              <SelectSocio
                 id="participants"
+                members={members}
                 value={selectedParticipantId}
-                onChange={(event) => setSelectedParticipantId(event.target.value)}
+                onChange={setSelectedParticipantId}
+                placeholder="Seleziona socio da aggiungere"
                 style={{ flex: '1 1 220px' }}
-                disabled={!filteredParticipants.length}
-              >
-                <option value="">
-                  {filteredParticipants.length ? 'Seleziona socio da aggiungere' : 'Nessun socio trovato'}
-                </option>
-                {filteredParticipants.map((member, index) => {
-                  const memberId = member?.id ? String(member.id) : '';
-                  const optionKey =
-                    member?.id ?? member?.old_id ?? member?.membership_number ?? `member-${index}`;
-                  const optionLabel =
-                    formatMemberLabel(member, { fallback: '' }) ||
-                    (member?.id ? `Socio senza nome (ID ${member.id})` : 'Socio senza nome');
-                  return (
-                    <option key={optionKey} value={memberId} title={buildMemberTooltip(member)}>
-                      {optionLabel}
-                    </option>
-                  );
-                })}
-              </select>
+              />
               <button
                 type="button"
                 onClick={() => {
