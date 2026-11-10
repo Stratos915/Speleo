@@ -6,7 +6,8 @@
 //   nuova_uscita e uscite_cambiate (avvisi a tutti i soci, in copia nascosta),
 //   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna),
 //   uscite_promemoria (a tutti i soci, 7 e 3 giorni prima di un'uscita),
-//   adesioni_responsabile (al responsabile: chi si aggiunge o si ritira).
+//   adesioni_responsabile (al responsabile: chi si aggiunge o si ritira),
+//   richieste_accesso (ad admin e presidente: nuovi utenti da approvare).
 // * I testi dicono «uscita» per le attività in esterno ed «evento» per le altre
 //   (serata in sede, formazione, altro evento, altro), come nell'app.
 // * Con "personali": [{ email, testo }] (adesioni, migrazione 15) ogni socio riceve un
@@ -410,6 +411,36 @@ function buildMessage(payload: Record<string, any>): Message | null {
         `Elenco completo e «Copia nei partecipanti»: ${appUrl}/uscite/${uscita.id}`,
         "",
         `Ricevi questo avviso perché sei il responsabile ${genere(uscita.tipo, "dell'uscita", "dell'evento")}.`,
+      ].join("\n"),
+    };
+  }
+
+  // Nuovi utenti registrati in attesa di approvazione: ad admin e presidente.
+  if (payload.type === "richieste_accesso") {
+    const items: any[] = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const righe = items.map((item) =>
+      [
+        `• ${item.nome ?? "Nuovo utente"}`,
+        item.email ? `  Email: ${item.email}` : null,
+        item.telefono ? `  Telefono: ${item.telefono}` : null,
+        `  Registrato il ${formatDateIt(item.registrato_il)}`,
+      ].filter(Boolean).join("\n")
+    );
+    return {
+      subject: items.length === 1
+        ? `GSU · Nuova richiesta di accesso: ${items[0].nome ?? "nuovo utente"}`
+        : `GSU · ${items.length} nuove richieste di accesso`,
+      to: collectEmails([admin, presidente]),
+      body: [
+        items.length === 1
+          ? "Una persona si è registrata all'app e aspetta l'approvazione:"
+          : "Alcune persone si sono registrate all'app e aspettano l'approvazione:",
+        "",
+        righe.join("\n\n"),
+        "",
+        `Per approvare, scegliere il ruolo o rifiutare: ${appUrl}/report (sezione «Approvazioni accessi»).`,
       ].join("\n"),
     };
   }
