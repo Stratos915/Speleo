@@ -7,7 +7,8 @@
 //   prestito_promemoria (al socio che ha il materiale, il giorno prima della riconsegna),
 //   uscite_promemoria (a tutti i soci, 7 e 3 giorni prima di un'uscita),
 //   adesioni_responsabile (al responsabile: chi si aggiunge o si ritira),
-//   richieste_accesso (ad admin e presidente: nuovi utenti da approvare).
+//   richieste_accesso (ad admin e presidente: nuovi utenti da approvare),
+//   acar_revisioni (ad admin, presidente e magazziniere: revisioni ACAR in scadenza o scadute).
 // * I testi dicono «uscita» per le attività in esterno ed «evento» per le altre
 //   (serata in sede, formazione, altro evento, altro), come nell'app.
 // * Con "personali": [{ email, testo }] (adesioni, migrazione 15) ogni socio riceve un
@@ -441,6 +442,29 @@ function buildMessage(payload: Record<string, any>): Message | null {
         righe.join("\n\n"),
         "",
         `Per approvare, scegliere il ruolo o rifiutare: ${appUrl}/report (sezione «Approvazioni accessi»).`,
+      ].join("\n"),
+    };
+  }
+
+  // Magazzino ACAR: revisioni in scadenza o scadute, ad admin, presidente e magazziniere.
+  if (payload.type === "acar_revisioni") {
+    const items: any[] = Array.isArray(payload.items) ? payload.items : [];
+    if (!items.length) return null;
+    const appUrl = String(payload.app_url ?? "https://speleoapp.netlify.app").replace(/\/+$/, "");
+    const scadute = items.filter((item) => item.scaduta);
+    const prossime = items.filter((item) => !item.scaduta);
+    const riga = (item: any) => `- ${item.nome ?? "materiale"}: revisione ${item.scaduta ? "scaduta il" : "entro il"} ${formatDayIt(item.scadenza)}`;
+    return {
+      subject: items.length === 1
+        ? `GSU · Revisione ACAR ${items[0].scaduta ? "scaduta" : "in scadenza"}: ${items[0].nome ?? "materiale"}`
+        : `GSU · Magazzino ACAR: ${items.length} revisioni da fare${scadute.length ? ` (${scadute.length} ${scadute.length === 1 ? "scaduta" : "scadute"})` : ""}`,
+      to: collectEmails([magazziniere, admin, presidente]),
+      body: [
+        ...(scadute.length
+          ? ["Revisione SCADUTA (bombole da non caricare finché non sono revisionate):", "", ...scadute.map(riga), ""]
+          : []),
+        ...(prossime.length ? ["Revisione in scadenza nei prossimi 60 giorni:", "", ...prossime.map(riga), ""] : []),
+        `Dettagli nel Magazzino ACAR: ${appUrl}/magazzino`,
       ].join("\n"),
     };
   }

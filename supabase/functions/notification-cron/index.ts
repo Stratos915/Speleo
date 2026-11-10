@@ -24,6 +24,10 @@
 //  11. RICHIESTA_ACCESSO nuovo utente registrato in attesa di approvazione: email ad admin e
 //                       presidente, avviso nell'app e notifica push a chi ha ruolo admin o
 //                       presidente (chi può approvare). Solo account con l'email confermata.
+//  12. ACAR_REVISIONE   materiale ACAR (bombole, erogatori, maschere) con la revisione entro
+//                       60 giorni o scaduta: email, avviso nell'app e notifica push ad admin,
+//                       presidente e magazziniere. Un avviso quando entra nei 60 giorni e uno
+//                       quando scade (migrazione 20).
 //
 // Adesioni (migrazione 15): gli avvisi di nuova uscita e i promemoria portano i pulsanti
 // «Partecipo · Forse · No» (push) e tre link personali (email), firmati con il segreto
@@ -1604,6 +1608,111 @@ async function checkRichiesteAccesso(supabase: SupabaseClient, config: Config, r
 }
 
 // ---------------------------------------------------------------------------
+// 12. Magazzino ACAR: revisioni in scadenza o scadute
+// ---------------------------------------------------------------------------
+const ACAR_REVISIONE_GIORNI = 60;
+const RUOLI_ACAR = ["admin", "presidente", "magazziniere"];
+const TIPI_ACAR: Record<string, string> = { bombola: "Bombola", erogatore: "Erogatore", maschera: "Maschera", altro: "Materiale" };
+
+async function checkAcarRevisioni(supabase: SupabaseClient, config: Config, runId: string, now: Date) {
+  const kind = "ACAR_REVISIONE";
+  const ora = oraRoma(now);
+  if (ora < PROMEMORIA_DALLE || ora >= PROMEMORIA_ALLE) return { total: 0, new: 0, skipped: "fuori orario" };
+
+  const oggi = giornoRoma(now);
+  const limite = giornoRoma(addDays(now, ACAR_REVISIONE_GIORNI));
+  const { data, error } = await supabase
+    .from("acar_materiale")
+    .select("id, tipo, descrizione, matricola, scadenza_revisione")
+    .not("scadenza_revisione", "is", null)
+    .lte("scadenza_revisione", limite)
+    .order("scadenza_revisione", { ascending: true });
+  if (error) {
+    if (["42P01", "PGRST205"].includes((error as any).code)) return { total: 0, new: 0, skipped: "migrazione 20 mancante" };
+    throw error;
+  }
+  if (!data?.length) return { total: 0, new: 0 };
+
+  // Un avviso quando la revisione entra nei 60 giorni e uno quando scade.
+  // La data nel riferimento: se la revisione viene fatta e la data cambia, l'avviso riparte.
+  const fresh: any[] = [];
+  for (const pezzo of data) {
+    const scadenza = String(pezzo.scadenza_revisione).slice(0, 10);
+    const fase = scadenza <= oggi ? "scaduta" : "in_scadenza";
+    const refId = `${pezzo.id}:${scadenza}:${fase}`;
+    if (await claim(supabase, runId, { kind, refId, meta: { fase, scadenza } })) fresh.push({ ...pezzo, scadenza, fase, refId });
+  }
+  if (!fresh.length) return { total: data.length, new: 0 };
+
+  const nome = (p: any) =>
+    [TIPI_ACAR[p.tipo] ?? "Materiale", p.descrizione, p.matricola ? `matr. ${p.matricola}` : ""].filter(Boolean).join(" ");
+  const priv = await loadPrivateConfig(supabase).catch(() => null);
+
+  const result = await sendWebhook(config, {
+    type: "acar_revisioni",
+    count: fresh.length,
+    items: fresh.map((p) => ({ nome: nome(p), scadenza: p.scadenza, scaduta: p.fase === "scaduta" })),
+    app_url: priv?.get("app_url") || APP_URL_DEFAULT,
+    recipients: {
+      admin: config.recipients.admin,
+      presidente: config.recipients.presidente,
+      magazziniere: config.recipients.magazziniere,
+    },
+    meta: { runId, kind },
+  });
+  await finalize(supabase, config, kind, fresh.map((p) => p.refId), result);
+
+  await notifyInApp(
+    supabase,
+    fresh.map((p) => ({
+      audience: "admin",
+      target_role: "magazziniere",
+      type: "warning",
+      title: p.fase === "scaduta" ? "Revisione ACAR scaduta" : "Revisione ACAR in scadenza",
+      message: `${nome(p)}: revisione ${p.fase === "scaduta" ? "scaduta il" : "entro il"} ${giornoIt(p.scadenza)}.`,
+      link: "/magazzino",
+      due_date: p.scadenza,
+      meta: { acar_id: p.id, runId },
+    })),
+  );
+
+  // Notifica push a admin, presidente e magazziniere, secondo le preferenze.
+  let push: unknown = { skipped: "migrazione 09 mancante" };
+  if (priv) {
+    const [{ data: profili, error: profiliError }, { data: preferenze, error: prefError }] = await Promise.all([
+      supabase.from("profiles").select("id, email, role, ruoli_extra").eq("approval_status", "approved"),
+      supabase.from("notifica_preferenze").select("user_id, push"),
+    ]);
+    if (profiliError) throw profiliError;
+    if (prefError) throw prefError;
+    const senzaPush = new Set((preferenze ?? []).filter((row: any) => row.push === false).map((row: any) => row.user_id));
+    const soloA = (priv.get("avvisi_uscite_solo_a") || "").trim().toLowerCase();
+    const destinatari = (profili ?? [])
+      .filter((p: any) => [p.role, ...(Array.isArray(p.ruoli_extra) ? p.ruoli_extra : [])].some((r) => RUOLI_ACAR.includes(r)))
+      .filter((p: any) => !senzaPush.has(p.id))
+      .filter((p: any) => !soloA || String(p.email ?? "").toLowerCase() === soloA)
+      .map((p: any) => p.id as string);
+    const scadute = fresh.filter((p) => p.fase === "scaduta").length;
+    const payload: PushPayload = fresh.length === 1
+      ? {
+        title: fresh[0].fase === "scaduta" ? "Revisione ACAR scaduta" : "Revisione ACAR in scadenza",
+        body: `${nome(fresh[0])} · ${giornoIt(fresh[0].scadenza)}`,
+        url: "/magazzino",
+        tag: `acar-${fresh[0].id}`,
+      }
+      : {
+        title: `Magazzino ACAR: ${fresh.length} revisioni da fare${scadute ? ` (${scadute} ${scadute === 1 ? "scaduta" : "scadute"})` : ""}`,
+        body: fresh.map((p) => `${nome(p)} · ${giornoIt(p.scadenza)}`).join("\n"),
+        url: "/magazzino",
+        tag: "acar-revisioni",
+      };
+    push = await sendPushSicuro(supabase, priv, destinatari, [payload], config.testMode, runId);
+  }
+
+  return { total: data.length, new: fresh.length, push };
+}
+
+// ---------------------------------------------------------------------------
 /** Confronto a tempo costante, per non rivelare il token un carattere alla volta. */
 function stessoToken(a: string, b: string) {
   if (!a || !b || a.length !== b.length) return false;
@@ -1681,8 +1790,10 @@ async function runCron(req: Request, interno = false) {
       ["promemoria_uscite", () => checkPromemoriaUscite(supabase, config, runId, now)],
       ["adesioni", () => checkAdesioni(supabase, config, runId, now)],
       ["richieste_accesso", () => checkRichiesteAccesso(supabase, config, runId, now)],
+      ["acar_revisioni", () => checkAcarRevisioni(supabase, config, runId, now)],
     ];
-    // Anche movimenti di magazzino e richieste di accesso: così gli avvisi arrivano entro una decina di minuti.
+    // Anche movimenti di magazzino, richieste di accesso e revisioni ACAR: così gli avvisi
+    // arrivano entro una decina di minuti.
     const CONTROLLI_SOCI = [
       "movimenti",
       "nuove_uscite",
@@ -1691,6 +1802,7 @@ async function runCron(req: Request, interno = false) {
       "promemoria_uscite",
       "adesioni",
       "richieste_accesso",
+      "acar_revisioni",
     ];
     for (const [name, fn] of controlli.filter(([name]) => gruppo === "tutti" || CONTROLLI_SOCI.includes(name))) {
       try {
