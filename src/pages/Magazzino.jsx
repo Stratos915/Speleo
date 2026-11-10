@@ -20,6 +20,7 @@ import './Magazzino.css';
 import { caricaFotoMateriale, rimuoviFotoMateriale, urlFotoMateriale } from '../services/fotoMateriali.js';
 import { tornaAllaScheda } from '../utils/scorrimento.js';
 import MaterialeScuola from '../components/MaterialeScuola.jsx';
+import MagazzinoAcar from '../components/MagazzinoAcar.jsx';
 
 const emptyMaterial = {
   equipment_number: '',
@@ -741,6 +742,9 @@ export default function Magazzino() {
 
       {/* Cartella riservata alla scuola: compare solo a chi non è socio semplice. */}
       <MaterialeScuola />
+
+      {/* Materiale ACAR: bombole, erogatori, maschere, con le scadenze di revisione. */}
+      <MagazzinoAcar />
 
       <input
         type="search"

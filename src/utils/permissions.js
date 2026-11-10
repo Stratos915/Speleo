@@ -137,6 +137,18 @@ export function canEditSacchiScuola(role) {
   return hasOne(role, SACCHI_EDIT_ROLES);
 }
 
+// Magazzino ACAR (migrazione 20): lo vedono tutti, come il resto del magazzino;
+// lo modificano admin, presidente e magazziniere. Il database applica la stessa regola.
+const ACAR_EDIT_ROLES = [...FULL_ACCESS_ROLES, 'magazziniere'];
+
+export function canViewAcar(role) {
+  return hasOne(role, ALL_ROLES);
+}
+
+export function canEditAcar(role) {
+  return hasOne(role, ACAR_EDIT_ROLES);
+}
+
 export function getAllRoles() {
   return [...ALL_ROLES];
 }
