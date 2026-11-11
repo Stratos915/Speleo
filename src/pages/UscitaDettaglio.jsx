@@ -9,6 +9,8 @@ import { supabase } from '../lib/supabaseClient';
 import { returnLoan } from '../services/loans.js';
 import AdesioniUscita from '../components/AdesioniUscita.jsx';
 import { riduciFoto } from '../utils/immagini.js';
+import { miniaturaFoto } from '../utils/fotoUscite.js';
+import GalleriaFoto from '../components/GalleriaFoto.jsx';
 import { conArticolo, etichettaTipo, isUscitaEsterna, nomeAttivita, usaMateriale } from '../utils/tipiUscita.js';
 
 // «Uscita chiusa» / «Evento chiuso».
@@ -537,6 +539,9 @@ export default function UscitaDettaglio() {
         </dl>
       </article>
 
+      {/* Le foto si vedono subito, per tutti; caricamento ed eliminazione restano più sotto. */}
+      <GalleriaFoto urls={uscita.photo_urls ?? []} />
+
       <AdesioniUscita
         uscita={uscita}
         userId={user?.id}
@@ -649,7 +654,7 @@ export default function UscitaDettaglio() {
           {photoDownloadError && <p style={{ color: 'var(--color-accent)' }}>{photoDownloadError}</p>}
           {(uscita.photo_urls ?? []).length > 0 && (
             <div style={{ marginTop: '0.75rem' }}>
-              <strong>Foto caricate:</strong>
+              <strong>Gestisci le foto ({uscita.photo_urls.length}):</strong>
               <ul
                 style={{
                   listStyle: 'none',
@@ -684,7 +689,10 @@ export default function UscitaDettaglio() {
                     >
                       {percorsoFoto(url) ? (
                         <img
-                          src={url}
+                          src={miniaturaFoto(url) ?? url}
+                          onError={(event) => {
+                            if (event.currentTarget.src !== url) event.currentTarget.src = url;
+                          }}
                           alt="Anteprima foto"
                           loading="lazy"
                           style={{ width: '100%', height: '100%', objectFit: 'cover' }}
