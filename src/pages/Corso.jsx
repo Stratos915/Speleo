@@ -15,6 +15,7 @@ import {
 import { SCUOLA_UI_STATE_KEY, extractScuolaDocument, hasScuolaContent } from '../utils/scuolaData.js';
 import { dedupeMembers, emailSocio, mappaEmailSoci } from '../utils/members.js';
 import SelectSocio from '../components/SelectSocio.jsx';
+import { buildProfiloIstruttore, scaricaProfiloIstruttore } from '../utils/profiloIstruttore.js';
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
@@ -1277,6 +1278,26 @@ function updateCourse(yearId, courseId, updater) {
     );
   }
 
+  // Profilo del singolo istruttore (dati, mantenimenti e storico attività) in PDF o Excel.
+  async function handleProfiloExport(entry, formato) {
+    const member = membersMap.get(entry.memberId);
+    setRegistryUploadErrors((prev) => ({ ...prev, [entry.id]: '' }));
+    try {
+      const profilo = buildProfiloIstruttore({
+        entry,
+        member,
+        email: emailSocio(member, emailPerNome),
+        annoCartella: entry.yearLabel,
+      });
+      await scaricaProfiloIstruttore(profilo, formato);
+    } catch (exportError) {
+      setRegistryUploadErrors((prev) => ({
+        ...prev,
+        [entry.id]: exportError.message ?? 'Esportazione del profilo non riuscita.',
+      }));
+    }
+  }
+
   function handleRegistryRemove(id) {
     setRegistry((prev) => prev.filter((entry) => entry.id !== id));
   }
@@ -1583,7 +1604,23 @@ function updateCourse(yearId, courseId, updater) {
                             Tessera: {member?.old_id ?? 'N/D'} · {emailSocio(member, emailPerNome) || 'Email non disponibile'} · {entry.yearLabel}
                           </p>
                         </div>
-                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            style={{ background: '#228be6' }}
+                            title="Scarica il profilo dell'istruttore in PDF"
+                            onClick={() => handleProfiloExport(entry, 'pdf')}
+                          >
+                            Profilo PDF
+                          </button>
+                          <button
+                            type="button"
+                            style={{ background: '#868e96' }}
+                            title="Scarica il profilo dell'istruttore in Excel"
+                            onClick={() => handleProfiloExport(entry, 'xlsx')}
+                          >
+                            Excel
+                          </button>
                           <button
                             type="button"
                             style={{ background: isExpanded ? '#adb5bd' : 'var(--color-primary)' }}
@@ -1598,6 +1635,9 @@ function updateCourse(yearId, courseId, updater) {
                           </button>
                         </div>
                       </header>
+                      {!isExpanded && registryUploadErrors[entry.id] && (
+                        <p style={{ color: 'var(--color-accent)', margin: '0.5rem 0 0' }}>{registryUploadErrors[entry.id]}</p>
+                      )}
                       {isExpanded && (
                         <div style={{ display: 'grid', gap: '0.75rem', marginTop: '0.75rem' }}>
                           <label>
