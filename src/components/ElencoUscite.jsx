@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { dayKey } from '../utils/calendario.js';
 import { etichettaTipo, nomeAttivita } from '../utils/tipiUscita.js';
 import useMieAdesioni from '../hooks/useMieAdesioni.js';
+import { testoFoto } from '../utils/fotoUscite.js';
 
 const MIA_RISPOSTA = {
   si: { testo: '✓ Ci sono', classe: 'cal-mia--si' },
@@ -46,6 +47,7 @@ export function UscitaRiga({ uscita, showDate = false }) {
               showDate ? formatOra(uscita.ora) : null,
               uscita.luogo,
               descriviTipo(uscita),
+              testoFoto(uscita.photo_urls),
             ]
               .filter(Boolean)
               .join(' · ')}
