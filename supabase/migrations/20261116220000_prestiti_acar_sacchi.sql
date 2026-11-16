@@ -20,6 +20,8 @@
 --
 -- Regole:
 --   * un pezzo ACAR o un sacco può avere un solo prestito aperto alla volta;
+--   * finché è in prestito non si può eliminare; dopo sì, e lo storico del
+--     prestito resta con il nome salvato in materiale_nome;
 --   * un pezzo ACAR con la revisione scaduta non si presta;
 --   * prestano e ritirano il materiale ACAR admin, presidente e magazziniere;
 --     i sacchi anche il direttore scuola;
@@ -47,18 +49,19 @@ begin
   if not exists (select 1 from pg_constraint where conname = 'loans_acar_id_fkey') then
     alter table public.loans
       add constraint loans_acar_id_fkey foreign key (acar_id)
-      references public.acar_materiale (id) on delete restrict;
+      references public.acar_materiale (id) on delete set null;
   end if;
   if not exists (select 1 from pg_constraint where conname = 'loans_sacco_id_fkey') then
     alter table public.loans
       add constraint loans_sacco_id_fkey foreign key (sacco_id)
-      references public.scuola_sacchi (id) on delete restrict;
+      references public.scuola_sacchi (id) on delete set null;
   end if;
-  -- Un prestito riguarda una sola cosa: materiale generale, pezzo ACAR o sacco.
+  -- Un prestito riguarda una sola cosa: materiale generale, pezzo ACAR o sacco
+  -- (nessuna, se il pezzo ACAR o il sacco è stato eliminato dopo il rientro).
   if not exists (select 1 from pg_constraint where conname = 'loans_un_solo_materiale') then
     alter table public.loans
       add constraint loans_un_solo_materiale
-      check (num_nonnulls(equipment_id, acar_id, sacco_id) = 1);
+      check (num_nonnulls(equipment_id, acar_id, sacco_id) <= 1);
   end if;
 end;
 $$;
@@ -69,6 +72,38 @@ create unique index if not exists loans_acar_aperto_unico
 create unique index if not exists loans_sacco_aperto_unico
   on public.loans (sacco_id) where sacco_id is not null and status in ('in_corso', 'active');
 create index if not exists loans_uscita_idx on public.loans (uscita_id);
+
+
+-- Un pezzo ACAR o un sacco ancora in prestito non si elimina.
+create or replace function public.blocca_eliminazione_in_prestito()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+set row_security = off
+as $$
+begin
+  if exists (
+    select 1 from public.loans
+     where status in ('in_corso', 'active')
+       and ((tg_table_name = 'acar_materiale' and acar_id = old.id)
+         or (tg_table_name = 'scuola_sacchi' and sacco_id = old.id))
+  ) then
+    raise exception 'È ancora in prestito: registra prima il rientro, poi eliminalo.' using errcode = 'P0001';
+  end if;
+  return old;
+end;
+$$;
+
+drop trigger if exists acar_materiale_blocca_in_prestito on public.acar_materiale;
+create trigger acar_materiale_blocca_in_prestito
+  before delete on public.acar_materiale
+  for each row execute function public.blocca_eliminazione_in_prestito();
+
+drop trigger if exists scuola_sacchi_blocca_in_prestito on public.scuola_sacchi;
+create trigger scuola_sacchi_blocca_in_prestito
+  before delete on public.scuola_sacchi
+  for each row execute function public.blocca_eliminazione_in_prestito();
 
 
 -- ---------------------------------------------------------------------

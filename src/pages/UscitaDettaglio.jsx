@@ -149,7 +149,8 @@ export default function UscitaDettaglio() {
       try {
         const { data, error: loansError } = await supabase
           .from('loans')
-          .select('id,equipment_id,borrower_name,borrower_email,quantity,status,delivered_at,returned_at,notes,missing_quantity,missing_notes,equipment:equipment_id(name)')
+          // Tutte le colonne: con la migrazione 22 arrivano anche materiale ACAR e sacchi.
+          .select('*, equipment:equipment_id(name)')
           .eq('uscita_id', id)
           .order('delivered_at', { ascending: false });
         if (loansError) throw loansError;
@@ -822,9 +823,13 @@ export default function UscitaDettaglio() {
                 {uscitaLoans.map((loan) => (
                   <li key={loan.id} style={{ border: '1px solid var(--color-border)', borderRadius: '0.75rem', padding: '0.75rem' }}>
                     <strong>
-                      {(loan.equipment?.name ?? loan.equipment_id)} · x{loan.quantity}
+                      {loan.acar_id ? '🫧 ' : loan.sacco_id ? '🎓 ' : ''}
+                      {loan.equipment?.name ?? loan.materiale_nome ?? loan.equipment_id} · x{loan.quantity}
                     </strong>
-                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>a: {loan.borrower_name}</p>
+                    <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>
+                      a: {loan.borrower_name}
+                      {loan.corso_nome ? ` · corso: ${loan.corso_nome}` : ''}
+                    </p>
                     <small style={{ color: 'var(--color-muted)' }}>
                       consegnato il {loan.delivered_at ? new Date(loan.delivered_at).toLocaleString('it-IT') : '—'}
                     </small>
@@ -878,6 +883,14 @@ export default function UscitaDettaglio() {
               </ul>
             ) : (
               <p>Nessun prestito collegato.</p>
+            )}
+            {(uscita.tipo === 'acar' || uscita.tipo === 'corso') && (
+              <small style={{ color: 'var(--color-muted)', display: 'block', marginTop: '0.5rem' }}>
+                {uscita.tipo === 'acar' ? 'Il materiale ACAR' : 'I sacchi della scuola'} si prestano dal{' '}
+                <Link to="/magazzino">Magazzino</Link>
+                {uscita.tipo === 'acar' ? ' (cartella Magazzino ACAR)' : ' (cartella Materiale scuola)'}: scegli questa uscita nel modulo e
+                il prestito compare qui.
+              </small>
             )}
           </article>
           )}
