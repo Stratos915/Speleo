@@ -21,6 +21,11 @@ import {
   eliminaSacco,
   getSacchi,
 } from '../services/sacchiScuola.js';
+import { MigrazionePrestitiMancante, getPrestitiAperti } from '../services/prestitiSpeciali.js';
+import { returnLoan } from '../services/loans.js';
+import { getUscite } from '../services/uscite.js';
+import { descriviPrestito } from '../utils/prestitiSpeciali.js';
+import PrestitoMateriale from './PrestitoMateriale.jsx';
 
 const CHIAVE_APERTA = 'speleo-materiale-scuola-aperto';
 const SACCO_VUOTO = { numero: '', consegnato_a: '', consegnato_il: '', note: '' };
@@ -75,12 +80,28 @@ export default function MaterialeScuola() {
   const [modulo, setModulo] = useState(null);
   const [valori, setValori] = useState(SACCO_VUOTO);
   const [quantiSacchi, setQuantiSacchi] = useState('');
+  // Consegne registrate come prestiti (migrazione 22); null finché non si sa se è attiva.
+  const [prestiti, setPrestiti] = useState(() => new Map());
+  const [prestitiAttivi, setPrestitiAttivi] = useState(null);
+  const [usciteMap, setUsciteMap] = useState(() => new Map());
+  const [consegna, setConsegna] = useState(null);
 
   const carica = useCallback(async () => {
     try {
-      setSacchi(await getSacchi());
+      const [elenco, aperti, uscite] = await Promise.all([
+        getSacchi(),
+        getPrestitiAperti('sacco').catch((error) => error),
+        getUscite().catch(() => []),
+      ]);
+      setSacchi(elenco);
+      if (aperti instanceof MigrazionePrestitiMancante) setPrestitiAttivi(false);
+      else if (!(aperti instanceof Error)) {
+        setPrestitiAttivi(true);
+        setPrestiti(aperti);
+      } else setPrestitiAttivi(true);
+      setUsciteMap(new Map((uscite ?? []).map((u) => [String(u.id), u])));
       setMancaMigrazione(false);
-      setErrore('');
+      setErrore(aperti instanceof Error && !(aperti instanceof MigrazionePrestitiMancante) ? aperti.message : '');
     } catch (error) {
       if (error instanceof MigrazioneSacchiMancante) setMancaMigrazione(true);
       else setErrore(error.message);
@@ -103,10 +124,11 @@ export default function MaterialeScuola() {
     if (!testo) return sacchi;
     return sacchi.filter((sacco) =>
       String(sacco.numero) === testo ||
-      [sacco.consegnato_a, sacco.note].some((v) => String(v ?? '').toLowerCase().includes(testo)) ||
+      [sacco.consegnato_a, sacco.note, prestiti.get(sacco.id)?.borrower_name, prestiti.get(sacco.id)?.corso_nome]
+        .some((v) => String(v ?? '').toLowerCase().includes(testo)) ||
       sacco.materiale.some((p) => [p.nome, p.matricola, p.note].some((v) => String(v ?? '').toLowerCase().includes(testo))),
     );
-  }, [sacchi, cerca]);
+  }, [sacchi, cerca, prestiti]);
 
   if (!puoVedere) return null;
 
@@ -288,6 +310,13 @@ export default function MaterialeScuola() {
     await esegui(() => eliminaPezzo(pezzo.id), `sacco-${pezzo.sacco_id}`);
   };
 
+  const rientrato = async (sacco) => {
+    const prestito = prestiti.get(sacco.id);
+    if (!prestito) return;
+    if (!window.confirm(`Il sacco n° ${sacco.numero} è rientrato da ${prestito.borrower_name}?`)) return;
+    await esegui(() => returnLoan({ loanId: prestito.id }), `sacco-${sacco.id}`);
+  };
+
   const campo = (nome) => ({
     value: valori[nome] ?? '',
     onChange: (event) => setValori((prima) => ({ ...prima, [nome]: event.target.value })),
@@ -307,6 +336,7 @@ export default function MaterialeScuola() {
         Note
         <textarea rows={2} {...campo('note')} />
       </label>
+      {prestitiAttivi !== true && (
       <fieldset className="scuola-consegna">
         <legend>Consegna al corsista (facoltativa, solo durante un corso)</legend>
         <div className="scuola-campi">
@@ -329,6 +359,7 @@ export default function MaterialeScuola() {
           </button>
         )}
       </fieldset>
+      )}
       {errore && <p className="scuola-errore">{errore}</p>}
       <div className="scuola-azioni">
         <button type="submit" disabled={inCorso}>{inCorso ? 'Salvataggio…' : 'Salva'}</button>
@@ -401,6 +432,7 @@ export default function MaterialeScuola() {
           <small>
             Riservato: non visibile ai soci
             {caricato && !mancaMigrazione ? ` · ${sacchi.length} ${sacchi.length === 1 ? 'sacco' : 'sacchi'}` : ''}
+            {prestiti.size ? ` · 🎓 ${prestiti.size} consegnati` : ''}
             {avvisiTotali ? ` · ⚠️ ${avvisiTotali} da controllare` : ''}
           </small>
         </span>
@@ -484,7 +516,11 @@ export default function MaterialeScuola() {
                               ? `Composto da: ${composizione(sacco.materiale)}`
                               : 'Sacco vuoto'}
                           </small>
-                          {sacco.consegnato_a && (
+                          {prestiti.has(sacco.id) ? (
+                            <small className="scuola-consegnato">
+                              🎓 Consegnato a {descriviPrestito(prestiti.get(sacco.id), usciteMap.get(String(prestiti.get(sacco.id).uscita_id)))}
+                            </small>
+                          ) : sacco.consegnato_a && (
                             <small className="scuola-consegnato">
                               🎓 Consegnato a {sacco.consegnato_a}
                               {sacco.consegnato_il ? ` il ${dataIt(sacco.consegnato_il)}` : ''}
@@ -585,6 +621,34 @@ export default function MaterialeScuola() {
                             )}
                           </section>
 
+                          {consegna === sacco.id && (
+                            <PrestitoMateriale
+                              tipo="sacco"
+                              itemId={sacco.id}
+                              titolo={`Consegna il sacco n° ${sacco.numero}`}
+                              onAnnulla={() => setConsegna(null)}
+                              onFatto={async () => {
+                                setConsegna(null);
+                                await carica();
+                                tornaAllaScheda(`sacco-${sacco.id}`);
+                              }}
+                            />
+                          )}
+
+                          {puoModificare && prestitiAttivi && consegna !== sacco.id && (
+                            <div className="scuola-azioni">
+                              {prestiti.has(sacco.id) ? (
+                                <button type="button" className="prestito-btn-rientro" onClick={() => rientrato(sacco)} disabled={inCorso}>
+                                  ✓ Sacco rientrato
+                                </button>
+                              ) : (
+                                <button type="button" className="prestito-btn" onClick={() => setConsegna(sacco.id)} disabled={inCorso}>
+                                  🎓 Consegna a corsista o socio
+                                </button>
+                              )}
+                            </div>
+                          )}
+
                           {puoModificare && (
                             <div className="scuola-azioni">
                               {sacco.materiale.length > 0 && (
@@ -595,7 +659,13 @@ export default function MaterialeScuola() {
                               <button type="button" className="scuola-btn-neutro" onClick={() => modificaSacco(sacco)} disabled={inCorso}>
                                 Modifica sacco
                               </button>
-                              <button type="button" className="scuola-btn-elimina" onClick={() => cancellaSacco(sacco)} disabled={inCorso}>
+                              <button
+                                type="button"
+                                className="scuola-btn-elimina"
+                                onClick={() => cancellaSacco(sacco)}
+                                disabled={inCorso || prestiti.has(sacco.id)}
+                                title={prestiti.has(sacco.id) ? 'È consegnato: registra prima il rientro.' : undefined}
+                              >
                                 Elimina sacco
                               </button>
                             </div>
