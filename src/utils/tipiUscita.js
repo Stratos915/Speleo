@@ -6,6 +6,7 @@ export const TIPI_USCITA = [
   { value: 'allenamento', label: 'Allenamento' },
   { value: 'formazione', label: 'Formazione' },
   { value: 'esplorazione', label: 'Esplorazione' },
+  { value: 'acar', label: 'ACAR' },
   { value: 'serata_sede', label: 'Serata in sede' },
   { value: 'altro_evento', label: 'Altro evento' },
   { value: 'altro', label: 'Altro' },
@@ -35,7 +36,7 @@ export function usaMateriale(tipo) {
 
 // «Uscite» sono solo le attività in esterno; tutte le altre sono «eventi».
 // Un'attività senza tipo (vecchi dati) resta un'uscita.
-export const TIPI_ESTERNI = ['esplorazione', 'allenamento', 'corso', 'sociale'];
+export const TIPI_ESTERNI = ['esplorazione', 'allenamento', 'corso', 'sociale', 'acar'];
 
 /** True per le uscite in esterno, false per gli eventi (serata in sede, formazione, altro…). */
 export function isUscitaEsterna(tipo) {

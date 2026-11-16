@@ -397,3 +397,28 @@
   font-weight: 600;
   color: var(--color-primary-dark);
 }
+
+/* Prestiti del materiale ACAR e dei sacchi della scuola (migrazione 22) */
+.prestito-in-corso {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 0.5rem;
+  background: rgba(25, 113, 194, 0.1);
+  color: #1864ab;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.prestito-btn {
+  background: #1971c2;
+}
+
+.prestito-btn-rientro {
+  background: #2b8a3e;
+}
+
+.prestito-modulo {
+  margin-top: 0.5rem;
+  border-left: 3px solid #1971c2;
+}

@@ -111,6 +111,7 @@ const TIPI: Record<string, string> = {
   allenamento: "Allenamento",
   formazione: "Formazione",
   esplorazione: "Esplorazione",
+  acar: "ACAR",
   serata_sede: "Serata in sede",
   altro_evento: "Altro evento",
   altro: "Altro",
@@ -124,7 +125,7 @@ function formatTipo(tipo: unknown, descrizione?: unknown) {
 
 // «Uscite» sono solo le attività in esterno; le altre sono «eventi» (come nell'app).
 // Un'attività senza tipo (vecchi dati) resta un'uscita.
-const TIPI_ESTERNI = new Set(["esplorazione", "allenamento", "corso", "sociale"]);
+const TIPI_ESTERNI = new Set(["esplorazione", "allenamento", "corso", "sociale", "acar"]);
 
 function isEvento(tipo: unknown) {
   const codice = String(tipo ?? "").toLowerCase();
@@ -173,7 +174,7 @@ function buildMessage(payload: Record<string, any>): Message | null {
     const loans: any[] = Array.isArray(payload.loans) ? payload.loans : [];
     if (!loans.length) return null;
     const righe = loans.map((loan) =>
-      `- ${loan.borrower_name ?? "socio non indicato"}: ${loan.quantity ?? "?"} pezzi, rientro previsto il ${formatDayIt(loan.reserved_until)}`
+      `- ${loan.borrower_name ?? "socio non indicato"}: ${loan.equipment?.name ?? loan.materiale_nome ?? "materiale"} ×${loan.quantity ?? "?"}, rientro previsto il ${formatDayIt(loan.reserved_until)}`
     );
     return {
       subject: `GSU · ${loans.length} ${loans.length === 1 ? "prestito" : "prestiti"} da riconsegnare`,

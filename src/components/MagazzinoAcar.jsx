@@ -25,6 +25,11 @@ import {
   eliminaAcar,
   getMaterialeAcar,
 } from '../services/acar.js';
+import { MigrazionePrestitiMancante, getPrestitiAperti } from '../services/prestitiSpeciali.js';
+import { returnLoan } from '../services/loans.js';
+import { getUscite } from '../services/uscite.js';
+import { descriviPrestito } from '../utils/prestitiSpeciali.js';
+import PrestitoMateriale from './PrestitoMateriale.jsx';
 
 const CHIAVE_APERTA = 'speleo-magazzino-acar-aperto';
 const VUOTO = {
@@ -95,12 +100,32 @@ export default function MagazzinoAcar() {
   // Modulo aperto: { id|null }
   const [modulo, setModulo] = useState(null);
   const [valori, setValori] = useState(VUOTO);
+  // Prestiti aperti per pezzo (migrazione 22); null finché non si sa se è attiva.
+  const [prestiti, setPrestiti] = useState(() => new Map());
+  const [prestitiAttivi, setPrestitiAttivi] = useState(null);
+  const [usciteMap, setUsciteMap] = useState(() => new Map());
+  const [presta, setPresta] = useState(null);
 
   const carica = useCallback(async () => {
     try {
-      setMateriale(await getMaterialeAcar());
+      const [elenco, aperti, uscite] = await Promise.all([
+        getMaterialeAcar(),
+        getPrestitiAperti('acar').catch((error) => error),
+        getUscite().catch(() => []),
+      ]);
+      setMateriale(elenco);
+      if (aperti instanceof MigrazionePrestitiMancante) {
+        setPrestitiAttivi(false);
+      } else if (aperti instanceof Error) {
+        setPrestitiAttivi(true);
+        setErrore(aperti.message);
+      } else {
+        setPrestitiAttivi(true);
+        setPrestiti(aperti);
+      }
+      setUsciteMap(new Map((uscite ?? []).map((u) => [String(u.id), u])));
       setMancaMigrazione(false);
-      setErrore('');
+      if (!(aperti instanceof Error) || aperti instanceof MigrazionePrestitiMancante) setErrore('');
     } catch (error) {
       if (error instanceof MigrazioneAcarMancante) setMancaMigrazione(true);
       else setErrore(error.message);
@@ -114,6 +139,7 @@ export default function MagazzinoAcar() {
   }, [puoVedere, aperta, caricato, carica]);
 
   const daRevisionare = useMemo(() => materiale.filter((p) => avvisoRevisione(p)).length, [materiale]);
+  const inPrestito = useMemo(() => materiale.filter((p) => prestiti.has(p.id)).length, [materiale, prestiti]);
 
   const gruppi = useMemo(() => {
     const filtrati = materiale.filter(
@@ -194,6 +220,14 @@ export default function MagazzinoAcar() {
       .join(' ');
     if (!window.confirm(`Eliminare «${nome}» dal magazzino ACAR?`)) return;
     await esegui(() => eliminaAcar(pezzo.id));
+  };
+
+  const rientrato = async (pezzo) => {
+    const prestito = prestiti.get(pezzo.id);
+    if (!prestito) return;
+    const nome = pezzo.descrizione || tipoAcar(pezzo.tipo).label;
+    if (!window.confirm(`«${nome}» è rientrato da ${prestito.borrower_name}?`)) return;
+    await esegui(() => returnLoan({ loanId: prestito.id }), `acar-${pezzo.id}`);
   };
 
   const campo = (nome) => ({
@@ -295,6 +329,7 @@ export default function MagazzinoAcar() {
           <small>
             Riservato: non visibile ai soci{riepilogo}
             {daRevisionare ? ` · ⚠️ ${daRevisionare} da revisionare` : ''}
+            {inPrestito ? ` · 🔁 ${inPrestito} in prestito` : ''}
           </small>
         </span>
         <span aria-hidden="true" className="scuola-freccia">{aperta ? '▾' : '▸'}</span>
@@ -396,13 +431,52 @@ export default function MagazzinoAcar() {
                             </span>
                           )}
                           {pezzo.note && <small className="scuola-note">{pezzo.note}</small>}
-                          {puoModificare && (
+                          {prestiti.has(pezzo.id) && (
+                            <span className="prestito-in-corso">
+                              🔁 In prestito a {descriviPrestito(prestiti.get(pezzo.id), usciteMap.get(String(prestiti.get(pezzo.id).uscita_id)))}
+                            </span>
+                          )}
+                          {presta === pezzo.id && (
+                            <PrestitoMateriale
+                              tipo="acar"
+                              itemId={pezzo.id}
+                              titolo={`Presta: ${pezzo.descrizione || tipoAcar(pezzo.tipo).label}${pezzo.matricola ? ` · matr. ${pezzo.matricola}` : ''}`}
+                              onAnnulla={() => setPresta(null)}
+                              onFatto={async () => {
+                                setPresta(null);
+                                await carica();
+                                tornaAllaScheda(`acar-${pezzo.id}`);
+                              }}
+                            />
+                          )}
+                          {puoModificare && presta !== pezzo.id && (
                             <div className="scuola-azioni scuola-azioni--piccole">
+                              {prestitiAttivi && (prestiti.has(pezzo.id) ? (
+                                <button type="button" className="prestito-btn-rientro" onClick={() => rientrato(pezzo)} disabled={inCorso}>
+                                  ✓ Rientrato
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="prestito-btn"
+                                  onClick={() => setPresta(pezzo.id)}
+                                  disabled={inCorso || avviso?.level === 'expired'}
+                                  title={avviso?.level === 'expired' ? 'Revisione scaduta: non si può prestare.' : undefined}
+                                >
+                                  🔁 Presta
+                                </button>
+                              ))}
                               <button type="button" onClick={() => modifica(pezzo)} disabled={inCorso}>Modifica</button>
                               <button type="button" className="scuola-btn-neutro" onClick={() => duplica(pezzo)} disabled={inCorso}>
                                 ⧉ Duplica
                               </button>
-                              <button type="button" className="scuola-btn-elimina" onClick={() => elimina(pezzo)} disabled={inCorso}>
+                              <button
+                                type="button"
+                                className="scuola-btn-elimina"
+                                onClick={() => elimina(pezzo)}
+                                disabled={inCorso || prestiti.has(pezzo.id)}
+                                title={prestiti.has(pezzo.id) ? 'È in prestito: registra prima il rientro.' : undefined}
+                              >
                                 Elimina
                               </button>
                             </div>
@@ -420,6 +494,9 @@ export default function MagazzinoAcar() {
               {materiale.length > 0 && (
                 <small className="scuola-vuoto">
                   L&apos;avviso compare {REVISIONE_WARNING_DAYS} giorni prima della scadenza della revisione.
+                  {prestitiAttivi === false && puoModificare
+                    ? ' Per prestare il materiale ACAR va eseguita la migrazione 22 su Supabase.'
+                    : ''}
                 </small>
               )}
             </>
