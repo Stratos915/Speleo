@@ -57,9 +57,8 @@ export default function StoricoPrestiti() {
       const [{ data, error: fetchError }, equipmentData, usciteData] = await Promise.all([
         supabase
           .from('loans')
-          .select(
-            'id,equipment_id,borrower_name,borrower_email,borrower_member_number,quantity,status,delivered_at,returned_at,notes,uscita_id,reserved_until,missing_quantity,missing_notes',
-          )
+          // Tutte le colonne: con la migrazione 22 arrivano anche materiale ACAR e sacchi.
+          .select('*')
           .order('delivered_at', { ascending: false }),
         getEquipment(),
         getUscite(),
@@ -83,7 +82,7 @@ export default function StoricoPrestiti() {
     const term = query.trim().toLowerCase();
     return loans.filter((loan) => {
       const matchesFilter = filter === 'all' || loan.status === filter;
-      const equipmentName = equipmentMap.get(String(loan.equipment_id ?? ''))?.name?.toLowerCase() ?? '';
+      const equipmentName = (equipmentMap.get(String(loan.equipment_id ?? ''))?.name ?? loan.materiale_nome ?? '').toLowerCase();
       const matchesQuery =
         !term ||
         loan.borrower_name?.toLowerCase().includes(term) ||
@@ -203,7 +202,7 @@ export default function StoricoPrestiti() {
         <div className="card-list">
           {filteredLoans.map((loan) => {
             const equipmentRow = equipmentMap.get(String(loan.equipment_id ?? ''));
-            const equipmentName = equipmentRow?.name ?? 'Materiale';
+            const equipmentName = equipmentRow?.name ?? loan.materiale_nome ?? 'Materiale';
             const reservedUntil = loan.reserved_until ? formatDateOnly(loan.reserved_until) : null;
             const uscita = loan.uscita_id ? usciteMap.get(String(loan.uscita_id)) : null;
             const uscitaDue = uscita?.data ? addDays(uscita.data, 7) : null;
@@ -215,7 +214,12 @@ export default function StoricoPrestiti() {
                     <h3 style={{ marginBottom: '0.25rem' }}>
                       {equipmentName} x {loan.quantity}
                     </h3>
-                    <p style={{ margin: 0, color: 'var(--color-muted)' }}>a: {loan.borrower_name}</p>
+                    <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                      a: {loan.borrower_name}
+                      {loan.acar_id ? ' · materiale ACAR' : ''}
+                      {loan.sacco_id ? ' · sacco della scuola' : ''}
+                      {loan.corso_nome ? ` · corso: ${loan.corso_nome}` : ''}
+                    </p>
                   </div>
                   <span
                     className="chip"
