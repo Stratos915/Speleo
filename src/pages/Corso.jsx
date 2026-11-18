@@ -20,6 +20,8 @@ import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
 import AttrezzaturaCorsista from '../components/AttrezzaturaCorsista.jsx';
+import { AggiungiEspandibile, RigaEspandibile, SezioneEspandibile } from '../components/Espandibile.jsx';
+import { etichettaIstruttore, etichetteCorsista } from '../utils/scuolaEtichette.js';
 import { MigrazionePrestitiMancante, getPrestitiApertiCorso } from '../services/prestitiSpeciali.js';
 import { canEditAcar, canEditSacchiScuola } from '../utils/permissions.js';
 import {
@@ -85,6 +87,26 @@ const REGISTRY_QUALIFICATION_OPTIONS = [
 const ABBREVIAZIONI_QUALIFICA = { istruttore: 'IT', aiuto_istruttore: 'AI', itca: 'ITCA' };
 
 const SAVE_DELAY_MS = 1200;
+
+// Sezioni Istruttori/Corsisti aperte o chiuse: si ricordano in questo browser.
+const CHIAVE_SEZIONI = 'speleo-scuola-sezioni';
+
+function leggiSezioni() {
+  try {
+    const salvate = JSON.parse(window.localStorage.getItem(CHIAVE_SEZIONI) ?? 'null');
+    return { istruttori: Boolean(salvate?.istruttori), corsisti: Boolean(salvate?.corsisti) };
+  } catch {
+    return { istruttori: false, corsisti: false };
+  }
+}
+
+function salvaSezioni(sezioni) {
+  try {
+    window.localStorage.setItem(CHIAVE_SEZIONI, JSON.stringify(sezioni));
+  } catch {
+    // Solo una comodità: se il browser non salva, le sezioni ripartono chiuse.
+  }
+}
 
 function readUiState() {
   if (typeof window === 'undefined') return null;
@@ -499,6 +521,17 @@ export default function Corso() {
   useEffect(() => {
     caricaPrestitiCorso();
   }, [caricaPrestitiCorso]);
+  // Sezioni, righe e moduli «Aggiungi» aperti o chiusi.
+  const [sezioniAperte, setSezioniAperte] = useState(leggiSezioni);
+  const [righeAperte, setRigheAperte] = useState({});
+  const [aggiungiAperto, setAggiungiAperto] = useState({ istruttore: false, corsista: false });
+  const apriChiudiSezione = (nome) =>
+    setSezioniAperte((prima) => {
+      const dopo = { ...prima, [nome]: !prima[nome] };
+      salvaSezioni(dopo);
+      return dopo;
+    });
+  const apriChiudiRiga = (chiave) => setRigheAperte((prima) => ({ ...prima, [chiave]: !prima[chiave] }));
   const instructors = activeCourse?.instructors ?? [];
   const students = activeCourse?.students ?? [];
   const coursesSummary = useMemo(() => {
@@ -585,14 +618,16 @@ export default function Corso() {
   function renderCorpoIstruttoriSection() {
     if (!activeYear || !activeCourse) return null;
     return (
-      <article className="card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-          <div>
-            <h2 style={{ margin: 0 }}>Corpo istruttori · {activeCourse.name} ({activeYear.label})</h2>
-            <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-              Seleziona i soci dal menu e assegna la qualifica. I dati rimangono nella cartella dell&apos;anno attivo.
-            </p>
-          </div>
+      <SezioneEspandibile
+        titolo="Corpo istruttori"
+        riepilogo={`${activeCourse.name} (${activeYear.label}) · ${instructors.length} ${instructors.length === 1 ? 'istruttore' : 'istruttori'}`}
+        aperta={sezioniAperte.istruttori}
+        onToggle={() => apriChiudiSezione('istruttori')}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+            Tocca un nome per vedere e modificare qualifica e note.
+          </p>
           <button type="button" style={{ background: '#adb5bd' }} onClick={loadMembers}>
             {membersLoading ? 'Aggiornamento...' : 'Ricarica soci'}
           </button>
@@ -605,61 +640,46 @@ export default function Corso() {
           </p>
         )}
 
-        <form
-          onSubmit={handleAddInstructor}
-          style={{ display: 'grid', gap: '0.75rem', marginTop: '1rem' }}
-        >
-          <label>
-            Seleziona socio
-            <SelectSocio
-              members={uniqueMembers}
-              value={instructorForm.memberId}
-              onChange={(memberId) => handleInstructorFormChange('memberId', memberId)}
-              disabled={membersLoading || isActiveCourseClosed}
-              style={{ marginTop: '0.35rem' }}
-            />
-          </label>
-          <label>
-            Qualifica principale
-            <select
-              value={instructorForm.qualification}
-              onChange={(event) => handleInstructorFormChange('qualification', event.target.value)}
-              disabled={isActiveCourseClosed}
+        {instructors.map((item) => {
+          const member = membersMap.get(item.memberId);
+          return (
+            <RigaEspandibile
+              key={item.memberId}
+              nome={member?.full_name ?? 'Socio non trovato'}
+              etichette={etichettaIstruttore(item, QUALIFICATION_OPTIONS)}
+              aperta={Boolean(righeAperte[`i-${item.memberId}`])}
+              onToggle={() => apriChiudiRiga(`i-${item.memberId}`)}
             >
-              {QUALIFICATION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Qualifiche aggiuntive
-            <input
-              placeholder="Es. Referente sicurezza, formatore interno..."
-              value={instructorForm.customQualification}
-              onChange={(event) => handleInstructorFormChange('customQualification', event.target.value)}
-              disabled={isActiveCourseClosed}
-            />
-          </label>
-          <button type="submit" disabled={membersLoading || isActiveCourseClosed}>
-            {membersLoading ? 'Caricamento soci...' : isActiveCourseClosed ? 'Corso chiuso' : 'Aggiungi al corpo'}
-          </button>
-          {instructorError && <p style={{ color: 'var(--color-accent)' }}>{instructorError}</p>}
-        </form>
-
-        <div className="card-list" style={{ marginTop: '1.5rem' }}>
-          {instructors.map((item) => {
-            const member = membersMap.get(item.memberId);
-            return (
-              <article key={item.memberId} className="card" style={{ padding: '1rem' }}>
-                <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h3 style={{ margin: 0 }}>{member?.full_name ?? 'Socio non trovato'}</h3>
-                    <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-                      Tessera: {member?.old_id ?? 'N/D'} · {emailSocio(member, emailPerNome) || 'Email non disponibile'}
-                    </p>
-                  </div>
+              <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                Tessera: {member?.old_id ?? 'N/D'} · {emailSocio(member, emailPerNome) || 'Email non disponibile'}
+              </p>
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
+                <label>
+                  Qualifica
+                  <select
+                    value={item.qualification}
+                    onChange={(event) => handleInstructorUpdate(item.memberId, 'qualification', event.target.value)}
+                    disabled={isActiveCourseClosed}
+                  >
+                    {QUALIFICATION_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Qualifiche aggiuntive
+                  <input
+                    placeholder="Note personali"
+                    value={item.customQualification}
+                    onChange={(event) =>
+                      handleInstructorUpdate(item.memberId, 'customQualification', event.target.value)
+                    }
+                    disabled={isActiveCourseClosed}
+                  />
+                </label>
+                <div>
                   <button
                     type="button"
                     style={{ background: '#e03131' }}
@@ -668,58 +688,78 @@ export default function Corso() {
                   >
                     Rimuovi
                   </button>
-                </header>
-                <div style={{ display: 'grid', gap: '0.5rem', marginTop: '0.75rem' }}>
-                  <label>
-                    Qualifica
-                    <select
-                      value={item.qualification}
-                      onChange={(event) => handleInstructorUpdate(item.memberId, 'qualification', event.target.value)}
-                      disabled={isActiveCourseClosed}
-                    >
-                      {QUALIFICATION_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Qualifiche aggiuntive
-                    <input
-                      placeholder="Note personali"
-                      value={item.customQualification}
-                      onChange={(event) =>
-                        handleInstructorUpdate(item.memberId, 'customQualification', event.target.value)
-                      }
-                      disabled={isActiveCourseClosed}
-                    />
-                  </label>
                 </div>
-              </article>
-            );
-          })}
-          {!instructors.length && (
-            <p style={{ color: 'var(--color-muted)' }}>
-              Nessun istruttore associato a questo corso.
-            </p>
-          )}
-        </div>
-      </article>
+              </div>
+            </RigaEspandibile>
+          );
+        })}
+        {!instructors.length && (
+          <p style={{ margin: 0, color: 'var(--color-muted)' }}>Nessun istruttore associato a questo corso.</p>
+        )}
 
-
-
-
+        <AggiungiEspandibile
+          testo="Aggiungi istruttore"
+          aperta={aggiungiAperto.istruttore}
+          onToggle={() => setAggiungiAperto((prima) => ({ ...prima, istruttore: !prima.istruttore }))}
+        >
+          <form
+            onSubmit={handleAddInstructor}
+            style={{ display: 'grid', gap: '0.75rem' }}
+          >
+            <label>
+              Seleziona socio
+              <SelectSocio
+                members={uniqueMembers}
+                value={instructorForm.memberId}
+                onChange={(memberId) => handleInstructorFormChange('memberId', memberId)}
+                disabled={membersLoading || isActiveCourseClosed}
+                style={{ marginTop: '0.35rem' }}
+              />
+            </label>
+            <label>
+              Qualifica principale
+              <select
+                value={instructorForm.qualification}
+                onChange={(event) => handleInstructorFormChange('qualification', event.target.value)}
+                disabled={isActiveCourseClosed}
+              >
+                {QUALIFICATION_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Qualifiche aggiuntive
+              <input
+                placeholder="Es. Referente sicurezza, formatore interno..."
+                value={instructorForm.customQualification}
+                onChange={(event) => handleInstructorFormChange('customQualification', event.target.value)}
+                disabled={isActiveCourseClosed}
+              />
+            </label>
+            <button type="submit" disabled={membersLoading || isActiveCourseClosed}>
+              {membersLoading ? 'Caricamento soci...' : isActiveCourseClosed ? 'Corso chiuso' : 'Aggiungi al corpo'}
+            </button>
+            {instructorError && <p style={{ color: 'var(--color-accent)' }}>{instructorError}</p>}
+          </form>
+        </AggiungiEspandibile>
+      </SezioneEspandibile>
     );
   }
 
   function renderCorsistiSection() {
     if (!activeCourse) return null;
     return (
-      <article className="card">
-        <h2>Corsisti · {activeCourse.name}</h2>
-        <p style={{ marginTop: '0.25rem', color: 'var(--color-muted)' }}>
-          Gestisci manualmente i partecipanti con le conferme privacy/regolamento e lo stato attrezzatura.
+      <SezioneEspandibile
+        titolo="Corsisti"
+        riepilogo={`${activeCourse.name} · ${students.length} ${students.length === 1 ? 'corsista' : 'corsisti'}`}
+        aperta={sezioniAperte.corsisti}
+        onToggle={() => apriChiudiSezione('corsisti')}
+      >
+        <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+          Tocca un nome per pagamento, conferme, attrezzatura e note. In rosso ciò che manca.
         </p>
         {isActiveCourseClosed && (
           <p style={{ color: 'var(--color-accent)' }}>
@@ -727,151 +767,22 @@ export default function Corso() {
           </p>
         )}
 
-        <form
-          onSubmit={handleAddStudent}
-          style={{
-            display: 'grid',
-            gap: '0.75rem',
-            marginTop: '1rem',
-            borderBottom: '1px solid rgba(0,0,0,0.08)',
-            paddingBottom: '1rem',
-          }}
-        >
-          <div
-            style={{
-              display: 'grid',
-              gap: '0.75rem',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            }}
-          >
-            <input
-              placeholder="Nome"
-              value={studentForm.firstName}
-              onChange={(event) => handleStudentFormChange('firstName', event.target.value)}
-              required
-              disabled={isActiveCourseClosed}
-            />
-            <input
-              placeholder="Cognome"
-              value={studentForm.lastName}
-              onChange={(event) => handleStudentFormChange('lastName', event.target.value)}
-              required
-              disabled={isActiveCourseClosed}
-            />
-            <label>
-              Data di nascita
-              <input
-                type="date"
-                value={studentForm.birthDate}
-                onChange={(event) => handleStudentFormChange('birthDate', event.target.value)}
-                disabled={isActiveCourseClosed}
-              />
-            </label>
-            <label>
-              Stato pagamento
-              <select
-                value={studentForm.paymentStatus}
-                onChange={(event) => handleStudentFormChange('paymentStatus', event.target.value)}
-                disabled={isActiveCourseClosed}
-              >
-                {PAYMENT_STATUS_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-            <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={studentForm.regulationRead}
-                onChange={(event) => handleStudentFormChange('regulationRead', event.target.checked)}
-                disabled={isActiveCourseClosed}
-              />
-              Regolamento letto
-            </label>
-            <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-              <input
-                type="checkbox"
-                checked={studentForm.privacyAccepted}
-                onChange={(event) => handleStudentFormChange('privacyAccepted', event.target.checked)}
-                disabled={isActiveCourseClosed}
-              />
-              Privacy firmata
-            </label>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gap: '0.75rem',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            }}
-          >
-            <label>
-              Consegna attrezzatura
-              <input
-                type="date"
-                value={studentForm.equipmentDelivery}
-                onChange={(event) => handleStudentFormChange('equipmentDelivery', event.target.value)}
-                disabled={isActiveCourseClosed}
-              />
-            </label>
-            <label>
-              Restituzione attrezzatura
-              <input
-                type="date"
-                value={studentForm.equipmentReturn}
-                onChange={(event) => handleStudentFormChange('equipmentReturn', event.target.value)}
-                disabled={isActiveCourseClosed}
-              />
-            </label>
-          </div>
-
-          <textarea
-            rows={2}
-            placeholder="Note attrezzatura, taglie, esigenze particolari..."
-            value={studentForm.equipmentNotes}
-            onChange={(event) => handleStudentFormChange('equipmentNotes', event.target.value)}
-            disabled={isActiveCourseClosed}
-          />
-
-          <button type="submit" disabled={isActiveCourseClosed}>
-            {isActiveCourseClosed ? 'Corso chiuso' : 'Aggiungi corsista'}
-          </button>
-          {studentError && <p style={{ color: 'var(--color-accent)' }}>{studentError}</p>}
-        </form>
-
-        <div className="card-list" style={{ marginTop: '1.5rem' }}>
-          {students.map((student) => (
-            <article key={student.id} className="card" style={{ padding: '1rem' }}>
-              <header
-                style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}
-              >
-                <div>
-                  <h3 style={{ margin: 0 }}>
-                    {student.firstName} {student.lastName}
-                  </h3>
-                  <p style={{ margin: 0, color: 'var(--color-muted)' }}>
-                    {student.birthDate
-                      ? `Nato/a il ${new Date(student.birthDate).toLocaleDateString('it-IT')}`
-                      : 'Data di nascita non indicata'}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  style={{ background: '#e03131' }}
-                  onClick={() => handleRemoveStudent(student.id)}
-                  disabled={isActiveCourseClosed}
-                >
-                  Rimuovi
-                </button>
-              </header>
-
-              <div style={{ display: 'grid', gap: '0.75rem', marginTop: '0.75rem' }}>
+        {students.map((student) => {
+          const prestitiCorsista = prestitiDelCorsista(prestitiCorso, rifCorsista(activeYear, activeCourse, student));
+          return (
+            <RigaEspandibile
+              key={student.id}
+              nome={`${student.firstName} ${student.lastName}`.trim()}
+              etichette={etichetteCorsista(student, prestitiCorsista)}
+              aperta={Boolean(righeAperte[`c-${student.id}`])}
+              onToggle={() => apriChiudiRiga(`c-${student.id}`)}
+            >
+              <div style={{ display: 'grid', gap: '0.75rem' }}>
+                <p style={{ margin: 0, color: 'var(--color-muted)' }}>
+                  {student.birthDate
+                    ? `Nato/a il ${new Date(student.birthDate).toLocaleDateString('it-IT')}`
+                    : 'Data di nascita non indicata'}
+                </p>
                 <label>
                   Stato pagamento
                   <select
@@ -913,7 +824,7 @@ export default function Corso() {
                     corsistaRif: rifCorsista(activeYear, activeCourse, student),
                     nome: nomeCorsista(student),
                   }}
-                  prestiti={prestitiDelCorsista(prestitiCorso, rifCorsista(activeYear, activeCourse, student))}
+                  prestiti={prestitiCorsista}
                   disponibile={prestitiCorsoAttivi}
                   corsoChiuso={isActiveCourseClosed}
                   puoSacchi={puoConsegnareSacchi}
@@ -958,14 +869,142 @@ export default function Corso() {
                     disabled={isActiveCourseClosed}
                   />
                 </label>
+                <div>
+                  <button
+                    type="button"
+                    style={{ background: '#e03131' }}
+                    onClick={() => handleRemoveStudent(student.id)}
+                    disabled={isActiveCourseClosed}
+                  >
+                    Rimuovi
+                  </button>
+                </div>
               </div>
-            </article>
-          ))}
-          {!students.length && (
-            <p style={{ color: 'var(--color-muted)' }}>Ancora nessun partecipante registrato in questo corso.</p>
-          )}
-        </div>
-      </article>
+            </RigaEspandibile>
+          );
+        })}
+        {!students.length && (
+          <p style={{ margin: 0, color: 'var(--color-muted)' }}>Ancora nessun partecipante registrato in questo corso.</p>
+        )}
+
+        <AggiungiEspandibile
+          testo="Aggiungi corsista"
+          aperta={aggiungiAperto.corsista}
+          onToggle={() => setAggiungiAperto((prima) => ({ ...prima, corsista: !prima.corsista }))}
+        >
+          <form
+            onSubmit={handleAddStudent}
+            style={{ display: 'grid', gap: '0.75rem' }}
+          >
+            <div
+              style={{
+                display: 'grid',
+                gap: '0.75rem',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              }}
+            >
+              <input
+                placeholder="Nome"
+                value={studentForm.firstName}
+                onChange={(event) => handleStudentFormChange('firstName', event.target.value)}
+                required
+                disabled={isActiveCourseClosed}
+              />
+              <input
+                placeholder="Cognome"
+                value={studentForm.lastName}
+                onChange={(event) => handleStudentFormChange('lastName', event.target.value)}
+                required
+                disabled={isActiveCourseClosed}
+              />
+              <label>
+                Data di nascita
+                <input
+                  type="date"
+                  value={studentForm.birthDate}
+                  onChange={(event) => handleStudentFormChange('birthDate', event.target.value)}
+                  disabled={isActiveCourseClosed}
+                />
+              </label>
+              <label>
+                Stato pagamento
+                <select
+                  value={studentForm.paymentStatus}
+                  onChange={(event) => handleStudentFormChange('paymentStatus', event.target.value)}
+                  disabled={isActiveCourseClosed}
+                >
+                  {PAYMENT_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={studentForm.regulationRead}
+                  onChange={(event) => handleStudentFormChange('regulationRead', event.target.checked)}
+                  disabled={isActiveCourseClosed}
+                />
+                Regolamento letto
+              </label>
+              <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="checkbox"
+                  checked={studentForm.privacyAccepted}
+                  onChange={(event) => handleStudentFormChange('privacyAccepted', event.target.checked)}
+                  disabled={isActiveCourseClosed}
+                />
+                Privacy firmata
+              </label>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gap: '0.75rem',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+              }}
+            >
+              <label>
+                Consegna attrezzatura
+                <input
+                  type="date"
+                  value={studentForm.equipmentDelivery}
+                  onChange={(event) => handleStudentFormChange('equipmentDelivery', event.target.value)}
+                  disabled={isActiveCourseClosed}
+                />
+              </label>
+              <label>
+                Restituzione attrezzatura
+                <input
+                  type="date"
+                  value={studentForm.equipmentReturn}
+                  onChange={(event) => handleStudentFormChange('equipmentReturn', event.target.value)}
+                  disabled={isActiveCourseClosed}
+                />
+              </label>
+            </div>
+
+            <textarea
+              rows={2}
+              placeholder="Note attrezzatura, taglie, esigenze particolari..."
+              value={studentForm.equipmentNotes}
+              onChange={(event) => handleStudentFormChange('equipmentNotes', event.target.value)}
+              disabled={isActiveCourseClosed}
+            />
+
+            <button type="submit" disabled={isActiveCourseClosed}>
+              {isActiveCourseClosed ? 'Corso chiuso' : 'Aggiungi corsista'}
+            </button>
+            {studentError && <p style={{ color: 'var(--color-accent)' }}>{studentError}</p>}
+          </form>
+        </AggiungiEspandibile>
+      </SezioneEspandibile>
     );
   }
 
