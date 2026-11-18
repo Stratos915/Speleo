@@ -1,0 +1,153 @@
+/* Sezioni e righe espandibili della pagina Scuola */
+.esp-sezione-testa,
+.esp-riga-testa,
+.esp-aggiungi-testa {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  padding: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  box-shadow: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+}
+
+.esp-sezione-testa:hover,
+.esp-riga-testa:hover,
+.esp-aggiungi-testa:hover {
+  background: none;
+  box-shadow: none;
+  transform: none;
+}
+
+.esp-sezione-titolo {
+  flex: 1;
+  min-width: 0;
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: var(--color-primary-dark);
+}
+
+.esp-sezione-titolo small {
+  font-size: 0.95rem;
+  font-weight: 400;
+  color: var(--color-muted);
+}
+
+.esp-freccia {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 50%;
+  background: #e6f4f4;
+  color: var(--color-primary-dark);
+  font-size: 0.95rem;
+  transition: transform 0.2s;
+}
+
+.esp-freccia--piccola {
+  width: 1.75rem;
+  height: 1.75rem;
+  font-size: 0.8rem;
+}
+
+.esp-aperta > button > .esp-freccia {
+  transform: rotate(180deg);
+}
+
+.esp-sezione-corpo {
+  display: grid;
+  gap: 0.6rem;
+  margin-top: 0.9rem;
+}
+
+.esp-riga,
+.esp-aggiungi {
+  border: 1px solid #d9ecec;
+  border-radius: 0.75rem;
+  background: #fbfefe;
+}
+
+.esp-aggiungi {
+  border-style: dashed;
+}
+
+.esp-riga-testa,
+.esp-aggiungi-testa {
+  padding: 0.6rem 0.85rem;
+}
+
+.esp-riga-testa strong {
+  flex: 1;
+  min-width: 0;
+  font-size: 1rem;
+}
+
+.esp-aggiungi-testa span:first-child {
+  flex: 1;
+  font-weight: 600;
+  color: var(--color-primary-dark);
+}
+
+.esp-etichette {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.35rem;
+}
+
+.esp-tag {
+  padding: 0.15rem 0.5rem;
+  border-radius: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.esp-tag--info {
+  background: #e7f5ff;
+  color: #1864ab;
+}
+
+.esp-tag--ok {
+  background: #ebfbee;
+  color: #2b8a3e;
+}
+
+.esp-tag--attesa {
+  background: #fff9db;
+  color: #8a6d00;
+}
+
+.esp-tag--manca {
+  background: #fff5f5;
+  color: #c92a2a;
+}
+
+.esp-riga-corpo {
+  display: grid;
+  gap: 0.75rem;
+  padding: 0.75rem 0.85rem;
+  border-top: 1px solid #d9ecec;
+}
+
+@media (max-width: 520px) {
+  .esp-riga-testa {
+    flex-wrap: wrap;
+  }
+  .esp-riga-testa strong {
+    flex-basis: calc(100% - 2.5rem);
+  }
+  .esp-etichette {
+    order: 3;
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
