@@ -1,6 +1,9 @@
-// Modulo per prestare un pezzo ACAR o consegnare un sacco della scuola (migrazione 22).
-// Il materiale va a un socio, a un corsista di un corso della scuola (solo sacchi)
-// o a una persona scritta a mano; si può collegare a un'uscita.
+// Modulo per prestare un pezzo ACAR o consegnare un sacco della scuola (migrazioni 22 e 23).
+// Il materiale va a un socio, a un corsista di un corso della scuola (il corsista è
+// anche socio) o a una persona scritta a mano; si può collegare a un'uscita.
+// uscitaIniziale: uscita già scelta (si apre dalla pagina dell'uscita).
+// destinatario: { corsoRif, corsoNome, corsistaRif, nome } se si apre dalla scheda
+// del corsista: allora «a chi va» è già deciso.
 import { useEffect, useMemo, useState } from 'react';
 import SelectSocio from './SelectSocio.jsx';
 import { getMembers } from '../services/members.js';
@@ -12,12 +15,29 @@ import {
   TIPO_USCITA_PREFERITO,
   corsiConCorsisti,
   etichettaUscita,
+  tesseraPerNome,
   usciteDaProporre,
 } from '../utils/prestitiSpeciali.js';
 
-export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnnulla }) {
-  const conCorsisti = tipo === 'sacco';
-  const [chi, setChi] = useState(conCorsisti ? 'corsista' : 'socio');
+function giornoDopo(data) {
+  if (!data) return '';
+  const giorno = new Date(`${String(data).slice(0, 10)}T12:00:00`);
+  if (Number.isNaN(giorno.getTime())) return '';
+  giorno.setDate(giorno.getDate() + 1);
+  return giorno.toISOString().slice(0, 10);
+}
+
+export default function PrestitoMateriale({
+  tipo,
+  itemId,
+  titolo,
+  onFatto,
+  onAnnulla,
+  uscitaIniziale = '',
+  destinatario = null,
+}) {
+  const conCorsisti = tipo === 'sacco' || tipo === 'acar';
+  const [chi, setChi] = useState(destinatario ? 'corsista' : tipo === 'sacco' ? 'corsista' : 'socio');
   const [soci, setSoci] = useState([]);
   const [uscite, setUscite] = useState([]);
   const [corsi, setCorsi] = useState([]);
@@ -26,7 +46,7 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
   const [corsoRif, setCorsoRif] = useState('');
   const [corsistaRif, setCorsistaRif] = useState('');
   const [nomeLibero, setNomeLibero] = useState('');
-  const [uscitaId, setUscitaId] = useState('');
+  const [uscitaId, setUscitaId] = useState(uscitaIniziale ? String(uscitaIniziale) : '');
   const [rientro, setRientro] = useState('');
   const [note, setNote] = useState('');
   const [errore, setErrore] = useState('');
@@ -39,7 +59,7 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
       const [membri, elencoUscite, scuola] = await Promise.all([
         getMembers().catch(() => []),
         getUscite().catch(() => []),
-        conCorsisti ? loadScuolaData().catch(() => null) : Promise.resolve(null),
+        conCorsisti && !destinatario ? loadScuolaData().catch(() => null) : Promise.resolve(null),
       ]);
       if (annullato) return;
       const ordinati = [...(membri ?? [])].sort(
@@ -47,6 +67,11 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
       );
       setSoci(dedupeMembers(ordinati));
       setUscite(elencoUscite ?? []);
+      // Uscita già scelta: rientro previsto il giorno dopo.
+      const giaScelta = uscitaIniziale
+        ? (elencoUscite ?? []).find((u) => String(u.id) === String(uscitaIniziale))
+        : null;
+      if (giaScelta?.data) setRientro((prima) => prima || giornoDopo(giaScelta.data));
       const elencoCorsi = corsiConCorsisti(scuola?.document);
       setCorsi(elencoCorsi);
       if (elencoCorsi.length) setCorsoRif(elencoCorsi[0].rif);
@@ -56,7 +81,7 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
     return () => {
       annullato = true;
     };
-  }, [conCorsisti]);
+  }, [conCorsisti, destinatario, uscitaIniziale]);
 
   const { consigliate, altre } = useMemo(
     () => usciteDaProporre(uscite, TIPO_USCITA_PREFERITO[tipo]),
@@ -69,11 +94,7 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
     setUscitaId(id);
     // Rientro previsto: se non c'è, il giorno dopo l'uscita.
     const uscita = uscite.find((u) => String(u.id) === id);
-    if (uscita?.data && !rientro) {
-      const giorno = new Date(`${String(uscita.data).slice(0, 10)}T12:00:00`);
-      giorno.setDate(giorno.getDate() + 1);
-      setRientro(giorno.toISOString().slice(0, 10));
-    }
+    if (uscita?.data && !rientro) setRientro(giornoDopo(uscita.data));
   };
 
   const invia = async (event) => {
@@ -82,7 +103,15 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
     let ricevente = '';
     let tessera = null;
     let corsistaScelto = '';
-    if (chi === 'socio') {
+    // Il corso si salva per i corsisti e, per i sacchi, anche per un socio se scelto.
+    const conCorso = chi === 'corsista' || (tipo === 'sacco' && chi === 'socio');
+    let corsoScelto = conCorsisti && corso && conCorso ? corso : null;
+    if (destinatario) {
+      ricevente = destinatario.nome;
+      tessera = tesseraPerNome(soci, destinatario.nome);
+      corsistaScelto = destinatario.corsistaRif;
+      corsoScelto = { rif: destinatario.corsoRif, nome: destinatario.corsoNome };
+    } else if (chi === 'socio') {
       const socio = soci.find((s) => String(s.id) === memberId);
       if (!socio) {
         setErrore('Scegli il socio.');
@@ -97,6 +126,8 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
         return;
       }
       ricevente = corsista.nome;
+      // Il corsista è anche socio: se c'è un socio con lo stesso nome, si salva la tessera.
+      tessera = tesseraPerNome(soci, corsista.nome);
       corsistaScelto = corsista.rif;
     } else {
       ricevente = nomeLibero.trim();
@@ -111,9 +142,9 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
         ricevente,
         tessera,
         uscitaId,
-        // Il corso si ricorda anche quando il sacco va a un socio, se scelto.
-        corsoRif: conCorsisti && corso && chi !== 'altro' ? corso.rif : '',
-        corsoNome: conCorsisti && corso && chi !== 'altro' ? corso.nome : '',
+        // Il corso si ricorda anche quando il materiale va a un socio, se scelto.
+        corsoRif: corsoScelto?.rif ?? '',
+        corsoNome: corsoScelto?.nome ?? '',
         corsistaRif: corsistaScelto,
         rientro,
         note,
@@ -133,6 +164,13 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
         <p>Caricamento elenchi…</p>
       ) : (
         <>
+          {destinatario ? (
+            <p className="prestito-destinatario">
+              Consegna a <strong>{destinatario.nome}</strong>
+              {destinatario.corsoNome ? <> · {destinatario.corsoNome}</> : null}
+            </p>
+          ) : (
+          <>
           <div className="acar-tipologia" role="radiogroup" aria-label="A chi va">
             {conCorsisti && (
               <label className="acar-scelta">
@@ -150,7 +188,7 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
             </label>
           </div>
 
-          {conCorsisti && chi !== 'altro' && (
+          {conCorsisti && (chi === 'corsista' || (tipo === 'sacco' && chi === 'socio')) && (
             <label>
               Corso
               <select
@@ -198,6 +236,8 @@ export default function PrestitoMateriale({ tipo, itemId, titolo, onFatto, onAnn
               Nome e cognome
               <input type="text" value={nomeLibero} onChange={(event) => setNomeLibero(event.target.value)} />
             </label>
+          )}
+          </>
           )}
 
           <label>

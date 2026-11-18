@@ -19,6 +19,17 @@ import { buildProfiloIstruttore, scaricaProfiloIstruttore } from '../utils/profi
 import usePermissions from '../hooks/usePermissions.js';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
+import AttrezzaturaCorsista from '../components/AttrezzaturaCorsista.jsx';
+import { MigrazionePrestitiMancante, getPrestitiApertiCorso } from '../services/prestitiSpeciali.js';
+import { canEditAcar, canEditSacchiScuola } from '../utils/permissions.js';
+import {
+  dateAttrezzatura,
+  nomeCorsista,
+  nomeCorso,
+  prestitiDelCorsista,
+  rifCorsista,
+  rifCorso,
+} from '../utils/prestitiSpeciali.js';
 import { useNavigate } from 'react-router-dom';
 
 const QUALIFICATION_OPTIONS = [
@@ -189,7 +200,10 @@ function buildYearFolder(label, initialCourseName = '') {
 export default function Corso() {
   const currentYear = new Date().getFullYear();
   const initialYear = useMemo(() => buildYearFolder(`Anno ${currentYear}`, `Corso ${currentYear}`), [currentYear]);
-  const { canEditSection, canViewPage } = usePermissions();
+  const { canEditSection, canViewPage, roles } = usePermissions();
+  // Chi consegna sacchi e materiale ACAR ai corsisti (lo controlla anche il database).
+  const puoConsegnareSacchi = canEditSacchiScuola(roles);
+  const puoConsegnareAcar = canEditAcar(roles);
   const { adminAlerts, userAlerts, dismissAlert } = useAlerts();
   const navigate = useNavigate();
   const canViewScuola = canViewPage('scuola');
@@ -461,6 +475,30 @@ export default function Corso() {
   const activeYear = yearFolders.find((item) => item.id === activeYearId) ?? null;
   const activeCourse = activeYear?.courses.find((course) => course.id === activeCourseId) ?? null;
   const isActiveCourseClosed = Boolean(activeCourse?.isClosed);
+
+  // Sacchi e materiale ACAR consegnati ai corsisti del corso aperto (prestiti aperti).
+  const [prestitiCorso, setPrestitiCorso] = useState([]);
+  const [prestitiCorsoAttivi, setPrestitiCorsoAttivi] = useState(true);
+  const corsoAttivoRif = activeYear && activeCourse ? rifCorso(activeYear, activeCourse) : '';
+  const caricaPrestitiCorso = useCallback(async () => {
+    if (!corsoAttivoRif) {
+      setPrestitiCorso([]);
+      return [];
+    }
+    try {
+      const elenco = await getPrestitiApertiCorso(corsoAttivoRif);
+      setPrestitiCorso(elenco);
+      setPrestitiCorsoAttivi(true);
+      return elenco;
+    } catch (error) {
+      if (error instanceof MigrazionePrestitiMancante) setPrestitiCorsoAttivi(false);
+      setPrestitiCorso([]);
+      return null;
+    }
+  }, [corsoAttivoRif]);
+  useEffect(() => {
+    caricaPrestitiCorso();
+  }, [caricaPrestitiCorso]);
   const instructors = activeCourse?.instructors ?? [];
   const students = activeCourse?.students ?? [];
   const coursesSummary = useMemo(() => {
@@ -868,6 +906,21 @@ export default function Corso() {
                     Privacy firmata
                   </label>
                 </div>
+                <AttrezzaturaCorsista
+                  destinatario={{
+                    corsoRif: rifCorso(activeYear, activeCourse),
+                    corsoNome: nomeCorso(activeYear, activeCourse),
+                    corsistaRif: rifCorsista(activeYear, activeCourse, student),
+                    nome: nomeCorsista(student),
+                  }}
+                  prestiti={prestitiDelCorsista(prestitiCorso, rifCorsista(activeYear, activeCourse, student))}
+                  disponibile={prestitiCorsoAttivi}
+                  corsoChiuso={isActiveCourseClosed}
+                  puoSacchi={puoConsegnareSacchi}
+                  puoAcar={puoConsegnareAcar}
+                  onConsegnato={() => dopoConsegna(student)}
+                  onRientrato={() => dopoRientro(student)}
+                />
                 <div
                   style={{
                     display: 'grid',
@@ -1121,6 +1174,26 @@ function updateCourse(yearId, courseId, updater) {
         student.id === id ? { ...student, [field]: value } : student,
       ),
     }));
+  }
+
+  // Più campi del corsista insieme (es. le date dell'attrezzatura aggiornate da sole).
+  function aggiornaCorsista(id, cambi) {
+    if (!activeYear || !activeCourse || activeCourse.isClosed || !Object.keys(cambi).length) return;
+    updateCourse(activeYear.id, activeCourse.id, (course) => ({
+      students: course.students.map((student) => (student.id === id ? { ...student, ...cambi } : student)),
+    }));
+  }
+
+  async function dopoConsegna(student) {
+    await caricaPrestitiCorso();
+    aggiornaCorsista(student.id, dateAttrezzatura(student, 'consegna'));
+  }
+
+  async function dopoRientro(student) {
+    const elenco = await caricaPrestitiCorso();
+    if (!elenco) return;
+    const aperti = prestitiDelCorsista(elenco, rifCorsista(activeYear, activeCourse, student)).length;
+    aggiornaCorsista(student.id, dateAttrezzatura(student, 'rientro', { aperti }));
   }
 
   function handleRemoveStudent(id) {

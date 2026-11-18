@@ -4,8 +4,19 @@ import { supabase } from '../lib/supabaseClient';
 import useAlerts from '../hooks/useAlerts.js';
 import AlertList from '../components/AlertList.jsx';
 import useAuth from '../context/useAuth.js';
+import usePermissions from '../hooks/usePermissions.js';
 import { getEquipment } from '../services/equipment.js';
 import { createLoan } from '../services/loans.js';
+import { getUscitaById } from '../services/uscite.js';
+import PrestitoDaElenco from '../components/PrestitoDaElenco.jsx';
+import { canEditAcar, canEditSacchiScuola, canViewAcar, canViewSacchiScuola } from '../utils/permissions.js';
+import { SCHEDE_MATERIALE, nomeMaterialePrestito, schedaIniziale } from '../utils/prestitiSpeciali.js';
+
+// Chi può prestare: lo stesso controllo lo fa il database.
+const CHI_PRESTA = {
+  acar: 'Il materiale ACAR lo prestano admin, presidente e magazziniere.',
+  sacco: 'I sacchi della scuola li consegnano admin, presidente, magazziniere e direttore scuola.',
+};
 
 const initialForm = {
   equipmentId: '',
@@ -44,6 +55,18 @@ export default function PrestitoAvanzato() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const { adminAlerts, dismissAlert } = useAlerts();
+  const { roles } = usePermissions();
+  // Da dove si prende il materiale: magazzino generale, ACAR o sacchi della scuola.
+  const schedeVisibili = useMemo(
+    () =>
+      SCHEDE_MATERIALE.filter(
+        (s) => s.value === 'generale' || (s.value === 'acar' ? canViewAcar(roles) : canViewSacchiScuola(roles)),
+      ),
+    [roles],
+  );
+  const puoPrestare = { generale: true, acar: canEditAcar(roles), sacco: canEditSacchiScuola(roles) };
+  const [scheda, setScheda] = useState('generale');
+  const [aggiornaElenco, setAggiornaElenco] = useState(0);
   const borrowerName = useMemo(() => {
     if (!user) return '';
     return (
@@ -92,6 +115,24 @@ export default function PrestitoAvanzato() {
   const reservedUntilDate = useMemo(() => computeReservationDate(uscitaDateParam), [uscitaDateParam]);
 
   const preselectedEquipmentId = searchParams.get('equipmentId');
+
+  // Si apre sulla scheda adatta al tipo di uscita (ACAR, corso, altre).
+  useEffect(() => {
+    if (!uscitaIdParam) return undefined;
+    let annullato = false;
+    getUscitaById(uscitaIdParam)
+      .then((uscita) => {
+        if (annullato) return;
+        const iniziale = schedaIniziale(uscita?.tipo);
+        if (schedeVisibili.some((s) => s.value === iniziale)) setScheda(iniziale);
+      })
+      .catch(() => {
+        // Senza il tipo dell'uscita si resta sul magazzino generale.
+      });
+    return () => {
+      annullato = true;
+    };
+  }, [uscitaIdParam, schedeVisibili]);
 
   useEffect(() => {
     setError('');
@@ -161,7 +202,7 @@ export default function PrestitoAvanzato() {
     setLoansError('');
     let query = supabase
       .from('loans')
-      .select('id,equipment_id,borrower_name,quantity,status,delivered_at,notes,reserved_until,uscita_id')
+      .select('*')
       .eq('status', 'in_corso')
       .order('delivered_at', { ascending: false });
     if (uscitaIdParam) {
@@ -271,11 +312,13 @@ export default function PrestitoAvanzato() {
           <ul style={{ listStyle: 'none', padding: 0, margin: '0.75rem 0 0', display: 'grid', gap: '0.5rem' }}>
             {activeLoans.map((loan) => {
               const equipmentRow = equipmentMap.get(String(loan.equipment_id ?? ''));
-              const equipmentName = equipmentRow?.name ?? 'Materiale';
+              const equipmentName = nomeMaterialePrestito(loan, equipmentRow?.name);
+              const icona = loan.acar_id ? '🫧 ' : loan.sacco_id ? '🎓 ' : '';
               const reservedUntilLabel = loan.reserved_until ? formatDate(loan.reserved_until) : null;
               return (
                 <li key={loan.id} style={{ border: '1px solid var(--color-border)', borderRadius: '0.75rem', padding: '0.75rem' }}>
                   <strong>
+                    {icona}
                     {equipmentName} · x{loan.quantity}
                   </strong>
                   <p style={{ margin: '0.25rem 0', color: 'var(--color-muted)' }}>a: {loan.borrower_name}</p>
@@ -306,82 +349,124 @@ export default function PrestitoAvanzato() {
       {loading ? (
         <p>Caricamento dati...</p>
       ) : (
-        <div className="card">
-          <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
-            {(uscitaIdParam || reservedUntilDate) && (
-              <div
-                style={{
-                  background: 'rgba(14, 165, 233, 0.12)',
-                  borderRadius: '0.75rem',
-                  padding: '0.75rem',
-                  fontSize: '0.9rem',
-                  color: 'var(--color-primary-dark)',
-                }}
-              >
-                {uscitaTitle ? (
-                  <strong>Uscita collegata: {uscitaTitle}</strong>
-                ) : (
-                  <strong>Materiale prenotato per una uscita programmata.</strong>
-                )}
-                {reservedUntilDate && (
-                  <p style={{ margin: '0.35rem 0 0' }}>
-                    Deve essere disponibile in magazzino entro il {formatDate(reservedUntilDate)} (3 giorni prima
-                    dell&apos;uscita).
-                  </p>
-                )}
-              </div>
-            )}
-
-            <select
-              value={form.equipmentId}
-              onChange={(event) => setForm((prev) => ({ ...prev, equipmentId: event.target.value }))}
-              required
+        <div className="card" style={{ display: 'grid', gap: '0.75rem' }}>
+          {(uscitaIdParam || reservedUntilDate) && (
+            <div
+              style={{
+                background: 'rgba(14, 165, 233, 0.12)',
+                borderRadius: '0.75rem',
+                padding: '0.75rem',
+                fontSize: '0.9rem',
+                color: 'var(--color-primary-dark)',
+              }}
             >
-              <option value="">Materiale</option>
-              {equipment.map((item) => (
-                <option key={item.id ?? item.equipment_id} value={item.id ?? item.equipment_id}>
-                  {item.name} · Disponibile: {item.quantity_available ?? item.quantity ?? 0}/{item.quantity ?? item.quantity_available ?? 0}
-                </option>
-              ))}
-            </select>
-
-            <input
-              type="number"
-              min={1}
-              placeholder="Quantità"
-              value={form.quantity}
-              onChange={(event) => setForm((prev) => ({ ...prev, quantity: event.target.value }))}
-              required
-            />
-
-            <div>
-              <label htmlFor="borrowerName" style={{ display: 'block', marginBottom: '0.25rem' }}>
-                Consegnato a
-              </label>
-              <input
-                id="borrowerName"
-                value={form.borrowerName || borrowerName}
-                readOnly
-                style={{ background: '#f1f3f5' }}
-              />
-              <small style={{ color: 'var(--color-muted)' }}>
-                Associato automaticamente al profilo connesso ({user?.email ?? 'utente'}).
-              </small>
+              {uscitaTitle ? (
+                <strong>Uscita collegata: {uscitaTitle}</strong>
+              ) : (
+                <strong>Materiale prenotato per una uscita programmata.</strong>
+              )}
+              {reservedUntilDate && (
+                <p style={{ margin: '0.35rem 0 0' }}>
+                  Deve essere disponibile in magazzino entro il {formatDate(reservedUntilDate)} (3 giorni prima
+                  dell&apos;uscita).
+                </p>
+              )}
             </div>
+          )}
 
-            <textarea
-              rows={3}
-              placeholder="Note (facoltative)"
-              value={form.notes}
-              onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
-            />
+          {schedeVisibili.length > 1 && (
+            <div className="prestito-schede" role="tablist" aria-label="Da dove prendi il materiale">
+              {schedeVisibili.map((s) => (
+                <button
+                  key={s.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={scheda === s.value}
+                  className={scheda === s.value ? 'prestito-scheda prestito-scheda--attiva' : 'prestito-scheda'}
+                  onClick={() => {
+                    setScheda(s.value);
+                    setSuccess('');
+                    setError('');
+                  }}
+                >
+                  {s.value === 'acar' ? '🫧 ' : s.value === 'sacco' ? '🎓 ' : '📦 '}
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          )}
 
-            <button type="submit" disabled={submitting}>
-              {submitting ? 'Registrazione...' : 'Registra prestito'}
-            </button>
-            {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
-            {success && <p style={{ color: 'var(--color-primary-dark)' }}>{success}</p>}
-          </form>
+          {scheda !== 'generale' && (
+            puoPrestare[scheda] ? (
+              <PrestitoDaElenco
+                tipo={scheda}
+                uscitaIniziale={uscitaIdParam || ''}
+                aggiorna={aggiornaElenco}
+                onFatto={() => {
+                  setSuccess(scheda === 'sacco' ? 'Sacco consegnato correttamente.' : 'Prestito registrato correttamente.');
+                  setAggiornaElenco((n) => n + 1);
+                  loadActiveLoans();
+                }}
+              />
+            ) : (
+              <p className="prestito-elenco-nota">{CHI_PRESTA[scheda]}</p>
+            )
+          )}
+          {scheda !== 'generale' && success && <p style={{ color: 'var(--color-primary-dark)' }}>{success}</p>}
+
+          {scheda === 'generale' && (
+            <form onSubmit={handleSubmit} style={{ display: 'grid', gap: '0.75rem' }}>
+              <select
+                value={form.equipmentId}
+                onChange={(event) => setForm((prev) => ({ ...prev, equipmentId: event.target.value }))}
+                required
+              >
+                <option value="">Materiale</option>
+                {equipment.map((item) => (
+                  <option key={item.id ?? item.equipment_id} value={item.id ?? item.equipment_id}>
+                    {item.name} · Disponibile: {item.quantity_available ?? item.quantity ?? 0}/{item.quantity ?? item.quantity_available ?? 0}
+                  </option>
+                ))}
+              </select>
+
+              <input
+                type="number"
+                min={1}
+                placeholder="Quantità"
+                value={form.quantity}
+                onChange={(event) => setForm((prev) => ({ ...prev, quantity: event.target.value }))}
+                required
+              />
+
+              <div>
+                <label htmlFor="borrowerName" style={{ display: 'block', marginBottom: '0.25rem' }}>
+                  Consegnato a
+                </label>
+                <input
+                  id="borrowerName"
+                  value={form.borrowerName || borrowerName}
+                  readOnly
+                  style={{ background: '#f1f3f5' }}
+                />
+                <small style={{ color: 'var(--color-muted)' }}>
+                  Associato automaticamente al profilo connesso ({user?.email ?? 'utente'}).
+                </small>
+              </div>
+
+              <textarea
+                rows={3}
+                placeholder="Note (facoltative)"
+                value={form.notes}
+                onChange={(event) => setForm((prev) => ({ ...prev, notes: event.target.value }))}
+              />
+
+              <button type="submit" disabled={submitting}>
+                {submitting ? 'Registrazione...' : 'Registra prestito'}
+              </button>
+              {error && <p style={{ color: 'var(--color-accent)' }}>{error}</p>}
+              {success && <p style={{ color: 'var(--color-primary-dark)' }}>{success}</p>}
+            </form>
+          )}
         </div>
       )}
     </section>
