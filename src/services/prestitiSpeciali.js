@@ -36,6 +36,23 @@ export async function getPrestitiAperti(tipo) {
 }
 
 /**
+ * Prestiti aperti (sacchi e ACAR) consegnati ai corsisti di un corso.
+ * corsoRif = «idAnno::idCorso»: si cercano i corsisti «idAnno::idCorso::…».
+ */
+export async function getPrestitiApertiCorso(corsoRif) {
+  if (!corsoRif) return [];
+  const { data, error } = await supabase
+    .from('loans')
+    .select('*')
+    .like('corsista_rif', `${corsoRif}::%`)
+    .in('status', ['in_corso', 'active'])
+    .order('delivered_at', { ascending: false });
+  if (mancaMigrazione(error)) throw new MigrazionePrestitiMancante();
+  if (error) throw new Error(friendlyDbError(error, 'Impossibile leggere l\'attrezzatura consegnata.'));
+  return data ?? [];
+}
+
+/**
  * Nuovo prestito di un pezzo ACAR o di un sacco.
  * dati: { ricevente, tessera, uscitaId, corsoRif, corsoNome, corsistaRif, rientro, note }
  */
